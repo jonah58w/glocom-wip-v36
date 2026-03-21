@@ -34,6 +34,33 @@ def _safe_dt_series(df, col_name):
     return pd.to_datetime(df[col_name], errors="coerce")
 
 
+def _norm_name(s):
+    s = str(s).strip()
+    s = s.replace("\n", "")
+    s = s.replace(" ", "")
+    s = s.replace("（", "(").replace("）", ")")
+    return s.lower()
+
+
+def _find_col(df, candidates, fallback=None):
+    if fallback and fallback in df.columns:
+        return fallback
+
+    actual_cols = list(df.columns)
+    direct_map = {_norm_name(c): c for c in actual_cols}
+
+    for c in candidates:
+        if c in actual_cols:
+            return c
+
+    for c in candidates:
+        nc = _norm_name(c)
+        if nc in direct_map:
+            return direct_map[nc]
+
+    return None
+
+
 def _download_excel(df, file_name, sheet_name="Report"):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -54,7 +81,14 @@ def _download_pdf(df, file_name, title="Report"):
         from reportlab.lib.styles import getSampleStyleSheet
 
         pdf_buffer = BytesIO()
-        doc = SimpleDocTemplate(pdf_buffer, pagesize=landscape(A4), leftMargin=18, rightMargin=18, topMargin=18, bottomMargin=18)
+        doc = SimpleDocTemplate(
+            pdf_buffer,
+            pagesize=landscape(A4),
+            leftMargin=18,
+            rightMargin=18,
+            topMargin=18,
+            bottomMargin=18,
+        )
         styles = getSampleStyleSheet()
 
         safe_df = df.fillna("").astype(str).copy()
@@ -123,7 +157,16 @@ def show_dashboard_report(df, wip_col=None, factory_col=None, ship_date_col=None
     with left:
         show_factory_load_report(df, factory_col=factory_col)
     with right:
-        show_shipment_forecast_report(df, ship_date_col=ship_date_col, po_col=kwargs.get("po_col"), customer_col=kwargs.get("customer_col"), part_col=kwargs.get("part_col"), qty_col=kwargs.get("qty_col"), factory_col=factory_col, wip_col=wip_col)
+        show_shipment_forecast_report(
+            df,
+            ship_date_col=ship_date_col,
+            po_col=kwargs.get("po_col"),
+            customer_col=kwargs.get("customer_col"),
+            part_col=kwargs.get("part_col"),
+            qty_col=kwargs.get("qty_col"),
+            factory_col=factory_col,
+            wip_col=wip_col,
+        )
 
 
 # ================================
@@ -141,11 +184,7 @@ def show_factory_load_report(df, factory_col=None, **kwargs):
         st.info("No factory data")
         return
 
-    factory_summary = (
-        factory_series.replace("", "(blank)")
-        .value_counts()
-        .reset_index()
-    )
+    factory_summary = factory_series.replace("", "(blank)").value_counts().reset_index()
     factory_summary.columns = [factory_col, "Orders"]
 
     st.bar_chart(factory_summary.set_index(factory_col))
@@ -166,10 +205,7 @@ def show_delayed_orders_report(df, factory_due_col=None, po_col=None, customer_c
     temp["_FactoryDueDateParsed"] = pd.to_datetime(temp[factory_due_col], errors="coerce")
     today = pd.Timestamp.today().normalize()
 
-    delayed = temp[
-        temp["_FactoryDueDateParsed"].notna()
-        & (temp["_FactoryDueDateParsed"] < today)
-    ].copy()
+    delayed = temp[temp["_FactoryDueDateParsed"].notna() & (temp["_FactoryDueDateParsed"] < today)].copy()
 
     if delayed.empty:
         st.success("No delayed orders")
@@ -289,6 +325,12 @@ def show_sandy_internal_wip_report(
 
     work = df.copy()
 
+    merge_date_col = _find_col(
+        work,
+        cfg.MERGE_DATE_CANDIDATES,
+        merge_date_col,
+    )
+
     if merge_date_col and merge_date_col in work.columns:
         work["_merge_sort"] = pd.to_datetime(work[merge_date_col], errors="coerce")
         work = work.sort_values("_merge_sort", ascending=True)
@@ -346,6 +388,12 @@ def show_sandy_shipment_report(
         wip_s = _safe_text_series(work, wip_col)
         work = work[wip_s.str.contains("SHIPMENT|Shipping|出貨", case=False, na=False)].copy()
 
+    merge_date_col = _find_col(
+        work,
+        cfg.MERGE_DATE_CANDIDATES,
+        merge_date_col,
+    )
+
     if merge_date_col and merge_date_col in work.columns:
         work["_merge_sort"] = pd.to_datetime(work[merge_date_col], errors="coerce")
         work = work.sort_values("_merge_sort", ascending=True)
@@ -378,7 +426,7 @@ def show_sandy_shipment_report(
 
 # ================================
 # 新訂單 WIP
-# 改成：抓取任何 工廠交期 / 交期更改 / 併貨日期 有變更者
+# 顯示任何 交期(更改) / 併貨日期 有值，或 工廠交期 != 交期(更改) 者
 # ================================
 def show_new_orders_wip_report(
     df,
@@ -401,24 +449,31 @@ def show_new_orders_wip_report(
 
     work = df.copy()
 
-    due_s = _safe_text_series(work, factory_due_col)
-    changed_due_s = _safe_text_series(work, changed_due_date_col)
-    merge_s = _safe_text_series(work, merge_date_col)
+    # 自己在 df 裡找真正欄位，不完全依賴 app.py 傳進來的名稱
+    order_date_col = _find_col(work, cfg.ORDER_DATE_CANDIDATES, order_date_col)
+    factory_order_date_col = _find_col(work, cfg.FACTORY_ORDER_DATE_CANDIDATES, factory_order_date_col)
+    merge_date_col = _find_col(work, cfg.MERGE_DATE_CANDIDATES, merge_date_col)
+    changed_due_date_col = _find_col(work, cfg.CHANGED_DUE_DATE_CANDIDATES, changed_due_date_col)
+    factory_due_col = _find_col(work, cfg.FACTORY_DUE_CANDIDATES, factory_due_col)
 
-    # 任一異動條件成立就顯示
+    with st.expander("新訂單 WIP 偵測到的欄位"):
+        st.write({
+            "客戶下單日期": order_date_col,
+            "工廠下單日期": factory_order_date_col,
+            "工廠交期": factory_due_col,
+            "交期(更改)": changed_due_date_col,
+            "併貨日期": merge_date_col,
+        })
+
+    due_s = _safe_text_series(work, factory_due_col) if factory_due_col else pd.Series([""] * len(work), index=work.index)
+    changed_due_s = _safe_text_series(work, changed_due_date_col) if changed_due_date_col else pd.Series([""] * len(work), index=work.index)
+    merge_s = _safe_text_series(work, merge_date_col) if merge_date_col else pd.Series([""] * len(work), index=work.index)
+
     cond_changed_due_has_value = changed_due_s != ""
     cond_merge_has_value = merge_s != ""
-    cond_due_diff = (
-        (due_s != "")
-        & (changed_due_s != "")
-        & (due_s != changed_due_s)
-    )
+    cond_due_diff = (due_s != "") & (changed_due_s != "") & (due_s != changed_due_s)
 
-    filtered = work[
-        cond_changed_due_has_value
-        | cond_merge_has_value
-        | cond_due_diff
-    ].copy()
+    filtered = work[cond_changed_due_has_value | cond_merge_has_value | cond_due_diff].copy()
 
     if merge_date_col and merge_date_col in filtered.columns:
         filtered["_merge_sort"] = pd.to_datetime(filtered[merge_date_col], errors="coerce")
