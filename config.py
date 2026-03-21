@@ -4,7 +4,12 @@ from PIL import Image
 
 from config import *
 from utils import *
-from teable_api import load_orders, upsert_to_teable, patch_record_by_id, update_working_orders_local
+# -*- coding: utf-8 -*-
+from teable_api import (
+    load_orders,
+    upsert_to_teable,
+    patch_record_by_id,
+) update_working_orders_local
 from match_engine import build_record_for_match, build_teable_match_records, find_best_match_by_4fields, dedupe_import_df_by_key
 from factory_parsers import read_import_dataframe
 from text_ocr_parsers import (
