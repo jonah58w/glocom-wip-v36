@@ -519,5 +519,36 @@ def show_new_orders_wip_report(
         return
 
     export_df = filtered[show_cols].copy()
-    st.dataframe(export_df, use_container_width=True, height=520)
+
+    # ===== 欄位上色邏輯 =====
+    def highlight_change_row(row):
+        styles = [""] * len(row)
+
+        due_val = str(row.get(factory_due_col, "")).strip() if factory_due_col else ""
+        changed_due_val = str(row.get(changed_due_date_col, "")).strip() if changed_due_date_col else ""
+        merge_val = str(row.get(merge_date_col, "")).strip() if merge_date_col else ""
+
+        for i, col in enumerate(row.index):
+            # 工廠交期 vs 交期(更改) 不同 -> 兩格都標色
+            if factory_due_col and changed_due_date_col:
+                if col in [factory_due_col, changed_due_date_col]:
+                    if due_val and changed_due_val and due_val != changed_due_val:
+                        styles[i] = "background-color: #5b3f00; color: #fff2cc; font-weight: bold;"
+
+            # 交期(更改) 只要有值就淡黃色
+            if changed_due_date_col and col == changed_due_date_col:
+                if changed_due_val:
+                    styles[i] = "background-color: #7a5c00; color: #fff2cc; font-weight: bold;"
+
+            # 併貨日期有值就淡藍色
+            if merge_date_col and col == merge_date_col:
+                if merge_val:
+                    styles[i] = "background-color: #003b5c; color: #d9f2ff; font-weight: bold;"
+
+        return styles
+
+    styled_df = export_df.style.apply(highlight_change_row, axis=1)
+
+    st.dataframe(styled_df, use_container_width=True, height=520)
+
     _show_export_buttons(export_df, "新訂單WIP.xlsx", "新訂單WIP.pdf", "新訂單 WIP")
