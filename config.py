@@ -1,14 +1,19 @@
-
 # -*- coding: utf-8 -*-
 import streamlit as st
 import pytesseract
 
+# ================================
+# PAGE CONFIG
+# ================================
 st.set_page_config(
     page_title="GLOCOM Control Tower",
     page_icon="🏭",
     layout="wide",
 )
 
+# ================================
+# TEABLE CONFIG
+# ================================
 DEFAULT_TABLE_URL = "https://app.teable.ai/api/table/tbl6c05EPXYtJcZfeir/record"
 TEABLE_WEB_URL = "https://app.teable.ai/base/bsedgLzbHjiK0XoZH01/table/tbl6c05EPXYtJcZfeir"
 
@@ -35,39 +40,9 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
-GLOBAL_STYLE = """
-<style>
-.portal-box {
-    padding: 18px 20px;
-    border: 1px solid rgba(120,120,120,.22);
-    border-radius: 16px;
-    background: rgba(255,255,255,.03);
-    margin-bottom: 14px;
-}
-.portal-title {
-    font-size: 1.2rem;
-    font-weight: 700;
-    margin-bottom: 4px;
-}
-.tag-chip {
-    display: inline-block;
-    padding: 4px 10px;
-    margin: 2px 6px 2px 0;
-    border-radius: 999px;
-    font-size: 0.82rem;
-    border: 1px solid rgba(120,120,120,.25);
-    background: rgba(255,255,255,.05);
-}
-.wip-chip {
-    display: inline-block;
-    padding: 4px 10px;
-    border-radius: 999px;
-    font-size: 0.82rem;
-    font-weight: 600;
-}
-</style>
-"""
-
+# ================================
+# FIELD CANDIDATES
+# ================================
 PO_CANDIDATES = ["PO#", "PO", "P/O", "訂單編號", "訂單號", "訂單號碼", "工單", "工單號", "單號"]
 CUSTOMER_CANDIDATES = ["Customer", "客戶", "客戶名稱"]
 PART_CANDIDATES = ["Part No", "Part No.", "P/N", "客戶料號", "Cust. P / N", "LS P/N", "料號", "品號", "成品料號", "產品料號"]
