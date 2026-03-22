@@ -171,15 +171,16 @@ def call_report_function(possible_names, **kwargs):
 @st.cache_data(ttl=60)
 def load_sales_workbook(path: str):
     if not os.path.exists(path):
-        return pd.DataFrame(), pd.DataFrame()
+        raise FileNotFoundError(f"找不到銷貨底檔案: {path}")
 
-    try:
-        xls = pd.ExcelFile(path)
-        main_df = pd.read_excel(path, sheet_name="主表") if "主表" in xls.sheet_names else pd.DataFrame()
-        shipment_df = pd.read_excel(path, sheet_name="銷貨底") if "銷貨底" in xls.sheet_names else pd.DataFrame()
-        return main_df, shipment_df
-    except Exception:
-        return pd.DataFrame(), pd.DataFrame()
+    xls = pd.ExcelFile(path)
+
+    if "主表" not in xls.sheet_names:
+        raise ValueError(f"Excel 缺少工作表: 主表，現有工作表: {xls.sheet_names}")
+
+    main_df = pd.read_excel(path, sheet_name="主表")
+    shipment_df = pd.read_excel(path, sheet_name="銷貨底") if "銷貨底" in xls.sheet_names else pd.DataFrame()
+    return main_df, shipment_df
 
 
 # ================================
@@ -193,7 +194,13 @@ except Exception as e:
     api_text = str(e)
 
 SALES_BASE_PATH = "Sandy需要的銷貨底.xlsx"
-sales_df, sales_shipment_df = load_sales_workbook(SALES_BASE_PATH)
+
+try:
+    sales_df, sales_shipment_df = load_sales_workbook(SALES_BASE_PATH)
+    sales_error_text = ""
+except Exception as e:
+    sales_df, sales_shipment_df = pd.DataFrame(), pd.DataFrame()
+    sales_error_text = str(e)
 
 
 # ================================
@@ -310,11 +317,15 @@ with st.expander("Debug"):
     st.write("TABLE_URL:", cfg.TABLE_URL)
     st.write("Token loaded:", bool(cfg.TEABLE_TOKEN))
     st.write("Columns:", list(orders.columns) if not orders.empty else [])
+    st.write("SALES_BASE_PATH:", SALES_BASE_PATH)
     st.write("Sales workbook path exists:", os.path.exists(SALES_BASE_PATH))
-    st.write("Sales workbook loaded:", bool(not sales_df.empty))
-    st.write("Sales shipment sheet loaded:", bool(not sales_shipment_df.empty))
-    if not sales_df.empty:
+    st.write("sales_df loaded:", bool(isinstance(sales_df, pd.DataFrame) and not sales_df.empty))
+    st.write("sales_shipment_df loaded:", bool(isinstance(sales_shipment_df, pd.DataFrame) and not sales_shipment_df.empty))
+    if isinstance(sales_df, pd.DataFrame) and not sales_df.empty:
         st.write("sales_df columns:", list(sales_df.columns))
+        st.dataframe(sales_df.head(5), use_container_width=True)
+    if sales_error_text:
+        st.error(f"銷貨底 Excel 載入失敗: {sales_error_text}")
     if isinstance(api_text, str):
         st.text(api_text[:1200])
 
@@ -351,198 +362,6 @@ st.sidebar.caption("另建 Completed View：WIP = 完成")
 
 
 # ================================
-# FALLBACK VIEWS
-# ================================
-def fallback_factory_load(df):
-    st.subheader("🏭 Factory Load")
-    if factory_col and factory_col in df.columns:
-        factory_series = u.get_series_by_col(df, factory_col)
-        if factory_series is not None:
-            factory_summary = (
-                factory_series.fillna("(blank)")
-                .astype(str)
-                .value_counts()
-                .reset_index()
-            )
-            factory_summary.columns = [factory_col, "Orders"]
-            st.bar_chart(factory_summary.set_index(factory_col))
-            st.dataframe(factory_summary, use_container_width=True, height=400)
-            return
-    st.info("No factory data")
-
-
-def fallback_delayed_orders(df):
-    st.subheader("⚠️ Delayed Orders")
-    if not factory_due_col or factory_due_col not in df.columns:
-        st.info("No factory due date column")
-        return
-
-    temp = df.copy()
-    due_series = u.get_series_by_col(temp, factory_due_col)
-    if due_series is None:
-        st.info("No factory due date data")
-        return
-
-    temp["_FactoryDueDateParsed"] = u.safe_to_datetime(due_series)
-    today = pd.Timestamp.today().normalize()
-
-    delayed = temp[
-        temp["_FactoryDueDateParsed"].notna()
-        & (temp["_FactoryDueDateParsed"] < today)
-    ].copy()
-
-    if delayed.empty:
-        st.success("No delayed orders")
-        return
-
-    delayed["Delay Days"] = (today - delayed["_FactoryDueDateParsed"]).dt.days
-    show_cols = [
-        c for c in [po_col, customer_col, part_col, qty_col, factory_col, wip_col, factory_due_col]
-        if c and c in delayed.columns
-    ]
-    if "Delay Days" not in show_cols:
-        show_cols.append("Delay Days")
-    st.dataframe(delayed[show_cols], use_container_width=True, height=520)
-
-
-def fallback_shipment_forecast(df):
-    st.subheader("📦 Shipment Forecast (Next 7 days)")
-    if not ship_date_col or ship_date_col not in df.columns:
-        st.info("No ship date column")
-        return
-
-    temp = df.copy()
-    ship_series = u.get_series_by_col(temp, ship_date_col)
-    if ship_series is None:
-        st.info("No ship date data")
-        return
-
-    temp["_ShipDateParsed"] = u.safe_to_datetime(ship_series)
-    today = pd.Timestamp.today().normalize()
-    next_7 = today + pd.Timedelta(days=7)
-
-    forecast = temp[
-        temp["_ShipDateParsed"].notna()
-        & (temp["_ShipDateParsed"] >= today)
-        & (temp["_ShipDateParsed"] <= next_7)
-    ].copy()
-
-    if forecast.empty:
-        st.info("No shipment within next 7 days")
-        return
-
-    show_cols = [
-        c for c in [po_col, customer_col, part_col, qty_col, factory_col, wip_col, ship_date_col]
-        if c and c in forecast.columns
-    ]
-    st.dataframe(
-        forecast.sort_values("_ShipDateParsed")[show_cols],
-        use_container_width=True,
-        height=520,
-    )
-
-
-def fallback_orders(df):
-    st.subheader("📋 Orders")
-    filtered = df.copy()
-
-    col1, col2 = st.columns(2)
-
-    if customer_col and customer_col in filtered.columns:
-        customer_series = u.get_series_by_col(filtered, customer_col)
-        if customer_series is not None:
-            customer_options = ["All"] + sorted([str(x) for x in customer_series.dropna().unique().tolist()])
-            selected_customer = col1.selectbox("Customer", customer_options)
-            if selected_customer != "All":
-                filtered = filtered[
-                    u.get_series_by_col(filtered, customer_col).astype(str) == selected_customer
-                ]
-
-    if wip_col and wip_col in filtered.columns:
-        wip_series = u.get_series_by_col(filtered, wip_col)
-        if wip_series is not None:
-            wip_options = ["All"] + sorted([str(x) for x in wip_series.dropna().unique().tolist()])
-            selected_wip = col2.selectbox("WIP Stage", wip_options)
-            if selected_wip != "All":
-                filtered = filtered[
-                    u.get_series_by_col(filtered, wip_col).astype(str) == selected_wip
-                ]
-
-    st.dataframe(filtered, use_container_width=True, height=520)
-
-    csv_data = filtered.to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        "Download Orders CSV",
-        data=csv_data,
-        file_name="glocom_orders.csv",
-        mime="text/csv",
-    )
-
-
-def fallback_import_update():
-    st.subheader("Import / Update")
-    st.caption("若 reports.py 未提供完整頁面，這裡提供基本匯入工具。")
-
-    tab1, tab2, tab3, tab4 = st.tabs(["檔案上傳", "圖片截圖", "貼上文字", "手工輸入"])
-
-    with tab1:
-        uploaded = st.file_uploader("上傳工廠進度檔案", type=["xlsx", "xls", "csv", "txt"])
-        if uploaded is not None:
-            name = uploaded.name.lower()
-            try:
-                if name.endswith((".xlsx", ".xls")):
-                    df_up = pd.read_excel(uploaded)
-                    st.success(f"已讀取 {len(df_up)} 筆")
-                    st.dataframe(df_up, use_container_width=True, height=420)
-                elif name.endswith(".csv"):
-                    df_up = pd.read_csv(uploaded)
-                    st.success(f"已讀取 {len(df_up)} 筆")
-                    st.dataframe(df_up, use_container_width=True, height=420)
-                else:
-                    text = uploaded.getvalue().decode("utf-8", errors="ignore")
-                    st.text_area("文字內容", value=text, height=260)
-            except Exception as e:
-                st.error(f"讀取失敗：{e}")
-
-    with tab2:
-        image_file = st.file_uploader("上傳截圖 / 圖片", type=["png", "jpg", "jpeg", "webp"], key="factory_image_upload")
-        if image_file is not None:
-            st.image(image_file, caption="已上傳截圖")
-            try:
-                import pytesseract
-                from PIL import Image
-                img = Image.open(image_file)
-                text = pytesseract.image_to_string(img, lang="eng")
-                st.text_area("OCR 辨識文字", value=text, height=260)
-            except Exception:
-                st.info("目前環境未啟用 OCR，可改用下方『貼上文字』或『手工輸入』。")
-
-    with tab3:
-        pasted = st.text_area("貼上工廠進度文字", height=280, key="factory_pasted_text")
-        if pasted.strip():
-            st.text_area("預覽", value=pasted, height=280)
-
-    with tab4:
-        rows = st.number_input("手工輸入列數", min_value=1, max_value=50, value=5, step=1)
-        manual_df = pd.DataFrame({
-            "PO#": [""] * rows,
-            "Customer": [""] * rows,
-            "P/N": [""] * rows,
-            "QTY": [""] * rows,
-            "WIP": [""] * rows,
-            "Ship date": [""] * rows,
-            "Remark": [""] * rows,
-        })
-        edited = st.data_editor(manual_df, use_container_width=True, num_rows="fixed", key="factory_manual_editor")
-        st.download_button(
-            "下載手工輸入 CSV",
-            data=edited.to_csv(index=False).encode("utf-8-sig"),
-            file_name="factory_manual_input.csv",
-            mime="text/csv",
-        )
-
-
-# ================================
 # ROUTING
 # ================================
 common_kwargs = dict(
@@ -570,86 +389,46 @@ if menu == "Dashboard":
     ok = call_report_function(["show_dashboard_report"], **common_kwargs)
     if ok is False:
         show_metrics(orders, wip_col)
-        st.divider()
-        left, right = st.columns(2)
-        with left:
-            fallback_factory_load(orders)
-        with right:
-            fallback_shipment_forecast(orders)
 
 elif menu == "Factory Load":
     ok = call_report_function(["show_factory_load_report"], **common_kwargs)
     if ok is False:
-        fallback_factory_load(orders)
+        st.info("Factory Load fallback not enabled.")
 
 elif menu == "Delayed Orders":
     ok = call_report_function(["show_delayed_orders_report"], **common_kwargs)
     if ok is False:
-        fallback_delayed_orders(orders)
+        st.info("Delayed Orders fallback not enabled.")
 
 elif menu == "Shipment Forecast":
     ok = call_report_function(["show_shipment_forecast_report"], **common_kwargs)
     if ok is False:
-        fallback_shipment_forecast(orders)
+        st.info("Shipment Forecast fallback not enabled.")
 
 elif menu == "Orders":
     ok = call_report_function(["show_orders_report"], **common_kwargs)
     if ok is False:
-        fallback_orders(orders)
+        st.dataframe(orders, use_container_width=True)
 
 elif menu == "Customer Preview":
     ok = call_report_function(["show_customer_preview_report"], **common_kwargs)
     if ok is False:
-        st.subheader("Customer Preview")
-        st.caption("僅供內部預覽。客戶請直接使用 Teable View。")
-        if not customer_col or customer_col not in orders.columns:
-            st.error("Customer column not found in Teable data")
-        else:
-            customer_series = u.get_series_by_col(orders, customer_col)
-            if customer_series is None:
-                st.error("Customer data unavailable")
-            else:
-                customers = sorted([str(x).strip() for x in customer_series.dropna().unique().tolist() if str(x).strip()])
-                if not customers:
-                    st.warning("No customers found")
-                else:
-                    wesco_matches = [x for x in customers if "wesco" in x.strip().lower()]
-                    default_customer = wesco_matches[0] if wesco_matches else customers[0]
-                    default_idx = customers.index(default_customer)
-
-                    selected_customer = st.selectbox(
-                        "Select customer to preview",
-                        customers,
-                        index=default_idx,
-                        key="customer_preview_select_v2_fallback",
-                    )
-                    preview_df = orders[
-                        customer_series.astype(str).str.strip().str.lower()
-                        == selected_customer.strip().lower()
-                    ].copy()
-                    if preview_df.empty:
-                        st.warning("No orders found for this customer")
-                    else:
-                        preview_cols = [
-                            c for c in [po_col, customer_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col]
-                            if c and c in preview_df.columns
-                        ]
-                        st.dataframe(preview_df[preview_cols], use_container_width=True, height=420)
+        st.info("Customer Preview fallback not enabled.")
 
 elif menu == "Sandy 內部 WIP":
     ok = call_report_function(["show_sandy_internal_wip_report"], **common_kwargs)
     if ok is False:
-        st.warning("reports.py 尚未提供 Sandy 內部 WIP 報表函式。")
+        st.info("Sandy 內部 WIP fallback not enabled.")
 
 elif menu == "Sandy 銷貨底":
     ok = call_report_function(["show_sandy_shipment_report"], **common_kwargs)
     if ok is False:
-        st.warning("reports.py 尚未提供 Sandy 銷貨底報表函式。")
+        st.info("Sandy 銷貨底 fallback not enabled.")
 
 elif menu == "新訂單 WIP":
     ok = call_report_function(["show_new_orders_wip_report"], **common_kwargs)
     if ok is False:
-        st.warning("reports.py 尚未提供 新訂單 WIP 報表函式。")
+        st.info("新訂單 WIP fallback not enabled.")
 
 elif menu == "業績明細表":
     render_sales_report_page(**common_kwargs)
@@ -657,6 +436,6 @@ elif menu == "業績明細表":
 elif menu == "Import / Update":
     ok = call_report_function(["show_import_update_page", "show_import_update_report"], **common_kwargs)
     if ok is False:
-        fallback_import_update()
+        st.info("Import / Update fallback not enabled.")
 
 st.caption("Auto refresh cache: 60 seconds")
