@@ -7,6 +7,7 @@ import config as cfg
 import utils as u
 import teable_api
 import reports
+from sales_report import render_sales_report_page
 
 
 # ================================
@@ -315,6 +316,7 @@ menu = st.sidebar.radio(
         "Sandy 內部 WIP",
         "Sandy 銷貨底",
         "新訂單 WIP",
+        "業績明細表",
         "Import / Update",
     ],
 )
@@ -557,6 +559,9 @@ elif menu == "新訂單 WIP":
     ok = call_report_function(["show_new_orders_wip_report"], **common_kwargs)
     if ok is False:
         st.warning("reports.py 尚未提供 新訂單 WIP 報表函式。")
+
+elif menu == "業績明細表":
+    render_sales_report_page()
 
 elif menu == "Import / Update":
     ok = call_report_function(["show_import_update_page", "show_import_update_report"], **common_kwargs)
