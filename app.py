@@ -610,41 +610,42 @@ elif menu == "Orders":
         fallback_orders(orders)
 
 elif menu == "Customer Preview":
-    ok = call_report_function(["show_customer_preview_report"], **common_kwargs)
-    if ok is False:
-        st.subheader("Customer Preview")
-        st.caption("僅供內部預覽。客戶請直接使用 Teable View。")
-        if not customer_col or customer_col not in orders.columns:
-            st.error("Customer column not found in Teable data")
+    # 這裡固定使用內建頁面，確保預設客戶一定是 WESCO。
+    st.subheader("Customer Preview")
+    st.caption("僅供內部預覽。客戶請直接使用 Teable View。")
+    if not customer_col or customer_col not in orders.columns:
+        st.error("Customer column not found in Teable data")
+    else:
+        customer_series = u.get_series_by_col(orders, customer_col)
+        if customer_series is None:
+            st.error("Customer data unavailable")
         else:
-            customer_series = u.get_series_by_col(orders, customer_col)
-            if customer_series is None:
-                st.error("Customer data unavailable")
+            customers = sorted([str(x).strip() for x in customer_series.dropna().unique().tolist() if str(x).strip()])
+            if not customers:
+                st.warning("No customers found")
             else:
-                customers = sorted([str(x).strip() for x in customer_series.dropna().unique().tolist() if str(x).strip()])
-                if not customers:
-                    st.warning("No customers found")
+                default_customer = "WESCO"
+                customer_map = {c.strip().lower(): c for c in customers}
+                selected_default = customer_map.get(default_customer.lower(), customers[0])
+                if st.session_state.get("customer_preview_selected") not in customers:
+                    st.session_state["customer_preview_selected"] = selected_default
+                selected_customer = st.selectbox(
+                    "Select customer to preview",
+                    customers,
+                    index=customers.index(st.session_state["customer_preview_selected"]) if st.session_state["customer_preview_selected"] in customers else 0,
+                    key="customer_preview_selected",
+                )
+                preview_df = orders[
+                    customer_series.astype(str).str.strip().str.lower() == selected_customer.strip().lower()
+                ].copy()
+                if preview_df.empty:
+                    st.warning("No orders found for this customer")
                 else:
-                    default_customer = "WESCO"
-                    if "customer_preview_selected" not in st.session_state:
-                        st.session_state["customer_preview_selected"] = default_customer if default_customer in customers else customers[0]
-                    selected_customer = st.selectbox(
-                        "Select customer to preview",
-                        customers,
-                        index=customers.index(st.session_state["customer_preview_selected"]) if st.session_state["customer_preview_selected"] in customers else 0,
-                        key="customer_preview_selected",
-                    )
-                    preview_df = orders[
-                        customer_series.astype(str).str.strip().str.lower() == selected_customer.strip().lower()
-                    ].copy()
-                    if preview_df.empty:
-                        st.warning("No orders found for this customer")
-                    else:
-                        preview_cols = [
-                            c for c in [po_col, customer_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col]
-                            if c and c in preview_df.columns
-                        ]
-                        st.dataframe(preview_df[preview_cols], use_container_width=True, height=420)
+                    preview_cols = [
+                        c for c in [po_col, customer_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col]
+                        if c and c in preview_df.columns
+                    ]
+                    st.dataframe(preview_df[preview_cols], use_container_width=True, height=420)
 
 elif menu == "Sandy 內部 WIP":
     ok = call_report_function(["show_sandy_internal_wip_report"], **common_kwargs)
