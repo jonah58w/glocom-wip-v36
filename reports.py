@@ -180,10 +180,6 @@ def show_factory_load_report(df, factory_col=None, **kwargs):
         return
 
     factory_series = _safe_text_series(df, factory_col)
-    if factory_series is None:
-        st.info("No factory data")
-        return
-
     factory_summary = factory_series.replace("", "(blank)").value_counts().reset_index()
     factory_summary.columns = [factory_col, "Orders"]
 
@@ -194,7 +190,17 @@ def show_factory_load_report(df, factory_col=None, **kwargs):
 # ================================
 # Delayed Orders
 # ================================
-def show_delayed_orders_report(df, factory_due_col=None, po_col=None, customer_col=None, part_col=None, qty_col=None, factory_col=None, wip_col=None, **kwargs):
+def show_delayed_orders_report(
+    df,
+    factory_due_col=None,
+    po_col=None,
+    customer_col=None,
+    part_col=None,
+    qty_col=None,
+    factory_col=None,
+    wip_col=None,
+    **kwargs,
+):
     st.subheader("⚠️ Delayed Orders")
 
     if not factory_due_col or factory_due_col not in df.columns:
@@ -219,7 +225,17 @@ def show_delayed_orders_report(df, factory_due_col=None, po_col=None, customer_c
 # ================================
 # Shipment Forecast
 # ================================
-def show_shipment_forecast_report(df, ship_date_col=None, po_col=None, customer_col=None, part_col=None, qty_col=None, factory_col=None, wip_col=None, **kwargs):
+def show_shipment_forecast_report(
+    df,
+    ship_date_col=None,
+    po_col=None,
+    customer_col=None,
+    part_col=None,
+    qty_col=None,
+    factory_col=None,
+    wip_col=None,
+    **kwargs,
+):
     st.subheader("📦 Shipment Forecast (Next 7 days)")
 
     if not ship_date_col or ship_date_col not in df.columns:
@@ -276,7 +292,18 @@ def show_orders_report(df, customer_col=None, wip_col=None, **kwargs):
 # ================================
 # Customer Preview
 # ================================
-def show_customer_preview_report(df, customer_col=None, po_col=None, part_col=None, qty_col=None, wip_col=None, ship_date_col=None, customer_tag_col=None, remark_col=None, **kwargs):
+def show_customer_preview_report(
+    df,
+    customer_col=None,
+    po_col=None,
+    part_col=None,
+    qty_col=None,
+    wip_col=None,
+    ship_date_col=None,
+    customer_tag_col=None,
+    remark_col=None,
+    **kwargs,
+):
     st.subheader("Customer Preview")
     st.caption("僅供內部預覽。客戶請直接使用 Teable View。")
 
@@ -291,7 +318,16 @@ def show_customer_preview_report(df, customer_col=None, po_col=None, part_col=No
         st.warning("No customers found")
         return
 
-    selected_customer = st.selectbox("Select customer to preview", customers)
+    wesco_matches = [x for x in customers if "wesco" in str(x).strip().lower()]
+    default_customer = wesco_matches[0] if wesco_matches else customers[0]
+    default_idx = customers.index(default_customer)
+
+    selected_customer = st.selectbox(
+        "Select customer to preview",
+        customers,
+        index=default_idx,
+    )
+
     preview_df = df[customer_series.str.lower() == selected_customer.strip().lower()].copy()
 
     if preview_df.empty:
@@ -325,11 +361,7 @@ def show_sandy_internal_wip_report(
 
     work = df.copy()
 
-    merge_date_col = _find_col(
-        work,
-        cfg.MERGE_DATE_CANDIDATES,
-        merge_date_col,
-    )
+    merge_date_col = _find_col(work, cfg.MERGE_DATE_CANDIDATES, merge_date_col)
 
     if merge_date_col and merge_date_col in work.columns:
         work["_merge_sort"] = pd.to_datetime(work[merge_date_col], errors="coerce")
@@ -366,6 +398,7 @@ def show_sandy_internal_wip_report(
 # ================================
 def show_sandy_shipment_report(
     df,
+    sales_shipment_df=None,
     po_col=None,
     customer_col=None,
     part_col=None,
@@ -380,23 +413,32 @@ def show_sandy_shipment_report(
     **kwargs,
 ):
     st.subheader("Sandy 銷貨底")
-    st.caption("只顯示 SHIPMENT / Shipping / 出貨，依併貨日期排序，可匯出 Excel / PDF。")
+    st.caption("優先顯示 Sandy需要的銷貨底.xlsx / 銷貨底 工作表。")
 
-    work = df.copy()
+    work = sales_shipment_df.copy() if isinstance(sales_shipment_df, pd.DataFrame) and not sales_shipment_df.empty else df.copy()
+
+    customer_col = _find_col(work, ["客戶", "Customer"], customer_col)
+    po_col = _find_col(work, ["PO#"], po_col)
+    part_col = _find_col(work, ["P/N"], part_col)
+    qty_col = _find_col(work, ["Order Q'TY (PCS)", "Order Q'TY\n (PCS)", "Order Q'TY\n(PCS)", "QTY", "Qty"], qty_col)
+    ship_date_col = _find_col(work, ["Ship date", "出貨日期"], ship_date_col)
+    wip_col = _find_col(work, ["WIP"], wip_col)
+    factory_due_col = _find_col(work, ["工廠交期"], factory_due_col)
+    changed_due_date_col = _find_col(work, ["交期(更改)", "交期\n (更改)"], changed_due_date_col)
+    merge_date_col = _find_col(work, ["併貨日期(限內部使用)", "併貨日期\n (限內部使用)"], merge_date_col)
+    factory_col = _find_col(work, ["工廠"], factory_col)
+    remark_col = _find_col(work, ["Note", "Remark"], remark_col)
 
     if wip_col and wip_col in work.columns:
         wip_s = _safe_text_series(work, wip_col)
         work = work[wip_s.str.contains("SHIPMENT|Shipping|出貨", case=False, na=False)].copy()
 
-    merge_date_col = _find_col(
-        work,
-        cfg.MERGE_DATE_CANDIDATES,
-        merge_date_col,
-    )
-
     if merge_date_col and merge_date_col in work.columns:
         work["_merge_sort"] = pd.to_datetime(work[merge_date_col], errors="coerce")
         work = work.sort_values("_merge_sort", ascending=True)
+    elif ship_date_col and ship_date_col in work.columns:
+        work["_ship_sort"] = pd.to_datetime(work[ship_date_col], errors="coerce")
+        work = work.sort_values("_ship_sort", ascending=True)
 
     show_cols = _existing_cols(
         work,
@@ -426,7 +468,6 @@ def show_sandy_shipment_report(
 
 # ================================
 # 新訂單 WIP
-# 顯示任何 交期(更改) / 併貨日期 有值，或 工廠交期 != 交期(更改) 者
 # ================================
 def show_new_orders_wip_report(
     df,
@@ -449,7 +490,6 @@ def show_new_orders_wip_report(
 
     work = df.copy()
 
-    # 自己在 df 裡找真正欄位，不完全依賴 app.py 傳進來的名稱
     order_date_col = _find_col(work, cfg.ORDER_DATE_CANDIDATES, order_date_col)
     factory_order_date_col = _find_col(work, cfg.FACTORY_ORDER_DATE_CANDIDATES, factory_order_date_col)
     merge_date_col = _find_col(work, cfg.MERGE_DATE_CANDIDATES, merge_date_col)
@@ -485,70 +525,30 @@ def show_new_orders_wip_report(
     else:
         filtered["_changed_due_sort"] = pd.NaT
 
-    if factory_due_col and factory_due_col in filtered.columns:
-        filtered["_factory_due_sort"] = pd.to_datetime(filtered[factory_due_col], errors="coerce")
-    else:
-        filtered["_factory_due_sort"] = pd.NaT
+    filtered = filtered.sort_values(["_merge_sort", "_changed_due_sort"], ascending=[True, True])
 
-    filtered = filtered.sort_values(
-        ["_merge_sort", "_changed_due_sort", "_factory_due_sort"],
-        ascending=True,
-        na_position="last",
-    )
+    if filtered.empty:
+        st.info("目前沒有新訂單 / 異動交期資料。")
+        return
 
     show_cols = _existing_cols(
         filtered,
         [
-            order_date_col,
-            factory_order_date_col,
             customer_col,
             po_col,
             part_col,
             qty_col,
-            ship_date_col,
             wip_col,
+            ship_date_col,
             factory_due_col,
             changed_due_date_col,
             merge_date_col,
+            order_date_col,
+            factory_order_date_col,
             remark_col,
         ],
     )
 
-    if filtered.empty:
-        st.warning("目前沒有符合條件的異動訂單。")
-        return
-
     export_df = filtered[show_cols].copy()
-
-    # ===== 欄位上色邏輯 =====
-    def highlight_change_row(row):
-        styles = [""] * len(row)
-
-        due_val = str(row.get(factory_due_col, "")).strip() if factory_due_col else ""
-        changed_due_val = str(row.get(changed_due_date_col, "")).strip() if changed_due_date_col else ""
-        merge_val = str(row.get(merge_date_col, "")).strip() if merge_date_col else ""
-
-        for i, col in enumerate(row.index):
-            # 工廠交期 vs 交期(更改) 不同 -> 兩格都標色
-            if factory_due_col and changed_due_date_col:
-                if col in [factory_due_col, changed_due_date_col]:
-                    if due_val and changed_due_val and due_val != changed_due_val:
-                        styles[i] = "background-color: #5b3f00; color: #fff2cc; font-weight: bold;"
-
-            # 交期(更改) 只要有值就淡黃色
-            if changed_due_date_col and col == changed_due_date_col:
-                if changed_due_val:
-                    styles[i] = "background-color: #7a5c00; color: #fff2cc; font-weight: bold;"
-
-            # 併貨日期有值就淡藍色
-            if merge_date_col and col == merge_date_col:
-                if merge_val:
-                    styles[i] = "background-color: #003b5c; color: #d9f2ff; font-weight: bold;"
-
-        return styles
-
-    styled_df = export_df.style.apply(highlight_change_row, axis=1)
-
-    st.dataframe(styled_df, use_container_width=True, height=520)
-
+    st.dataframe(export_df, use_container_width=True, height=520)
     _show_export_buttons(export_df, "新訂單WIP.xlsx", "新訂單WIP.pdf", "新訂單 WIP")
