@@ -13,7 +13,6 @@ from openpyxl.chart import BarChart, DoughnutChart, LineChart, Reference
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-
 DEFAULT_BASE_URL = os.getenv("TEABLE_BASE_URL", "https://app.teable.ai")
 DEFAULT_TOKEN = os.getenv("TEABLE_TOKEN", "")
 DEFAULT_TABLE_ID = os.getenv("TEABLE_SALES_TABLE_ID", os.getenv("TEABLE_TABLE_ID", ""))
@@ -282,20 +281,21 @@ def build_excel_report(
 
     ws["A9"] = "客戶"
     ws["B9"] = "淨出貨金額"
-    top_customer = by_customer.head(10)
-    max_customer_row = 9 + len(top_customer)
-    for i, (_, row) in enumerate(top_customer.iterrows(), start=10):
+    max_customer_rows = min(10, len(by_customer))
+    for i, (_, row) in enumerate(by_customer.head(10).iterrows(), start=10):
         ws[f"A{i}"] = row["客戶"] or "(空白)"
         ws[f"B{i}"] = float(row["淨出貨金額"])
         ws[f"B{i}"].number_format = f'"{currency_symbol}" #,##0'
+
+    end_customer_row = 9 + max(1, max_customer_rows)
+    data = Reference(ws, min_col=2, min_row=9, max_row=end_customer_row)
+    cats = Reference(ws, min_col=1, min_row=10, max_row=end_customer_row)
 
     bar = BarChart()
     bar.title = "客戶業績比較"
     bar.y_axis.title = "金額"
     bar.height = 8
     bar.width = 13
-    data = Reference(ws, min_col=2, min_row=9, max_row=max_customer_row)
-    cats = Reference(ws, min_col=1, min_row=10, max_row=max_customer_row)
     bar.add_data(data, titles_from_data=True)
     bar.set_categories(cats)
     bar.legend = None
@@ -329,8 +329,9 @@ def build_excel_report(
     line.y_axis.title = "金額"
     line.height = 8
     line.width = 18
-    d2 = Reference(ws, min_col=2, min_row=start_row + 1, max_row=start_row + 1 + len(daily))
-    c2 = Reference(ws, min_col=1, min_row=start_row + 2, max_row=start_row + 1 + len(daily))
+    end_daily_row = start_row + 1 + max(1, len(daily))
+    d2 = Reference(ws, min_col=2, min_row=start_row + 1, max_row=end_daily_row)
+    c2 = Reference(ws, min_col=1, min_row=start_row + 2, max_row=end_daily_row)
     line.add_data(d2, titles_from_data=True)
     line.set_categories(c2)
     ws.add_chart(line, "D38")
@@ -377,15 +378,15 @@ def build_excel_report(
 
 
 def render_sales_report_page():
-    st.subheader("業績明細表")
+    st.subheader("📊 業績明細表")
     st.caption("保留原 Excel 明細架構，同時新增圖表首頁。資料來源為 Teable。")
 
     with st.expander("設定", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
             token = st.text_input("TEABLE_TOKEN", value=DEFAULT_TOKEN, type="password")
-            table_id = st.text_input("Teable Table ID", value=DEFAULT_TABLE_ID)
-            view_id = st.text_input("Teable View ID", value=DEFAULT_VIEW_ID)
+            table_id = st.text_input("Teable Sales Table ID", value=DEFAULT_TABLE_ID)
+            view_id = st.text_input("Teable Sales View ID", value=DEFAULT_VIEW_ID)
         with c2:
             base_url = st.text_input("Teable Base URL", value=DEFAULT_BASE_URL)
             now = datetime.now()
@@ -394,9 +395,7 @@ def render_sales_report_page():
             company_name = st.text_input("子表名稱 / 公司名稱", value=os.getenv("COMPANY_NAME", ""))
             currency_symbol = st.text_input("幣別符號", value=os.getenv("CURRENCY_SYMBOL", "NT$"))
 
-    refresh = st.button("讀取並產生業績報表", type="primary", use_container_width=True)
-
-    if not refresh:
+    if not st.button("讀取並產生業績報表", type="primary", use_container_width=True):
         st.info("按上方按鈕後，會從 Teable 抓資料並顯示圖表，同時可下載 Excel。")
         return
 
@@ -420,8 +419,7 @@ def render_sales_report_page():
             if summary["by_customer"].empty:
                 st.write("無資料")
             else:
-                chart_df = summary["by_customer"].head(10).set_index("客戶")
-                st.bar_chart(chart_df)
+                st.bar_chart(summary["by_customer"].head(10).set_index("客戶"))
 
         with c2:
             st.markdown("**業績佔比**")
@@ -429,17 +427,19 @@ def render_sales_report_page():
                 st.write("無資料")
             else:
                 pie_df = summary["by_customer"].head(10).copy()
-                pie_df["佔比%"] = pie_df["淨出貨金額"] / max(pie_df["淨出貨金額"].sum(), 1) * 100
-                show_pie_df = pie_df.copy()
-                show_pie_df["淨出貨金額"] = show_pie_df["淨出貨金額"].map(lambda x: _fmt_money(x, currency_symbol))
-                st.dataframe(show_pie_df, use_container_width=True, hide_index=True)
+                total = max(pie_df["淨出貨金額"].sum(), 1)
+                pie_df["佔比%"] = pie_df["淨出貨金額"] / total * 100
+                st.dataframe(
+                    pie_df.assign(淨出貨金額=pie_df["淨出貨金額"].map(lambda x: _fmt_money(x, currency_symbol))),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
         st.markdown("**每日趨勢**")
         if summary["daily"].empty:
             st.write("無資料")
         else:
-            trend_df = summary["daily"].set_index("日期")[["淨出貨金額"]]
-            st.line_chart(trend_df)
+            st.line_chart(summary["daily"].set_index("日期")[["淨出貨金額"]])
 
         t1, t2, t3 = st.tabs(["業績明細表", "客戶/工廠/業務彙總", "RawData"])
         with t1:
