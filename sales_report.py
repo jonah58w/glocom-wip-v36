@@ -2,15 +2,55 @@
 from __future__ import annotations
 
 from io import BytesIO
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
 
 
+def _norm(s: str) -> str:
+    s = str(s).strip()
+    s = s.replace("\n", "")
+    s = s.replace(" ", "")
+    s = s.replace("（", "(").replace("）", ")")
+    return s.lower()
+
+
+def _pick_col(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
+    if df is None or df.empty:
+        return None
+
+    # 先做 exact-normalized mapping
+    norm_map = {_norm(c): c for c in df.columns}
+
+    for cand in candidates:
+        nc = _norm(cand)
+        if nc in norm_map:
+            return norm_map[nc]
+
+    # 再做 contains 比對
+    best = None
+    best_score = -1
+    for col in df.columns:
+        ncol = _norm(col)
+        score = 0
+        for cand in candidates:
+            nc = _norm(cand)
+            if nc and nc in ncol:
+                score = max(score, len(nc))
+        if score > best_score:
+            best_score = score
+            best = col
+
+    return best if best_score > 0 else None
+
+
 def _to_num(series: pd.Series) -> pd.Series:
     if series is None:
         return pd.Series(dtype=float)
-    s = series.astype(str).fillna("").str.replace(",", "", regex=False)
+
+    s = series.astype(str).fillna("")
+    s = s.str.replace(",", "", regex=False)
     for token in ["US$", "USD", "$", "NT$", "EUR", "¥"]:
         s = s.str.replace(token, "", regex=False)
     s = s.str.replace("(", "-", regex=False).str.replace(")", "", regex=False).str.strip()
@@ -57,35 +97,28 @@ def render_sales_report_page(
 
     work = src.copy()
 
-    real_customer_col = "Customer" if "Customer" in work.columns else customer_col
-    real_po_col = "PO#" if "PO#" in work.columns else po_col
-    real_part_col = "P/N" if "P/N" in work.columns else part_col
+    # ===== 欄位模糊偵測 =====
+    real_customer_col = _pick_col(work, ["Customer", "客戶", "公司名稱"])
+    real_po_col = _pick_col(work, ["PO#"])
+    real_part_col = _pick_col(work, ["P/N"])
+    real_qty_col = _pick_col(work, ["Order Q'TY (PCS)", "Order Q'TY\n(PCS)", "Order Q'TY\n (PCS)", "QTY", "Qty"])
+    real_factory_col = _pick_col(work, ["工廠", "Factory"])
+    real_ship_date_col = _pick_col(work, ["Ship date", "出貨日期", "Date"])
+    real_remark_col = _pick_col(work, ["工廠提醒事項", "Note", "Remark"])
 
-    qty_candidates = [
-        "Order Q'TY\n(PCS)",
-        "Order Q'TY\n (PCS)",
-        "Order Q'TY (PCS)",
-        "QTY",
-        "Qty",
-    ]
-    real_qty_col = next((c for c in qty_candidates if c in work.columns), qty_col)
-
-    real_factory_col = "工廠" if "工廠" in work.columns else factory_col
-    real_ship_date_col = "Ship date" if "Ship date" in work.columns else ship_date_col
-    remark_candidates = ["工廠提醒事項", "Note", "Remark"]
-    real_remark_col = next((c for c in remark_candidates if c in work.columns), remark_col)
-
-    real_order_amt_col = "INVOICE" if "INVOICE" in work.columns else None
-    real_ship_amt_col = "INVOICE" if "INVOICE" in work.columns else None
-    real_tooling_col = "TOOLING" if "TOOLING" in work.columns else None
+    # 關鍵：INVOICE 不再精確比對
+    real_order_amt_col = _pick_col(work, ["INVOICE", "Invoice", "invoice amount", "出貨金額", "Amount"])
+    real_ship_amt_col = _pick_col(work, ["INVOICE", "Invoice", "invoice amount", "出貨金額", "Amount"])
+    real_tooling_col = _pick_col(work, ["TOOLING", "Tooling"])
 
     c1, c2, c3 = st.columns(3)
-    report_month = c1.text_input("報表月份 (YYYY-MM)", value="2026-03", key="sales_report_month_v2")
-    company_name = c2.text_input("子表名稱 / 公司名稱", value="WESCO", key="sales_report_company_v2")
-    currency_symbol = c3.text_input("幣別符號", value="US$", key="sales_report_currency_v2")
+    report_month = c1.text_input("報表月份 (YYYY-MM)", value="2026-03", key="sales_report_month_v3")
+    company_name = c2.text_input("子表名稱 / 公司名稱", value="WESCO", key="sales_report_company_v3")
+    currency_symbol = c3.text_input("幣別符號", value="US$", key="sales_report_currency_v3")
 
     with st.expander("欄位偵測"):
         st.write({
+            "all_columns": list(work.columns),
             "customer_col": real_customer_col,
             "po_col": real_po_col,
             "part_col": real_part_col,
@@ -131,8 +164,16 @@ def render_sales_report_page(
     k1.metric("接單金額", _fmt_money(month_df["_order_amt"].sum(), currency_symbol))
     k2.metric("出貨金額", _fmt_money(month_df["_ship_amt"].sum(), currency_symbol))
     k3.metric("淨出貨", _fmt_money(month_df["_net"].sum(), currency_symbol))
-    k4.metric("客戶數", int(month_df[real_customer_col].astype(str).replace("", pd.NA).dropna().nunique()) if not month_df.empty else 0)
-    k5.metric("廠商數", int(month_df[real_factory_col].astype(str).replace("", pd.NA).dropna().nunique()) if real_factory_col and real_factory_col in month_df.columns and not month_df.empty else 0)
+    k4.metric(
+        "客戶數",
+        int(month_df[real_customer_col].astype(str).replace("", pd.NA).dropna().nunique()) if not month_df.empty else 0
+    )
+    k5.metric(
+        "廠商數",
+        int(month_df[real_factory_col].astype(str).replace("", pd.NA).dropna().nunique())
+        if real_factory_col and real_factory_col in month_df.columns and not month_df.empty
+        else 0
+    )
 
     by_customer = pd.DataFrame(columns=["客戶", "出貨金額", "佔比%"])
     if not month_df.empty:
