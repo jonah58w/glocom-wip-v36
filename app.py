@@ -161,58 +161,6 @@ def call_report_function(possible_names, **kwargs):
     return False
 
 
-def show_customer_preview_default(
-    df,
-    po_col=None,
-    customer_col=None,
-    part_col=None,
-    qty_col=None,
-    wip_col=None,
-    ship_date_col=None,
-    customer_tag_col=None,
-    remark_col=None,
-):
-    st.subheader("Customer Preview")
-    st.caption("僅供內部預覽。客戶請直接使用 Teable View。")
-    if df is None or df.empty:
-        st.warning("No customer data")
-        return
-    if not customer_col or customer_col not in df.columns:
-        st.error("Customer column not found in Teable data")
-        return
-
-    customer_series = u.get_series_by_col(df, customer_col)
-    if customer_series is None:
-        st.error("Customer data unavailable")
-        return
-
-    customers = sorted([str(x).strip() for x in customer_series.dropna().unique().tolist() if str(x).strip()])
-    if not customers:
-        st.warning("No customers found")
-        return
-
-    default_customer = "WESCO"
-    default_index = customers.index(default_customer) if default_customer in customers else 0
-    selected_customer = st.selectbox(
-        "Select customer to preview",
-        customers,
-        index=default_index,
-    )
-
-    preview_df = df[
-        customer_series.astype(str).str.strip().str.lower() == selected_customer.strip().lower()
-    ].copy()
-    if preview_df.empty:
-        st.warning("No orders found for this customer")
-        return
-
-    preview_cols = [
-        c for c in [po_col, customer_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col]
-        if c and c in preview_df.columns
-    ]
-    st.dataframe(preview_df[preview_cols], use_container_width=True, height=420)
-
-
 # ================================
 # LOAD DATA
 # ================================
@@ -524,6 +472,7 @@ common_kwargs = dict(
     changed_due_date_col=changed_due_date_col,
 )
 
+
 if menu == "Dashboard":
     ok = call_report_function(["show_dashboard_report"], **common_kwargs)
     if ok is False:
@@ -556,17 +505,40 @@ elif menu == "Orders":
         fallback_orders(orders)
 
 elif menu == "Customer Preview":
-    show_customer_preview_default(
-        df=orders,
-        po_col=po_col,
-        customer_col=customer_col,
-        part_col=part_col,
-        qty_col=qty_col,
-        wip_col=wip_col,
-        ship_date_col=ship_date_col,
-        customer_tag_col=customer_tag_col,
-        remark_col=remark_col,
-    )
+    ok = call_report_function([], **common_kwargs)
+    if ok is False:
+        st.subheader("Customer Preview")
+        st.caption("僅供內部預覽。客戶請直接使用 Teable View。")
+        if not customer_col or customer_col not in orders.columns:
+            st.error("Customer column not found in Teable data")
+        else:
+            customer_series = u.get_series_by_col(orders, customer_col)
+            if customer_series is None:
+                st.error("Customer data unavailable")
+            else:
+                customers = sorted([str(x).strip() for x in customer_series.dropna().unique().tolist() if str(x).strip()])
+                if not customers:
+                    st.warning("No customers found")
+                else:
+                    default_customer = "WESCO"
+                    default_index = customers.index(default_customer) if default_customer in customers else 0
+                    selected_customer = st.selectbox(
+                        "Select customer to preview",
+                        customers,
+                        index=default_index,
+                    )
+                    preview_df = orders[
+                        customer_series.astype(str).str.strip().str.lower()
+                        == selected_customer.strip().lower()
+                    ].copy()
+                    if preview_df.empty:
+                        st.warning("No orders found for this customer")
+                    else:
+                        preview_cols = [
+                            c for c in [po_col, customer_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col]
+                            if c and c in preview_df.columns
+                        ]
+                        st.dataframe(preview_df[preview_cols], use_container_width=True, height=420)
 
 elif menu == "Sandy 內部 WIP":
     ok = call_report_function(["show_sandy_internal_wip_report"], **common_kwargs)
