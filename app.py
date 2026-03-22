@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import inspect
-import io
 import pandas as pd
 import streamlit as st
 
@@ -9,21 +8,6 @@ import utils as u
 import teable_api
 import reports
 from sales_report import render_sales_report_page
-
-try:
-    import excel_reader
-except Exception:
-    excel_reader = None
-
-try:
-    import factory_parsers
-except Exception:
-    factory_parsers = None
-
-try:
-    import text_ocr_parsers
-except Exception:
-    text_ocr_parsers = None
 
 
 # ================================
@@ -177,91 +161,49 @@ def call_report_function(possible_names, **kwargs):
     return False
 
 
-def _to_df_from_uploaded_file(uploaded_file):
-    name = uploaded_file.name.lower()
-    data = uploaded_file.getvalue()
-    if name.endswith((".xlsx", ".xls")):
-        return pd.read_excel(io.BytesIO(data))
-    if name.endswith(".csv"):
-        return pd.read_csv(io.BytesIO(data))
-    if name.endswith(".txt"):
-        text = data.decode("utf-8", errors="ignore")
-        lines = [ln for ln in text.splitlines() if ln.strip()]
-        return pd.DataFrame({"raw_text": lines})
-    return pd.DataFrame()
+def show_customer_preview_default(df, default_customer: str, po_col, customer_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col):
+    st.subheader("Customer Preview")
+    st.caption("僅供內部預覽。客戶請直接使用 Teable View。")
 
+    if not customer_col or customer_col not in df.columns:
+        st.error("Customer column not found in Teable data")
+        return
 
-def fallback_import_update_page(**kwargs):
-    st.subheader("Import / Update")
-    st.caption("保留工廠進度輸入方式：檔案上傳、截圖、貼上文字、手工輸入。")
+    customer_series = u.get_series_by_col(df, customer_col)
+    if customer_series is None:
+        st.error("Customer data unavailable")
+        return
 
-    tab1, tab2, tab3, tab4 = st.tabs(["檔案上傳", "截圖 / 圖片", "貼上文字", "手工輸入"])
+    customers = sorted([
+        str(x).strip() for x in customer_series.dropna().unique().tolist() if str(x).strip()
+    ])
+    if not customers:
+        st.warning("No customers found")
+        return
 
-    with tab1:
-        uploaded = st.file_uploader(
-            "上傳工廠進度檔案",
-            type=["xlsx", "xls", "csv", "txt"],
-            key="factory_upload_file",
-        )
-        if uploaded is not None:
-            try:
-                df = _to_df_from_uploaded_file(uploaded)
-                st.success(f"已讀取：{uploaded.name}")
-                st.dataframe(df, use_container_width=True, height=420)
-                st.download_button(
-                    "下載預覽 CSV",
-                    df.to_csv(index=False).encode("utf-8-sig"),
-                    file_name="import_preview.csv",
-                    mime="text/csv",
-                )
-            except Exception as e:
-                st.error(f"讀取檔案失敗：{e}")
+    default_index = customers.index(default_customer) if default_customer in customers else 0
+    selected_customer = st.selectbox(
+        "Select customer to preview",
+        customers,
+        index=default_index,
+        key="customer_preview_selected",
+    )
 
-    with tab2:
-        image_file = st.file_uploader(
-            "上傳工廠進度截圖 / 圖片",
-            type=["png", "jpg", "jpeg", "webp"],
-            key="factory_upload_image",
-        )
-        if image_file is not None:
-            st.image(image_file, caption=image_file.name, use_container_width=True)
-            st.info("圖片已上傳。若你專案中的 reports.py / text_ocr_parsers.py 有 OCR 流程，會優先由既有模組處理；這裡保留 fallback 入口。")
+    preview_df = df[
+        customer_series.astype(str).str.strip().str.lower()
+        == selected_customer.strip().lower()
+    ].copy()
 
-    with tab3:
-        pasted = st.text_area(
-            "貼上 Email 文字 / 工廠進度文字",
-            height=260,
-            key="factory_paste_text",
-        )
-        if pasted.strip():
-            lines = [ln for ln in pasted.splitlines() if ln.strip()]
-            df = pd.DataFrame({"raw_text": lines})
-            st.dataframe(df, use_container_width=True, height=360)
-            st.download_button(
-                "下載貼上文字 CSV",
-                df.to_csv(index=False).encode("utf-8-sig"),
-                file_name="pasted_text.csv",
-                mime="text/csv",
-            )
-        else:
-            st.info("請貼上工廠進度文字。")
+    if preview_df.empty:
+        st.warning(f"No orders found for {selected_customer}")
+        return
 
-    with tab4:
-        st.caption("可直接手工輸入少量進度資料。")
-        manual_df = pd.DataFrame(
-            [
-                {"PO": "", "Customer": "", "Part No": "", "Qty": "", "WIP": "", "Ship Date": "", "Remark": ""}
-                for _ in range(5)
-            ]
-        )
-        edited = st.data_editor(manual_df, num_rows="dynamic", use_container_width=True, key="manual_factory_input")
-        if isinstance(edited, pd.DataFrame) and not edited.empty:
-            st.download_button(
-                "下載手工輸入 CSV",
-                edited.to_csv(index=False).encode("utf-8-sig"),
-                file_name="manual_input.csv",
-                mime="text/csv",
-            )
+    preview_cols = [
+        c for c in [po_col, customer_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col]
+        if c and c in preview_df.columns
+    ]
+    st.dataframe(preview_df[preview_cols], use_container_width=True, height=420)
+
 
 
 # ================================
@@ -577,9 +519,10 @@ common_kwargs = dict(
 
 
 if menu == "Dashboard":
-    ok = call_report_function([
-        "show_dashboard_report",
-    ], **common_kwargs)
+    ok = call_report_function(
+        ["show_dashboard_report"],
+        **common_kwargs,
+    )
     if ok is False:
         show_metrics(orders, wip_col)
         st.divider()
@@ -610,42 +553,18 @@ elif menu == "Orders":
         fallback_orders(orders)
 
 elif menu == "Customer Preview":
-    # 這裡固定使用內建頁面，確保預設客戶一定是 WESCO。
-    st.subheader("Customer Preview")
-    st.caption("僅供內部預覽。客戶請直接使用 Teable View。")
-    if not customer_col or customer_col not in orders.columns:
-        st.error("Customer column not found in Teable data")
-    else:
-        customer_series = u.get_series_by_col(orders, customer_col)
-        if customer_series is None:
-            st.error("Customer data unavailable")
-        else:
-            customers = sorted([str(x).strip() for x in customer_series.dropna().unique().tolist() if str(x).strip()])
-            if not customers:
-                st.warning("No customers found")
-            else:
-                default_customer = "WESCO"
-                customer_map = {c.strip().lower(): c for c in customers}
-                selected_default = customer_map.get(default_customer.lower(), customers[0])
-                if st.session_state.get("customer_preview_selected") not in customers:
-                    st.session_state["customer_preview_selected"] = selected_default
-                selected_customer = st.selectbox(
-                    "Select customer to preview",
-                    customers,
-                    index=customers.index(st.session_state["customer_preview_selected"]) if st.session_state["customer_preview_selected"] in customers else 0,
-                    key="customer_preview_selected",
-                )
-                preview_df = orders[
-                    customer_series.astype(str).str.strip().str.lower() == selected_customer.strip().lower()
-                ].copy()
-                if preview_df.empty:
-                    st.warning("No orders found for this customer")
-                else:
-                    preview_cols = [
-                        c for c in [po_col, customer_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col]
-                        if c and c in preview_df.columns
-                    ]
-                    st.dataframe(preview_df[preview_cols], use_container_width=True, height=420)
+    show_customer_preview_default(
+        df=orders,
+        customer_name="WESCO",
+        po_col=po_col,
+        customer_col=customer_col,
+        part_col=part_col,
+        qty_col=qty_col,
+        wip_col=wip_col,
+        ship_date_col=ship_date_col,
+        customer_tag_col=customer_tag_col,
+        remark_col=remark_col,
+    )
 
 elif menu == "Sandy 內部 WIP":
     ok = call_report_function(["show_sandy_internal_wip_report"], **common_kwargs)
@@ -663,11 +582,24 @@ elif menu == "新訂單 WIP":
         st.warning("reports.py 尚未提供 新訂單 WIP 報表函式。")
 
 elif menu == "業績明細表":
-    render_sales_report_page(**common_kwargs)
+    render_sales_report_page(
+        df=orders,
+        orders=orders,
+        po_col=po_col,
+        customer_col=customer_col,
+        part_col=part_col,
+        qty_col=qty_col,
+        factory_col=factory_col,
+        wip_col=wip_col,
+        ship_date_col=ship_date_col,
+        remark_col=remark_col,
+        order_date_col=order_date_col,
+    )
 
 elif menu == "Import / Update":
     ok = call_report_function(["show_import_update_page", "show_import_update_report"], **common_kwargs)
     if ok is False:
-        fallback_import_update_page(**common_kwargs)
+        st.subheader("Import / Update")
+        st.info("目前沿用既有匯入模組；若要完整上雲版本，我再幫你補成獨立頁。")
 
 st.caption("Auto refresh cache: 60 seconds")
