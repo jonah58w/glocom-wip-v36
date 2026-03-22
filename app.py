@@ -152,11 +152,19 @@ def customer_portal_columns(df, po_col, part_col, qty_col, wip_col, ship_date_co
 
 
 def call_report_function(possible_names, **kwargs):
+    """
+    依名稱清單找 reports 裡存在的函式，並自動只傳它需要的參數。
+    這樣就算 reports.py 函式簽名有些微不同，也比較不容易炸。
+    """
     for name in possible_names:
         func = getattr(reports, name, None)
         if callable(func):
             sig = inspect.signature(func)
-            accepted = {k: v for k, v in kwargs.items() if k in sig.parameters}
+            accepted = {
+                k: v
+                for k, v in kwargs.items()
+                if k in sig.parameters
+            }
             return func(**accepted)
     return False
 
@@ -450,6 +458,69 @@ def fallback_orders(df):
     )
 
 
+def fallback_import_update():
+    st.subheader("Import / Update")
+    st.caption("若 reports.py 未提供完整頁面，這裡提供基本匯入工具。")
+
+    tab1, tab2, tab3, tab4 = st.tabs(["檔案上傳", "圖片截圖", "貼上文字", "手工輸入"])
+
+    with tab1:
+        uploaded = st.file_uploader("上傳工廠進度檔案", type=["xlsx", "xls", "csv", "txt"])
+        if uploaded is not None:
+            name = uploaded.name.lower()
+            try:
+                if name.endswith((".xlsx", ".xls")):
+                    df_up = pd.read_excel(uploaded)
+                    st.success(f"已讀取 {len(df_up)} 筆")
+                    st.dataframe(df_up, use_container_width=True, height=420)
+                elif name.endswith(".csv"):
+                    df_up = pd.read_csv(uploaded)
+                    st.success(f"已讀取 {len(df_up)} 筆")
+                    st.dataframe(df_up, use_container_width=True, height=420)
+                else:
+                    text = uploaded.getvalue().decode("utf-8", errors="ignore")
+                    st.text_area("文字內容", value=text, height=260)
+            except Exception as e:
+                st.error(f"讀取失敗：{e}")
+
+    with tab2:
+        image_file = st.file_uploader("上傳截圖 / 圖片", type=["png", "jpg", "jpeg", "webp"], key="factory_image_upload")
+        if image_file is not None:
+            st.image(image_file, caption="已上傳截圖")
+            try:
+                import pytesseract
+                from PIL import Image
+                img = Image.open(image_file)
+                text = pytesseract.image_to_string(img, lang='eng')
+                st.text_area("OCR 辨識文字", value=text, height=260)
+            except Exception:
+                st.info("目前環境未啟用 OCR，可改用下方『貼上文字』或『手工輸入』。")
+
+    with tab3:
+        pasted = st.text_area("貼上工廠進度文字", height=280, key="factory_pasted_text")
+        if pasted.strip():
+            st.text_area("預覽", value=pasted, height=280)
+
+    with tab4:
+        rows = st.number_input("手工輸入列數", min_value=1, max_value=50, value=5, step=1)
+        manual_df = pd.DataFrame({
+            "PO#": [""] * rows,
+            "Customer": [""] * rows,
+            "P/N": [""] * rows,
+            "QTY": [""] * rows,
+            "WIP": [""] * rows,
+            "Ship date": [""] * rows,
+            "Remark": [""] * rows,
+        })
+        edited = st.data_editor(manual_df, use_container_width=True, num_rows="fixed", key="factory_manual_editor")
+        st.download_button(
+            "下載手工輸入 CSV",
+            data=edited.to_csv(index=False).encode("utf-8-sig"),
+            file_name="factory_manual_input.csv",
+            mime="text/csv",
+        )
+
+
 # ================================
 # ROUTING
 # ================================
@@ -474,7 +545,10 @@ common_kwargs = dict(
 
 
 if menu == "Dashboard":
-    ok = call_report_function(["show_dashboard_report"], **common_kwargs)
+    ok = call_report_function(
+        ["show_dashboard_report"],
+        **common_kwargs,
+    )
     if ok is False:
         show_metrics(orders, wip_col)
         st.divider()
@@ -505,7 +579,7 @@ elif menu == "Orders":
         fallback_orders(orders)
 
 elif menu == "Customer Preview":
-    ok = call_report_function([], **common_kwargs)
+    ok = call_report_function(["show_customer_preview_report"], **common_kwargs)
     if ok is False:
         st.subheader("Customer Preview")
         st.caption("僅供內部預覽。客戶請直接使用 Teable View。")
@@ -520,13 +594,8 @@ elif menu == "Customer Preview":
                 if not customers:
                     st.warning("No customers found")
                 else:
-                    default_customer = "WESCO"
-                    default_index = customers.index(default_customer) if default_customer in customers else 0
-                    selected_customer = st.selectbox(
-                        "Select customer to preview",
-                        customers,
-                        index=default_index,
-                    )
+                    default_idx = customers.index("WESCO") if "WESCO" in customers else 0
+                    selected_customer = st.selectbox("Select customer to preview", customers, index=default_idx)
                     preview_df = orders[
                         customer_series.astype(str).str.strip().str.lower()
                         == selected_customer.strip().lower()
@@ -561,7 +630,6 @@ elif menu == "業績明細表":
 elif menu == "Import / Update":
     ok = call_report_function(["show_import_update_page", "show_import_update_report"], **common_kwargs)
     if ok is False:
-        st.subheader("Import / Update")
-        st.info("目前沿用既有匯入模組；若要完整上雲版本，我再幫你補成獨立頁。")
+        fallback_import_update()
 
 st.caption("Auto refresh cache: 60 seconds")
