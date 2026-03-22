@@ -143,7 +143,10 @@ def show_delayed_orders_report(
         return
 
     delayed["Delay Days"] = (today - delayed["_FactoryDueDateParsed"]).dt.days
-    show_cols = _existing_cols(delayed, [po_col, customer_col, part_col, qty_col, factory_col, wip_col, factory_due_col, "Delay Days"])
+    show_cols = _existing_cols(
+        delayed,
+        [po_col, customer_col, part_col, qty_col, factory_col, wip_col, factory_due_col, "Delay Days"],
+    )
     st.dataframe(delayed[show_cols], use_container_width=True, height=520)
 
 
@@ -179,7 +182,10 @@ def show_shipment_forecast_report(
         st.info("No shipment within next 7 days")
         return
 
-    show_cols = _existing_cols(forecast, [po_col, customer_col, part_col, qty_col, factory_col, wip_col, ship_date_col])
+    show_cols = _existing_cols(
+        forecast,
+        [po_col, customer_col, part_col, qty_col, factory_col, wip_col, ship_date_col],
+    )
     st.dataframe(forecast.sort_values("_ShipDateParsed")[show_cols], use_container_width=True, height=520)
 
 
@@ -205,7 +211,12 @@ def show_orders_report(df, customer_col=None, wip_col=None, **kwargs):
 
     st.dataframe(filtered, use_container_width=True, height=520)
     csv_data = filtered.to_csv(index=False).encode("utf-8-sig")
-    st.download_button("Download Orders CSV", data=csv_data, file_name="glocom_orders.csv", mime="text/csv")
+    st.download_button(
+        "Download Orders CSV",
+        data=csv_data,
+        file_name="glocom_orders.csv",
+        mime="text/csv",
+    )
 
 
 def show_customer_preview_report(
@@ -251,7 +262,10 @@ def show_customer_preview_report(
         st.warning("No orders found for this customer")
         return
 
-    preview_cols = _existing_cols(preview_df, [po_col, customer_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col])
+    preview_cols = _existing_cols(
+        preview_df,
+        [po_col, customer_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col],
+    )
     st.dataframe(preview_df[preview_cols], use_container_width=True, height=420)
 
 
