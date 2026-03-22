@@ -20,7 +20,6 @@ def _pick_col(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
     if df is None or df.empty:
         return None
 
-    # 先做 exact-normalized mapping
     norm_map = {_norm(c): c for c in df.columns}
 
     for cand in candidates:
@@ -28,7 +27,6 @@ def _pick_col(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
         if nc in norm_map:
             return norm_map[nc]
 
-    # 再做 contains 比對
     best = None
     best_score = -1
     for col in df.columns:
@@ -97,7 +95,6 @@ def render_sales_report_page(
 
     work = src.copy()
 
-    # ===== 欄位模糊偵測 =====
     real_customer_col = _pick_col(work, ["Customer", "客戶", "公司名稱"])
     real_po_col = _pick_col(work, ["PO#"])
     real_part_col = _pick_col(work, ["P/N"])
@@ -106,7 +103,6 @@ def render_sales_report_page(
     real_ship_date_col = _pick_col(work, ["Ship date", "出貨日期", "Date"])
     real_remark_col = _pick_col(work, ["工廠提醒事項", "Note", "Remark"])
 
-    # 關鍵：INVOICE 不再精確比對
     real_order_amt_col = _pick_col(work, ["INVOICE", "Invoice", "invoice amount", "出貨金額", "Amount"])
     real_ship_amt_col = _pick_col(work, ["INVOICE", "Invoice", "invoice amount", "出貨金額", "Amount"])
     real_tooling_col = _pick_col(work, ["TOOLING", "Tooling"])
