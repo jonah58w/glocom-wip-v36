@@ -87,7 +87,7 @@ def render_sales_report_page(
     )
 
     st.subheader("業績明細表")
-    st.caption("優先使用 Sandy需要的銷貨底.xlsx / 主表 的 INVOICE 作為實際業績金額來源。")
+    st.caption("業績明細表 v4 - INVOICE fuzzy matcher")
 
     if src is None or src.empty:
         st.warning("目前沒有可用資料")
@@ -107,9 +107,9 @@ def render_sales_report_page(
     real_tooling_col = _pick_col(work, ["TOOLING", "Tooling"])
 
     c1, c2, c3 = st.columns(3)
-    report_month = c1.text_input("報表月份 (YYYY-MM)", value="2026-03", key="sales_report_month_v3")
-    company_name = c2.text_input("子表名稱 / 公司名稱", value="WESCO", key="sales_report_company_v3")
-    currency_symbol = c3.text_input("幣別符號", value="US$", key="sales_report_currency_v3")
+    report_month = c1.text_input("報表月份 (YYYY-MM)", value="2026-03", key="sales_report_month_v4")
+    company_name = c2.text_input("子表名稱 / 公司名稱", value="WESCO", key="sales_report_company_v4")
+    currency_symbol = c3.text_input("幣別符號", value="US$", key="sales_report_currency_v4")
 
     with st.expander("欄位偵測"):
         st.write({
