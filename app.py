@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import inspect
+import os
+
 import pandas as pd
 import streamlit as st
 
@@ -154,19 +156,32 @@ def customer_portal_columns(df, po_col, part_col, qty_col, wip_col, ship_date_co
 def call_report_function(possible_names, **kwargs):
     """
     依名稱清單找 reports 裡存在的函式，並自動只傳它需要的參數。
-    這樣就算 reports.py 函式簽名有些微不同，也比較不容易炸。
+    若函式有 **kwargs，就把全部 kwargs 傳進去。
     """
     for name in possible_names:
         func = getattr(reports, name, None)
         if callable(func):
             sig = inspect.signature(func)
-            accepted = {
-                k: v
-                for k, v in kwargs.items()
-                if k in sig.parameters
-            }
+            has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+            if has_var_kw:
+                return func(**kwargs)
+            accepted = {k: v for k, v in kwargs.items() if k in sig.parameters}
             return func(**accepted)
     return False
+
+
+@st.cache_data(ttl=60)
+def load_sales_workbook(path: str):
+    if not os.path.exists(path):
+        return pd.DataFrame(), pd.DataFrame()
+
+    try:
+        xls = pd.ExcelFile(path)
+        main_df = pd.read_excel(path, sheet_name="主表") if "主表" in xls.sheet_names else pd.DataFrame()
+        shipment_df = pd.read_excel(path, sheet_name="銷貨底") if "銷貨底" in xls.sheet_names else pd.DataFrame()
+        return main_df, shipment_df
+    except Exception:
+        return pd.DataFrame(), pd.DataFrame()
 
 
 # ================================
@@ -178,6 +193,9 @@ except Exception as e:
     orders = pd.DataFrame()
     api_status = "EXCEPTION"
     api_text = str(e)
+
+SALES_BASE_PATH = "Sandy需要的銷貨底.xlsx"
+sales_df, sales_shipment_df = load_sales_workbook(SALES_BASE_PATH)
 
 
 # ================================
@@ -294,6 +312,8 @@ with st.expander("Debug"):
     st.write("TABLE_URL:", cfg.TABLE_URL)
     st.write("Token loaded:", bool(cfg.TEABLE_TOKEN))
     st.write("Columns:", list(orders.columns) if not orders.empty else [])
+    st.write("Sales workbook loaded:", bool(not sales_df.empty))
+    st.write("Sales shipment sheet loaded:", bool(not sales_shipment_df.empty))
     if isinstance(api_text, str):
         st.text(api_text[:1200])
 
@@ -491,7 +511,7 @@ def fallback_import_update():
                 import pytesseract
                 from PIL import Image
                 img = Image.open(image_file)
-                text = pytesseract.image_to_string(img, lang='eng')
+                text = pytesseract.image_to_string(img, lang="eng")
                 st.text_area("OCR 辨識文字", value=text, height=260)
             except Exception:
                 st.info("目前環境未啟用 OCR，可改用下方『貼上文字』或『手工輸入』。")
@@ -527,6 +547,8 @@ def fallback_import_update():
 common_kwargs = dict(
     df=orders,
     orders=orders,
+    sales_df=sales_df,
+    sales_shipment_df=sales_shipment_df,
     po_col=po_col,
     customer_col=customer_col,
     part_col=part_col,
@@ -543,12 +565,8 @@ common_kwargs = dict(
     changed_due_date_col=changed_due_date_col,
 )
 
-
 if menu == "Dashboard":
-    ok = call_report_function(
-        ["show_dashboard_report"],
-        **common_kwargs,
-    )
+    ok = call_report_function(["show_dashboard_report"], **common_kwargs)
     if ok is False:
         show_metrics(orders, wip_col)
         st.divider()
@@ -594,7 +612,10 @@ elif menu == "Customer Preview":
                 if not customers:
                     st.warning("No customers found")
                 else:
-                    default_idx = customers.index("WESCO") if "WESCO" in customers else 0
+                    wesco_matches = [x for x in customers if "wesco" in x.strip().lower()]
+                    default_customer = wesco_matches[0] if wesco_matches else customers[0]
+                    default_idx = customers.index(default_customer)
+
                     selected_customer = st.selectbox("Select customer to preview", customers, index=default_idx)
                     preview_df = orders[
                         customer_series.astype(str).str.strip().str.lower()
