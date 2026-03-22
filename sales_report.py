@@ -168,6 +168,20 @@ def render_sales_report_page(
     hold = _to_num(month_df[hold_col]) if hold_col != "(無)" and hold_col in month_df.columns else pd.Series(0.0, index=month_df.index)
     discount = _to_num(month_df[discount_col]) if discount_col != "(無)" and discount_col in month_df.columns else pd.Series(0.0, index=month_df.index)
     month_df["_net"] = month_df["_ship_amt"] - hold - discount
+    
+    with st.expander("業績明細 Debug"):
+    st.write("source rows:", len(work))
+    st.write("report_month:", report_month)
+    st.write("company_name:", company_name)
+    st.write("customer_col:", customer_col)
+    st.write("date_col:", date_col)
+    st.write("order_amt_col:", order_amt_col)
+    st.write("ship_amt_col:", ship_amt_col)
+    st.write("rows after month filter:", len(work[work["_month"] == report_month]))
+    st.write("rows after company filter:", len(month_df))
+    if not month_df.empty:
+        debug_cols = [c for c in [customer_col, date_col, order_amt_col, ship_amt_col] if c != "(無)" and c in month_df.columns]
+        st.dataframe(month_df[debug_cols].head(20), use_container_width=True)
 
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("接單金額", _fmt_money(month_df["_order_amt"].sum(), currency_symbol))
