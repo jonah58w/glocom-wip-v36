@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import re
@@ -7,23 +6,6 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
-
-
-AMOUNT_TOKENS = [
-    "amount", "amt", "金額", "總額", "usd", "us$", "sales", "revenue", "invoice", "價值", "貨款"
-]
-ORDER_AMOUNT_TOKENS = [
-    "order amount", "order amt", "接單金額", "接單總額", "訂單金額", "訂單總額", "sales amount", "booking", "bookings"
-]
-SHIP_AMOUNT_TOKENS = [
-    "shipment amount", "ship amount", "出貨金額", "出貨總額", "invoice amount", "銷貨金額", "淨出貨", "net shipment", "net sales"
-]
-UNIT_PRICE_TOKENS = [
-    "unit price", "price", "單價", "usd/pcs", "usd/pc", "單價(usd)", "price usd", "pcs price"
-]
-HOLD_TOKENS = ["hold", "hold金額", "hold amount"]
-DISCOUNT_TOKENS = ["discount", "折讓", "折讓金額"]
-DATE_TOKENS = ["ship date", "date", "出貨日期", "日期", "invoice date", "order date"]
 
 
 def _normalize_month_text(text: str) -> str:
@@ -35,70 +17,61 @@ def _normalize_month_text(text: str) -> str:
     return f"{y}-{int(mm):02d}"
 
 
-def _safe_series(df: pd.DataFrame, col: str | None) -> pd.Series | None:
+def _safe_numeric_series(series: pd.Series) -> pd.Series:
+    s = series.fillna("").astype(str)
+    s = (
+        s.str.replace(",", "", regex=False)
+        .str.replace("US$", "", regex=False)
+        .str.replace("USD", "", regex=False)
+        .str.replace("NT$", "", regex=False)
+        .str.replace("\u3000", "", regex=False)
+        .str.replace(" ", "", regex=False)
+    )
+    s = s.str.extract(r"([-+]?[0-9]*\.?[0-9]+)", expand=False)
+    return pd.to_numeric(s, errors="coerce").fillna(0.0)
+
+
+def _pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    lowered = {str(c).strip().lower(): c for c in df.columns}
+    for cand in candidates:
+        if cand.strip().lower() in lowered:
+            return lowered[cand.strip().lower()]
+    for col in df.columns:
+        c = str(col).strip().lower()
+        for cand in candidates:
+            if cand.strip().lower() in c:
+                return col
+    return None
+
+
+def _series_text(df: pd.DataFrame, col: str | None) -> pd.Series:
     if not col or col not in df.columns:
-        return None
-    return df[col]
+        return pd.Series([""] * len(df), index=df.index)
+    return df[col].fillna("").astype(str).str.strip()
 
 
-def _to_num(s: pd.Series | None) -> pd.Series:
-    if s is None:
-        return pd.Series(dtype="float64")
-    text = s.astype(str).str.replace(",", "", regex=False)
-    text = text.str.replace("US$", "", regex=False)
-    text = text.str.replace("USD", "", regex=False)
-    text = text.str.replace("NT$", "", regex=False)
-    text = text.str.replace("$", "", regex=False)
-    return pd.to_numeric(text, errors="coerce").fillna(0.0)
+def _date_series(df: pd.DataFrame, col: str | None) -> pd.Series:
+    if not col or col not in df.columns:
+        return pd.Series(pd.NaT, index=df.index)
+    return pd.to_datetime(df[col], errors="coerce")
 
 
-def _match_score(name: str, tokens: list[str]) -> int:
-    lower = str(name).strip().lower()
-    return sum(1 for t in tokens if t in lower)
-
-
-def _pick_best_col(columns: list[str], preferred_tokens: list[str], fallback_tokens: list[str] | None = None) -> str | None:
-    scored = []
-    for c in columns:
-        score = _match_score(c, preferred_tokens)
-        if fallback_tokens:
-            score = max(score, _match_score(c, fallback_tokens))
-        if score > 0:
-            scored.append((score, c))
-    if not scored:
-        return None
-    scored.sort(key=lambda x: (-x[0], x[1]))
-    return scored[0][1]
-
-
-def _all_column_options(df: pd.DataFrame) -> list[str]:
-    return ["(無)"] + [str(c) for c in df.columns]
-
-
-def _default_index(options: list[str], value: str | None) -> int:
-    if value and value in options:
-        return options.index(value)
-    return 0
-
-
-def _select_col(label: str, options: list[str], default_value: str | None, key: str) -> str | None:
-    idx = _default_index(options, default_value)
-    selected = st.selectbox(label, options, index=idx, key=key)
-    return None if selected == "(無)" else selected
+def _money(v: float, symbol: str = "US$") -> str:
+    return f"{symbol} {v:,.0f}"
 
 
 def render_sales_report_page(
-    df: pd.DataFrame | None = None,
-    orders: pd.DataFrame | None = None,
-    po_col: str | None = None,
-    customer_col: str | None = None,
-    part_col: str | None = None,
-    qty_col: str | None = None,
-    factory_col: str | None = None,
-    wip_col: str | None = None,
-    ship_date_col: str | None = None,
-    remark_col: str | None = None,
-    order_date_col: str | None = None,
+    df=None,
+    orders=None,
+    po_col=None,
+    customer_col=None,
+    part_col=None,
+    qty_col=None,
+    factory_col=None,
+    wip_col=None,
+    ship_date_col=None,
+    remark_col=None,
+    order_date_col=None,
     **kwargs: Any,
 ):
     source_df = orders if isinstance(orders, pd.DataFrame) and not orders.empty else df
@@ -106,105 +79,146 @@ def render_sales_report_page(
     st.subheader("業績明細表")
     st.caption("只統計所選月份；預設幣別為美金。")
 
-    if source_df is None or source_df.empty:
-        st.warning("目前沒有可用資料")
+    if source_df is None or not isinstance(source_df, pd.DataFrame) or source_df.empty:
+        st.warning("目前沒有可統計資料")
         return
 
     work = source_df.copy()
-    columns = [str(c) for c in work.columns]
+    default_month = datetime.now().strftime("%Y-%m")
 
-    auto_date_col = ship_date_col if ship_date_col in work.columns else _pick_best_col(columns, DATE_TOKENS)
-    auto_order_amount_col = _pick_best_col(columns, ORDER_AMOUNT_TOKENS, AMOUNT_TOKENS)
-    auto_ship_amount_col = _pick_best_col(columns, SHIP_AMOUNT_TOKENS, AMOUNT_TOKENS)
-    auto_unit_price_col = _pick_best_col(columns, UNIT_PRICE_TOKENS)
-    auto_hold_col = _pick_best_col(columns, HOLD_TOKENS)
-    auto_discount_col = _pick_best_col(columns, DISCOUNT_TOKENS)
+    col1, col2, col3 = st.columns(3)
+    report_month_input = col1.text_input("報表月份 (YYYY-MM)", value=default_month)
+    report_month = _normalize_month_text(report_month_input)
+    col2.text_input("子表名稱 / 公司名稱", value="", key="sales_company_name")
+    currency_symbol = col3.text_input("幣別符號", value="US$", key="sales_currency_symbol")
 
-    current_month = datetime.now().strftime("%Y-%m")
-    c1, c2, c3 = st.columns(3)
-    report_month = _normalize_month_text(c1.text_input("報表月份 (YYYY-MM)", value=current_month))
-    company_name = c2.text_input("子表名稱 / 公司名稱", value="")
-    currency_symbol = c3.text_input("幣別符號", value="US$")
+    date_candidates = [
+        *( [ship_date_col] if ship_date_col else [] ),
+        *( [order_date_col] if order_date_col else [] ),
+        "Ship date", "Ship Date", "出貨日期", "日期", "Date", "Order Date", "下單日期",
+    ]
+    order_amount_candidates = [
+        "接單金額", "金額(USD)", "Order Amount", "Order Amt", "Amount", "Sales Amount", "Total Amount",
+        "USD Amount", "訂單金額", "Amount(USD)", "Order USD",
+    ]
+    ship_amount_candidates = [
+        "出貨金額", "淨出貨金額", "Shipment Amount", "Ship Amount", "Net Shipment", "Invoice Amount",
+        "銷貨金額", "Shipping Amount", "Net Amount",
+    ]
+    unit_price_candidates = [
+        "單價", "Price", "Unit Price", "單價(USD)", "USD Price", "Price USD", "Selling Price",
+    ]
+    hold_candidates = ["HOLD", "HOLD金額", "Hold", "Hold Amount"]
+    discount_candidates = ["折讓", "銷貨折讓", "Discount"]
 
-    with st.expander("欄位偵測", expanded=True):
-        opts = _all_column_options(work)
-        d1, d2, d3 = st.columns(3)
-        date_col = _select_col("日期欄位", opts, auto_date_col, "sales_date_col")
-        order_amount_col = _select_col("接單金額欄位", opts, auto_order_amount_col, "sales_order_amount_col")
-        ship_amount_col = _select_col("出貨金額欄位", opts, auto_ship_amount_col, "sales_ship_amount_col")
-        d4, d5, d6 = st.columns(3)
-        unit_price_col = _select_col("單價欄位", opts, auto_unit_price_col, "sales_unit_price_col")
-        hold_col = _select_col("HOLD欄位", opts, auto_hold_col, "sales_hold_col")
-        discount_col = _select_col("折讓欄位", opts, auto_discount_col, "sales_discount_col")
+    all_cols = ["(無)"] + [str(c) for c in work.columns]
+
+    detected_date_col = _pick_col(work, date_candidates)
+    detected_order_amount_col = _pick_col(work, order_amount_candidates)
+    detected_ship_amount_col = _pick_col(work, ship_amount_candidates)
+    detected_unit_price_col = _pick_col(work, unit_price_candidates)
+    detected_hold_col = _pick_col(work, hold_candidates)
+    detected_discount_col = _pick_col(work, discount_candidates)
+
+    with st.expander("欄位偵測", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        selected_date_col = c1.selectbox("日期欄位", all_cols, index=all_cols.index(str(detected_date_col)) if detected_date_col in work.columns else 0)
+        selected_order_amount_col = c2.selectbox("接單金額欄位", all_cols, index=all_cols.index(str(detected_order_amount_col)) if detected_order_amount_col in work.columns else 0)
+        selected_ship_amount_col = c3.selectbox("出貨金額欄位", all_cols, index=all_cols.index(str(detected_ship_amount_col)) if detected_ship_amount_col in work.columns else 0)
+        c4, c5, c6 = st.columns(3)
+        selected_unit_price_col = c4.selectbox("單價欄位", all_cols, index=all_cols.index(str(detected_unit_price_col)) if detected_unit_price_col in work.columns else 0)
+        selected_hold_col = c5.selectbox("HOLD欄位", all_cols, index=all_cols.index(str(detected_hold_col)) if detected_hold_col in work.columns else 0)
+        selected_discount_col = c6.selectbox("折讓欄位", all_cols, index=all_cols.index(str(detected_discount_col)) if detected_discount_col in work.columns else 0)
+
+    date_col = None if selected_date_col == "(無)" else selected_date_col
+    order_amount_col = None if selected_order_amount_col == "(無)" else selected_order_amount_col
+    ship_amount_col = None if selected_ship_amount_col == "(無)" else selected_ship_amount_col
+    unit_price_col = None if selected_unit_price_col == "(無)" else selected_unit_price_col
+    hold_col = None if selected_hold_col == "(無)" else selected_hold_col
+    discount_col = None if selected_discount_col == "(無)" else selected_discount_col
+
+    customer_col = customer_col if customer_col in work.columns else _pick_col(work, ["客戶", "Customer", "Cust"])
+    factory_col = factory_col if factory_col in work.columns else _pick_col(work, ["工廠", "Factory", "Vendor"])
+    qty_col = qty_col if qty_col in work.columns else _pick_col(work, ["Order Q'TY (PCS)", "Qty", "Quantity", "數量"])
 
     if not date_col:
-        st.error("找不到日期欄位")
+        st.warning("請在欄位偵測中選擇日期欄位")
         return
 
-    work["_report_date"] = pd.to_datetime(work[date_col], errors="coerce")
+    work["_report_date"] = _date_series(work, date_col)
     work["_month"] = work["_report_date"].dt.strftime("%Y-%m")
     month_df = work[work["_month"] == report_month].copy()
 
-    qty_series = _to_num(_safe_series(month_df, qty_col)) if qty_col else pd.Series([0.0] * len(month_df), index=month_df.index)
-    unit_price_series = _to_num(_safe_series(month_df, unit_price_col)) if unit_price_col else pd.Series([0.0] * len(month_df), index=month_df.index)
-    order_amount_series = _to_num(_safe_series(month_df, order_amount_col)) if order_amount_col else pd.Series([0.0] * len(month_df), index=month_df.index)
-    ship_amount_series = _to_num(_safe_series(month_df, ship_amount_col)) if ship_amount_col else pd.Series([0.0] * len(month_df), index=month_df.index)
-    hold_series = _to_num(_safe_series(month_df, hold_col)) if hold_col else pd.Series([0.0] * len(month_df), index=month_df.index)
-    discount_series = _to_num(_safe_series(month_df, discount_col)) if discount_col else pd.Series([0.0] * len(month_df), index=month_df.index)
+    if month_df.empty:
+        st.warning("所選月份沒有資料")
+        return
 
-    if order_amount_series.sum() == 0 and unit_price_col and qty_col:
-        order_amount_series = unit_price_series * qty_series
-    if ship_amount_series.sum() == 0 and unit_price_col and qty_col:
-        ship_amount_series = unit_price_series * qty_series
+    qty_series = _safe_numeric_series(month_df[qty_col]) if qty_col and qty_col in month_df.columns else pd.Series(0.0, index=month_df.index)
+    order_amount_series = _safe_numeric_series(month_df[order_amount_col]) if order_amount_col and order_amount_col in month_df.columns else pd.Series(0.0, index=month_df.index)
+    ship_amount_series = _safe_numeric_series(month_df[ship_amount_col]) if ship_amount_col and ship_amount_col in month_df.columns else pd.Series(0.0, index=month_df.index)
+    unit_price_series = _safe_numeric_series(month_df[unit_price_col]) if unit_price_col and unit_price_col in month_df.columns else pd.Series(0.0, index=month_df.index)
+    hold_series = _safe_numeric_series(month_df[hold_col]) if hold_col and hold_col in month_df.columns else pd.Series(0.0, index=month_df.index)
+    discount_series = _safe_numeric_series(month_df[discount_col]) if discount_col and discount_col in month_df.columns else pd.Series(0.0, index=month_df.index)
+
+    calc_from_unit = unit_price_series * qty_series
+    if float(order_amount_series.sum()) == 0 and float(calc_from_unit.sum()) > 0:
+        order_amount_series = calc_from_unit
+    if float(ship_amount_series.sum()) == 0 and float(calc_from_unit.sum()) > 0:
+        ship_amount_series = calc_from_unit
+
+    net_ship_series = ship_amount_series - hold_series - discount_series
 
     month_df["_order_amount"] = order_amount_series
     month_df["_ship_amount"] = ship_amount_series
-    month_df["_net_amount"] = ship_amount_series - hold_series - discount_series
+    month_df["_net_ship"] = net_ship_series
 
-    customer_count = 0
-    factory_count = 0
-    if customer_col and customer_col in month_df.columns:
-        customer_count = month_df[customer_col].astype(str).str.strip().replace("", pd.NA).dropna().nunique()
-    if factory_col and factory_col in month_df.columns:
-        factory_count = month_df[factory_col].astype(str).str.strip().replace("", pd.NA).dropna().nunique()
+    customer_series = _series_text(month_df, customer_col) if customer_col else pd.Series([""] * len(month_df), index=month_df.index)
+    factory_series = _series_text(month_df, factory_col) if factory_col else pd.Series([""] * len(month_df), index=month_df.index)
 
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("接單金額", f"{currency_symbol} {month_df['_order_amount'].sum():,.0f}")
-    k2.metric("出貨金額", f"{currency_symbol} {month_df['_ship_amount'].sum():,.0f}")
-    k3.metric("淨出貨", f"{currency_symbol} {month_df['_net_amount'].sum():,.0f}")
-    k4.metric("客戶數", int(customer_count))
-    k5.metric("廠商數", int(factory_count))
+    total_order_amount = float(month_df["_order_amount"].sum())
+    total_ship_amount = float(month_df["_ship_amount"].sum())
+    total_net_ship = float(month_df["_net_ship"].sum())
+    customer_count = int(customer_series.replace("", pd.NA).dropna().nunique())
+    factory_count = int(factory_series.replace("", pd.NA).dropna().nunique())
 
-    if customer_col and customer_col in month_df.columns:
-        by_customer = (
-            month_df.groupby(customer_col)["_ship_amount"]
-            .sum()
-            .sort_values(ascending=False)
-            .head(10)
-        )
-        left, right = st.columns(2)
-        with left:
-            st.markdown("**客戶業績比較**")
-            if by_customer.empty:
-                st.info("本月無金額資料")
-            else:
-                st.bar_chart(by_customer)
-        with right:
-            st.markdown("**業績佔比**")
-            if by_customer.empty:
-                st.info("本月無金額資料")
-            else:
-                ratio_df = by_customer.reset_index()
-                ratio_df.columns = ["客戶", "出貨金額"]
-                total_ship = ratio_df["出貨金額"].sum()
-                ratio_df["佔比%"] = (ratio_df["出貨金額"] / total_ship * 100).round(2) if total_ship else 0
-                st.dataframe(ratio_df, use_container_width=True, hide_index=True)
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("接單金額", _money(total_order_amount, currency_symbol))
+    m2.metric("出貨金額", _money(total_ship_amount, currency_symbol))
+    m3.metric("淨出貨", _money(total_net_ship, currency_symbol))
+    m4.metric("客戶數", customer_count)
+    m5.metric("廠商數", factory_count)
 
-    detail_cols = [c for c in [date_col, po_col, customer_col, part_col, qty_col, factory_col, wip_col, remark_col] if c and c in month_df.columns]
-    detail = month_df[detail_cols].copy() if detail_cols else pd.DataFrame(index=month_df.index)
-    detail["接單金額"] = month_df["_order_amount"].values
-    detail["出貨金額"] = month_df["_ship_amount"].values
-    detail["淨出貨"] = month_df["_net_amount"].values
+    by_customer = pd.DataFrame({
+        "客戶": customer_series,
+        "出貨金額": month_df["_ship_amount"],
+        "淨出貨": month_df["_net_ship"],
+    })
+    by_customer = by_customer.groupby("客戶", dropna=False)[["出貨金額", "淨出貨"]].sum().reset_index()
+    by_customer = by_customer[by_customer["客戶"].astype(str).str.strip() != ""]
+    by_customer = by_customer.sort_values("出貨金額", ascending=False)
 
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**客戶業績比較**")
+        if by_customer.empty:
+            st.info("無資料")
+        else:
+            st.bar_chart(by_customer.head(10).set_index("客戶")[["出貨金額"]])
+
+    with right:
+        st.markdown("**業績佔比**")
+        if by_customer.empty:
+            st.info("無資料")
+        else:
+            pct = by_customer.head(10).copy()
+            total = float(pct["出貨金額"].sum())
+            pct["佔比%"] = (pct["出貨金額"] / total * 100).round(2) if total else 0
+            st.dataframe(pct[["客戶", "出貨金額", "佔比%"]], use_container_width=True, hide_index=True)
+
+    show_cols = [c for c in [date_col, po_col, customer_col, part_col, qty_col, factory_col, wip_col, ship_date_col, remark_col] if c and c in month_df.columns]
     st.markdown("**業績明細**")
-    st.dataframe(detail, use_container_width=True, height=420, hide_index=True)
+    show_df = month_df[show_cols].copy() if show_cols else month_df.copy()
+    show_df.insert(len(show_df.columns), "接單金額", month_df["_order_amount"].values)
+    show_df.insert(len(show_df.columns), "出貨金額", month_df["_ship_amount"].values)
+    show_df.insert(len(show_df.columns), "淨出貨", month_df["_net_ship"].values)
+    st.dataframe(show_df, use_container_width=True, hide_index=True, height=420)
