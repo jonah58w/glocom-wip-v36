@@ -8,9 +8,6 @@ import utils as u
 import config as cfg
 
 
-# ================================
-# Common helpers
-# ================================
 def _existing_cols(df, cols):
     return [c for c in cols if c and c in df.columns]
 
@@ -26,12 +23,6 @@ def _safe_series(df, col_name):
 def _safe_text_series(df, col_name):
     s = _safe_series(df, col_name)
     return s.astype(str).fillna("").str.strip()
-
-
-def _safe_dt_series(df, col_name):
-    if not col_name or col_name not in df.columns:
-        return pd.Series([pd.NaT] * len(df), index=df.index)
-    return pd.to_datetime(df[col_name], errors="coerce")
 
 
 def _norm_name(s):
@@ -73,69 +64,10 @@ def _download_excel(df, file_name, sheet_name="Report"):
     )
 
 
-def _download_pdf(df, file_name, title="Report"):
-    try:
-        from reportlab.lib import colors
-        from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-        from reportlab.lib.styles import getSampleStyleSheet
-
-        pdf_buffer = BytesIO()
-        doc = SimpleDocTemplate(
-            pdf_buffer,
-            pagesize=landscape(A4),
-            leftMargin=18,
-            rightMargin=18,
-            topMargin=18,
-            bottomMargin=18,
-        )
-        styles = getSampleStyleSheet()
-
-        safe_df = df.fillna("").astype(str).copy()
-        table_data = [list(safe_df.columns)] + safe_df.values.tolist()
-
-        table = Table(table_data, repeatRows=1)
-        table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#333333")),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-                    ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
-                    ("FONTSIZE", (0, 0), (-1, -1), 7),
-                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f5f5")]),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ]
-            )
-        )
-
-        story = [
-            Paragraph(title, styles["Title"]),
-            Spacer(1, 8),
-            table,
-        ]
-        doc.build(story)
-
-        st.download_button(
-            "Download PDF",
-            data=pdf_buffer.getvalue(),
-            file_name=file_name,
-            mime="application/pdf",
-        )
-    except Exception as e:
-        st.error(f"PDF 匯出失敗: {e}")
+def _show_export_buttons(df, excel_name, title):
+    _download_excel(df, excel_name, sheet_name=title)
 
 
-def _show_export_buttons(df, excel_name, pdf_name, title):
-    c1, c2 = st.columns(2)
-    with c1:
-        _download_excel(df, excel_name, sheet_name=title)
-    with c2:
-        _download_pdf(df, pdf_name, title=title)
-
-
-# ================================
-# Dashboard
-# ================================
 def show_dashboard_report(df, wip_col=None, factory_col=None, ship_date_col=None, **kwargs):
     total_orders = len(df)
     shipping = 0
@@ -152,7 +84,6 @@ def show_dashboard_report(df, wip_col=None, factory_col=None, ship_date_col=None
     c3.metric("Shipping", shipping)
 
     st.divider()
-
     left, right = st.columns(2)
     with left:
         show_factory_load_report(df, factory_col=factory_col)
@@ -169,9 +100,6 @@ def show_dashboard_report(df, wip_col=None, factory_col=None, ship_date_col=None
         )
 
 
-# ================================
-# Factory Load
-# ================================
 def show_factory_load_report(df, factory_col=None, **kwargs):
     st.subheader("🏭 Factory Load")
 
@@ -187,9 +115,6 @@ def show_factory_load_report(df, factory_col=None, **kwargs):
     st.dataframe(factory_summary, use_container_width=True, height=400)
 
 
-# ================================
-# Delayed Orders
-# ================================
 def show_delayed_orders_report(
     df,
     factory_due_col=None,
@@ -222,9 +147,6 @@ def show_delayed_orders_report(
     st.dataframe(delayed[show_cols], use_container_width=True, height=520)
 
 
-# ================================
-# Shipment Forecast
-# ================================
 def show_shipment_forecast_report(
     df,
     ship_date_col=None,
@@ -261,9 +183,6 @@ def show_shipment_forecast_report(
     st.dataframe(forecast.sort_values("_ShipDateParsed")[show_cols], use_container_width=True, height=520)
 
 
-# ================================
-# Orders
-# ================================
 def show_orders_report(df, customer_col=None, wip_col=None, **kwargs):
     st.subheader("📋 Orders")
 
@@ -289,9 +208,6 @@ def show_orders_report(df, customer_col=None, wip_col=None, **kwargs):
     st.download_button("Download Orders CSV", data=csv_data, file_name="glocom_orders.csv", mime="text/csv")
 
 
-# ================================
-# Customer Preview
-# ================================
 def show_customer_preview_report(
     df,
     customer_col=None,
@@ -326,6 +242,7 @@ def show_customer_preview_report(
         "Select customer to preview",
         customers,
         index=default_idx,
+        key="customer_preview_select_v2",
     )
 
     preview_df = df[customer_series.str.lower() == selected_customer.strip().lower()].copy()
@@ -338,9 +255,6 @@ def show_customer_preview_report(
     st.dataframe(preview_df[preview_cols], use_container_width=True, height=420)
 
 
-# ================================
-# Sandy 內部 WIP
-# ================================
 def show_sandy_internal_wip_report(
     df,
     po_col=None,
@@ -357,11 +271,10 @@ def show_sandy_internal_wip_report(
     **kwargs,
 ):
     st.subheader("Sandy 內部 WIP")
-    st.caption("依併貨日期排序，可匯出 Excel / PDF。")
+    st.caption("依併貨日期排序。")
 
     work = df.copy()
-
-    merge_date_col = _find_col(work, cfg.MERGE_DATE_CANDIDATES, merge_date_col)
+    merge_date_col = _find_col(work, getattr(cfg, "MERGE_DATE_CANDIDATES", []), merge_date_col)
 
     if merge_date_col and merge_date_col in work.columns:
         work["_merge_sort"] = pd.to_datetime(work[merge_date_col], errors="coerce")
@@ -390,12 +303,9 @@ def show_sandy_internal_wip_report(
 
     export_df = work[show_cols].copy()
     st.dataframe(export_df, use_container_width=True, height=520)
-    _show_export_buttons(export_df, "Sandy_內部WIP.xlsx", "Sandy_內部WIP.pdf", "Sandy 內部 WIP")
+    _show_export_buttons(export_df, "Sandy_內部WIP.xlsx", "Sandy 內部 WIP")
 
 
-# ================================
-# Sandy 銷貨底
-# ================================
 def show_sandy_shipment_report(
     df,
     sales_shipment_df=None,
@@ -463,12 +373,9 @@ def show_sandy_shipment_report(
 
     export_df = work[show_cols].copy()
     st.dataframe(export_df, use_container_width=True, height=520)
-    _show_export_buttons(export_df, "Sandy_銷貨底.xlsx", "Sandy_銷貨底.pdf", "Sandy 銷貨底")
+    _show_export_buttons(export_df, "Sandy_銷貨底.xlsx", "Sandy 銷貨底")
 
 
-# ================================
-# 新訂單 WIP
-# ================================
 def show_new_orders_wip_report(
     df,
     po_col=None,
@@ -486,24 +393,15 @@ def show_new_orders_wip_report(
     **kwargs,
 ):
     st.subheader("新訂單 WIP")
-    st.caption("顯示任何 工廠交期 / 交期更改 / 併貨日期 有異動者，可匯出 Excel / PDF。")
+    st.caption("顯示工廠交期 / 交期更改 / 併貨日期 有異動者。")
 
     work = df.copy()
 
-    order_date_col = _find_col(work, cfg.ORDER_DATE_CANDIDATES, order_date_col)
-    factory_order_date_col = _find_col(work, cfg.FACTORY_ORDER_DATE_CANDIDATES, factory_order_date_col)
-    merge_date_col = _find_col(work, cfg.MERGE_DATE_CANDIDATES, merge_date_col)
-    changed_due_date_col = _find_col(work, cfg.CHANGED_DUE_DATE_CANDIDATES, changed_due_date_col)
-    factory_due_col = _find_col(work, cfg.FACTORY_DUE_CANDIDATES, factory_due_col)
-
-    with st.expander("新訂單 WIP 偵測到的欄位"):
-        st.write({
-            "客戶下單日期": order_date_col,
-            "工廠下單日期": factory_order_date_col,
-            "工廠交期": factory_due_col,
-            "交期(更改)": changed_due_date_col,
-            "併貨日期": merge_date_col,
-        })
+    order_date_col = _find_col(work, getattr(cfg, "ORDER_DATE_CANDIDATES", []), order_date_col)
+    factory_order_date_col = _find_col(work, getattr(cfg, "FACTORY_ORDER_DATE_CANDIDATES", []), factory_order_date_col)
+    merge_date_col = _find_col(work, getattr(cfg, "MERGE_DATE_CANDIDATES", []), merge_date_col)
+    changed_due_date_col = _find_col(work, getattr(cfg, "CHANGED_DUE_DATE_CANDIDATES", []), changed_due_date_col)
+    factory_due_col = _find_col(work, getattr(cfg, "FACTORY_DUE_CANDIDATES", []), factory_due_col)
 
     due_s = _safe_text_series(work, factory_due_col) if factory_due_col else pd.Series([""] * len(work), index=work.index)
     changed_due_s = _safe_text_series(work, changed_due_date_col) if changed_due_date_col else pd.Series([""] * len(work), index=work.index)
@@ -551,4 +449,4 @@ def show_new_orders_wip_report(
 
     export_df = filtered[show_cols].copy()
     st.dataframe(export_df, use_container_width=True, height=520)
-    _show_export_buttons(export_df, "新訂單WIP.xlsx", "新訂單WIP.pdf", "新訂單 WIP")
+    _show_export_buttons(export_df, "新訂單WIP.xlsx", "新訂單 WIP")
