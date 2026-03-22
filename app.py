@@ -57,6 +57,8 @@ st.markdown(
 # ================================
 def refresh_after_update():
     st.cache_data.clear()
+    for k in list(st.session_state.keys()):
+        del st.session_state[k]
     st.rerun()
 
 
@@ -68,7 +70,7 @@ def wip_display_html(value: str) -> str:
     text = u.safe_text(value)
     lower = text.lower()
 
-    if any(k in lower for k in ["完成"]) or text.upper() in cfg.DONE_WIP_VALUES:
+    if any(k in lower for k in ["完成"]) or text.upper() in getattr(cfg, "DONE_WIP_VALUES", []):
         label = text or "完成"
         bg = "#065f46"
         fg = "#d1fae5"
@@ -154,10 +156,6 @@ def customer_portal_columns(df, po_col, part_col, qty_col, wip_col, ship_date_co
 
 
 def call_report_function(possible_names, **kwargs):
-    """
-    依名稱清單找 reports 裡存在的函式，並自動只傳它需要的參數。
-    若函式有 **kwargs，就把全部 kwargs 傳進去。
-    """
     for name in possible_names:
         func = getattr(reports, name, None)
         if callable(func):
@@ -317,7 +315,6 @@ with st.expander("Debug"):
     st.write("Sales shipment sheet loaded:", bool(not sales_shipment_df.empty))
     if not sales_df.empty:
         st.write("sales_df columns:", list(sales_df.columns))
-        st.write("sales_df sample:", sales_df[["Customer", "PO#", "Ship date", "INVOICE"]].head(10))
     if isinstance(api_text, str):
         st.text(api_text[:1200])
 
@@ -620,7 +617,12 @@ elif menu == "Customer Preview":
                     default_customer = wesco_matches[0] if wesco_matches else customers[0]
                     default_idx = customers.index(default_customer)
 
-                    selected_customer = st.selectbox("Select customer to preview", customers, index=default_idx)
+                    selected_customer = st.selectbox(
+                        "Select customer to preview",
+                        customers,
+                        index=default_idx,
+                        key="customer_preview_select_v2_fallback",
+                    )
                     preview_df = orders[
                         customer_series.astype(str).str.strip().str.lower()
                         == selected_customer.strip().lower()
