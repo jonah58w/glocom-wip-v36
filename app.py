@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 import inspect
 import io
-from typing import Optional
-
 import pandas as pd
 import streamlit as st
 
@@ -11,6 +9,21 @@ import utils as u
 import teable_api
 import reports
 from sales_report import render_sales_report_page
+
+try:
+    import excel_reader
+except Exception:
+    excel_reader = None
+
+try:
+    import factory_parsers
+except Exception:
+    factory_parsers = None
+
+try:
+    import text_ocr_parsers
+except Exception:
+    text_ocr_parsers = None
 
 
 # ================================
@@ -61,10 +74,8 @@ def refresh_after_update():
     st.rerun()
 
 
-
 def split_tags(value):
     return u.split_tags(value)
-
 
 
 def wip_display_html(value: str) -> str:
@@ -107,8 +118,7 @@ def wip_display_html(value: str) -> str:
     return f'<span class="wip-chip" style="background:{bg};color:{fg};">{label}</span>'
 
 
-
-def show_metrics(df: pd.DataFrame, wip_col: Optional[str]):
+def show_metrics(df: pd.DataFrame, wip_col: str | None):
     total_orders = len(df)
     shipping = 0
 
@@ -133,7 +143,6 @@ def show_metrics(df: pd.DataFrame, wip_col: Optional[str]):
     c3.metric("Shipping", shipping)
 
 
-
 def show_no_data_layout():
     c1, c2, c3 = st.columns(3)
     c1.metric("Total Orders", 0)
@@ -141,7 +150,6 @@ def show_no_data_layout():
     c3.metric("Shipping", 0)
     st.divider()
     st.warning("No data from Teable")
-
 
 
 def customer_portal_columns(df, po_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col):
@@ -159,130 +167,100 @@ def customer_portal_columns(df, po_col, part_col, qty_col, wip_col, ship_date_co
     ]
 
 
-
 def call_report_function(possible_names, **kwargs):
-    """
-    依名稱清單找 reports 裡存在的函式，並自動只傳它需要的參數。
-    這樣就算 reports.py 函式簽名有些微不同，也比較不容易炸。
-    """
     for name in possible_names:
         func = getattr(reports, name, None)
         if callable(func):
             sig = inspect.signature(func)
-            accepts_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-            accepted = kwargs if accepts_var_kw else {k: v for k, v in kwargs.items() if k in sig.parameters}
+            accepted = {k: v for k, v in kwargs.items() if k in sig.parameters}
             return func(**accepted)
     return False
 
 
-
-def _safe_read_uploaded_table(uploaded_file):
-    if uploaded_file is None:
-        return pd.DataFrame()
-    name = str(uploaded_file.name).lower()
-    try:
-        if name.endswith((".xlsx", ".xlsm", ".xls")):
-            return pd.read_excel(uploaded_file)
-        if name.endswith(".csv"):
-            return pd.read_csv(uploaded_file)
-        if name.endswith(".txt"):
-            text = uploaded_file.getvalue().decode("utf-8", errors="ignore")
-            return pd.DataFrame({"raw_text": [line for line in text.splitlines() if line.strip()]})
-    except Exception as e:
-        st.error(f"讀取檔案失敗：{e}")
+def _to_df_from_uploaded_file(uploaded_file):
+    name = uploaded_file.name.lower()
+    data = uploaded_file.getvalue()
+    if name.endswith((".xlsx", ".xls")):
+        return pd.read_excel(io.BytesIO(data))
+    if name.endswith(".csv"):
+        return pd.read_csv(io.BytesIO(data))
+    if name.endswith(".txt"):
+        text = data.decode("utf-8", errors="ignore")
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        return pd.DataFrame({"raw_text": lines})
     return pd.DataFrame()
 
 
-
-def fallback_import_update_page(df):
+def fallback_import_update_page(**kwargs):
     st.subheader("Import / Update")
-    st.caption("保留工廠進度輸入方式：檔案上傳、截圖圖片、複製貼上文字、手工輸入。")
+    st.caption("保留工廠進度輸入方式：檔案上傳、截圖、貼上文字、手工輸入。")
 
-    tabs = st.tabs(["上傳檔案", "上傳截圖", "貼上文字", "手工輸入"])
+    tab1, tab2, tab3, tab4 = st.tabs(["檔案上傳", "截圖 / 圖片", "貼上文字", "手工輸入"])
 
-    with tabs[0]:
+    with tab1:
         uploaded = st.file_uploader(
             "上傳工廠進度檔案",
             type=["xlsx", "xls", "csv", "txt"],
-            key="factory_file_uploader",
+            key="factory_upload_file",
         )
         if uploaded is not None:
-            file_df = _safe_read_uploaded_table(uploaded)
-            if not file_df.empty:
-                st.success(f"已讀取 {len(file_df)} 筆資料")
-                st.dataframe(file_df, use_container_width=True, height=420)
-                csv_data = file_df.to_csv(index=False).encode("utf-8-sig")
+            try:
+                df = _to_df_from_uploaded_file(uploaded)
+                st.success(f"已讀取：{uploaded.name}")
+                st.dataframe(df, use_container_width=True, height=420)
                 st.download_button(
-                    "下載解析結果 CSV",
-                    data=csv_data,
+                    "下載預覽 CSV",
+                    df.to_csv(index=False).encode("utf-8-sig"),
                     file_name="import_preview.csv",
                     mime="text/csv",
-                    key="download_import_preview_csv",
                 )
-            else:
-                st.info("檔案已上傳，但目前未解析出表格資料。")
+            except Exception as e:
+                st.error(f"讀取檔案失敗：{e}")
 
-    with tabs[1]:
-        img = st.file_uploader(
-            "上傳截圖 / 圖片",
+    with tab2:
+        image_file = st.file_uploader(
+            "上傳工廠進度截圖 / 圖片",
             type=["png", "jpg", "jpeg", "webp"],
-            key="factory_image_uploader",
+            key="factory_upload_image",
         )
-        if img is not None:
-            st.image(img, caption="已上傳圖片", use_container_width=True)
-            try:
-                import pytesseract
-                from PIL import Image
-                image = Image.open(img)
-                ocr_text = pytesseract.image_to_string(image, lang="eng")
-                st.text_area("OCR 文字結果", value=ocr_text, height=240, key="ocr_text_area")
-            except Exception:
-                st.info("目前環境未啟用 OCR；圖片已保留，仍可搭配下方貼上文字或手工輸入。")
+        if image_file is not None:
+            st.image(image_file, caption=image_file.name, use_container_width=True)
+            st.info("圖片已上傳。若你專案中的 reports.py / text_ocr_parsers.py 有 OCR 流程，會優先由既有模組處理；這裡保留 fallback 入口。")
 
-    with tabs[2]:
-        pasted = st.text_area("貼上 Email / PDF / 截圖轉出的文字", height=260, key="pasted_factory_text")
+    with tab3:
+        pasted = st.text_area(
+            "貼上 Email 文字 / 工廠進度文字",
+            height=260,
+            key="factory_paste_text",
+        )
         if pasted.strip():
-            lines = [line.strip() for line in pasted.splitlines() if line.strip()]
-            parsed_df = pd.DataFrame({"raw_text": lines})
-            st.dataframe(parsed_df, use_container_width=True, height=320)
+            lines = [ln for ln in pasted.splitlines() if ln.strip()]
+            df = pd.DataFrame({"raw_text": lines})
+            st.dataframe(df, use_container_width=True, height=360)
             st.download_button(
                 "下載貼上文字 CSV",
-                data=parsed_df.to_csv(index=False).encode("utf-8-sig"),
-                file_name="pasted_factory_text.csv",
+                df.to_csv(index=False).encode("utf-8-sig"),
+                file_name="pasted_text.csv",
                 mime="text/csv",
-                key="download_pasted_text_csv",
             )
+        else:
+            st.info("請貼上工廠進度文字。")
 
-    with tabs[3]:
-        c1, c2 = st.columns(2)
-        with c1:
-            manual_po = st.text_input("PO#", key="manual_po")
-            manual_part = st.text_input("P/N", key="manual_part")
-            manual_qty = st.text_input("QTY", key="manual_qty")
-        with c2:
-            manual_factory = st.text_input("工廠", key="manual_factory")
-            manual_wip = st.text_input("WIP", key="manual_wip")
-            manual_ship = st.text_input("Ship date", key="manual_ship")
-        manual_remark = st.text_area("Remark", key="manual_remark")
-
-        if st.button("加入手工輸入預覽", key="manual_add_preview"):
-            row = {
-                "PO#": manual_po,
-                "P/N": manual_part,
-                "QTY": manual_qty,
-                "Factory": manual_factory,
-                "WIP": manual_wip,
-                "Ship date": manual_ship,
-                "Remark": manual_remark,
-            }
-            preview_df = pd.DataFrame([row])
-            st.dataframe(preview_df, use_container_width=True)
+    with tab4:
+        st.caption("可直接手工輸入少量進度資料。")
+        manual_df = pd.DataFrame(
+            [
+                {"PO": "", "Customer": "", "Part No": "", "Qty": "", "WIP": "", "Ship Date": "", "Remark": ""}
+                for _ in range(5)
+            ]
+        )
+        edited = st.data_editor(manual_df, num_rows="dynamic", use_container_width=True, key="manual_factory_input")
+        if isinstance(edited, pd.DataFrame) and not edited.empty:
             st.download_button(
                 "下載手工輸入 CSV",
-                data=preview_df.to_csv(index=False).encode("utf-8-sig"),
-                file_name="manual_factory_update.csv",
+                edited.to_csv(index=False).encode("utf-8-sig"),
+                file_name="manual_input.csv",
                 mime="text/csv",
-                key="download_manual_factory_csv",
             )
 
 
@@ -408,8 +386,8 @@ st.caption("Internal PCB Production Monitoring System")
 
 with st.expander("Debug"):
     st.write("API Status:", api_status)
-    st.write("TABLE_URL:", getattr(cfg, "TABLE_URL", ""))
-    st.write("Token loaded:", bool(getattr(cfg, "TEABLE_TOKEN", "")))
+    st.write("TABLE_URL:", cfg.TABLE_URL)
+    st.write("Token loaded:", bool(cfg.TEABLE_TOKEN))
     st.write("Columns:", list(orders.columns) if not orders.empty else [])
     if isinstance(api_text, str):
         st.text(api_text[:1200])
@@ -467,7 +445,6 @@ def fallback_factory_load(df):
     st.info("No factory data")
 
 
-
 def fallback_delayed_orders(df):
     st.subheader("⚠️ Delayed Orders")
     if not factory_due_col or factory_due_col not in df.columns:
@@ -500,7 +477,6 @@ def fallback_delayed_orders(df):
     if "Delay Days" not in show_cols:
         show_cols.append("Delay Days")
     st.dataframe(delayed[show_cols], use_container_width=True, height=520)
-
 
 
 def fallback_shipment_forecast(df):
@@ -538,7 +514,6 @@ def fallback_shipment_forecast(df):
         use_container_width=True,
         height=520,
     )
-
 
 
 def fallback_orders(df):
@@ -602,7 +577,9 @@ common_kwargs = dict(
 
 
 if menu == "Dashboard":
-    ok = call_report_function(["show_dashboard_report"], **common_kwargs)
+    ok = call_report_function([
+        "show_dashboard_report",
+    ], **common_kwargs)
     if ok is False:
         show_metrics(orders, wip_col)
         st.divider()
@@ -648,19 +625,17 @@ elif menu == "Customer Preview":
                 if not customers:
                     st.warning("No customers found")
                 else:
-                    default_idx = 0
-                    upper_map = [c.upper() for c in customers]
-                    if "WESCO" in upper_map:
-                        default_idx = upper_map.index("WESCO")
+                    default_customer = "WESCO"
+                    if "customer_preview_selected" not in st.session_state:
+                        st.session_state["customer_preview_selected"] = default_customer if default_customer in customers else customers[0]
                     selected_customer = st.selectbox(
                         "Select customer to preview",
                         customers,
-                        index=default_idx,
-                        key="customer_preview_select",
+                        index=customers.index(st.session_state["customer_preview_selected"]) if st.session_state["customer_preview_selected"] in customers else 0,
+                        key="customer_preview_selected",
                     )
                     preview_df = orders[
-                        customer_series.astype(str).str.strip().str.lower()
-                        == selected_customer.strip().lower()
+                        customer_series.astype(str).str.strip().str.lower() == selected_customer.strip().lower()
                     ].copy()
                     if preview_df.empty:
                         st.warning("No orders found for this customer")
@@ -692,6 +667,6 @@ elif menu == "業績明細表":
 elif menu == "Import / Update":
     ok = call_report_function(["show_import_update_page", "show_import_update_report"], **common_kwargs)
     if ok is False:
-        fallback_import_update_page(orders)
+        fallback_import_update_page(**common_kwargs)
 
 st.caption("Auto refresh cache: 60 seconds")
