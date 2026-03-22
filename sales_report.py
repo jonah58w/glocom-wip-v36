@@ -1,204 +1,189 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import re
 from datetime import datetime
-from typing import Any, Optional
+from io import BytesIO
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
 
 
-def _pick_existing(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
-    lower_map = {str(c).strip().lower(): c for c in df.columns}
-    for c in candidates:
-        hit = lower_map.get(c.strip().lower())
-        if hit is not None:
-            return hit
-    return None
+def _norm(s: str) -> str:
+    return str(s).strip().lower()
 
 
-def _parse_number_series(series: pd.Series) -> pd.Series:
-    s = series.astype(str).str.replace(",", "", regex=False)
-    s = s.str.replace("US$", "", regex=False)
-    s = s.str.replace("USD", "", regex=False)
-    s = s.str.replace("NT$", "", regex=False)
-    s = s.str.replace("$", "", regex=False)
-    s = s.str.replace(" ", "", regex=False)
-    s = s.str.replace(r"[^0-9.\-]", "", regex=True)
-    return pd.to_numeric(s, errors="coerce")
-
-
-def _candidate_numeric_columns(df: pd.DataFrame) -> list[str]:
-    cols: list[str] = []
+def _pick_col(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
+    if df is None or df.empty:
+        return None
+    exact = {_norm(c): c for c in df.columns}
+    for cand in candidates:
+        if _norm(cand) in exact:
+            return exact[_norm(cand)]
+    # score partial matches
+    best = None
+    best_score = -1
     for c in df.columns:
-        try:
-            parsed = _parse_number_series(df[c])
-            if parsed.notna().sum() > 0:
-                cols.append(c)
-        except Exception:
-            pass
-    return cols
+        cl = _norm(c)
+        score = 0
+        for cand in candidates:
+            cd = _norm(cand)
+            if cd and cd in cl:
+                score = max(score, len(cd))
+        if score > best_score:
+            best_score = score
+            best = c
+    return best if best_score > 0 else None
 
 
-def _normalize_month(text: str) -> str:
-    text = (text or "").strip()
-    m = re.match(r"^(\d{4})-(\d{1,2})$", text)
-    if not m:
-        return datetime.now().strftime("%Y-%m")
-    y, mm = m.groups()
-    return f"{y}-{int(mm):02d}"
+def _to_num(series: pd.Series) -> pd.Series:
+    if series is None:
+        return pd.Series(dtype=float)
+    s = series.astype(str).str.replace(',', '', regex=False)
+    for token in ['US$', 'USD', '$', 'NT$', 'EUR', '¥']:
+        s = s.str.replace(token, '', regex=False)
+    s = s.str.replace('(', '-', regex=False).str.replace(')', '', regex=False).str.strip()
+    return pd.to_numeric(s, errors='coerce').fillna(0.0)
 
 
-def _fmt_money(v: float, symbol: str = "US$") -> str:
-    return f"{symbol} {v:,.0f}"
+def _fmt_money(v: float, symbol: str) -> str:
+    return f"{symbol} {float(v):,.0f}"
 
 
-def render_sales_report_page(
-    df: Optional[pd.DataFrame] = None,
-    orders: Optional[pd.DataFrame] = None,
-    po_col: Optional[str] = None,
-    customer_col: Optional[str] = None,
-    part_col: Optional[str] = None,
-    qty_col: Optional[str] = None,
-    factory_col: Optional[str] = None,
-    wip_col: Optional[str] = None,
-    ship_date_col: Optional[str] = None,
-    remark_col: Optional[str] = None,
-    order_date_col: Optional[str] = None,
-    **kwargs: Any,
-):
-    source_df = orders if isinstance(orders, pd.DataFrame) and not orders.empty else df
+def _to_month(series: pd.Series) -> pd.Series:
+    dt = pd.to_datetime(series, errors='coerce')
+    return dt.dt.strftime('%Y-%m').fillna('')
 
-    st.subheader("業績明細表")
-    st.caption("只統計所選月份；預設幣別為美金。")
 
-    if source_df is None or source_df.empty:
-        st.warning("沒有可用資料")
+def _download_excel(df: pd.DataFrame) -> bytes:
+    bio = BytesIO()
+    with pd.ExcelWriter(bio, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='業績明細')
+    bio.seek(0)
+    return bio.getvalue()
+
+
+def render_sales_report_page(df=None, orders=None, po_col=None, customer_col=None, part_col=None,
+                             qty_col=None, factory_col=None, ship_date_col=None, order_date_col=None,
+                             remark_col=None, **kwargs):
+    src = orders if isinstance(orders, pd.DataFrame) and not orders.empty else df
+
+    st.subheader('業績明細表')
+    st.caption('只統計所選月份；預設幣別為美金。')
+
+    if src is None or src.empty:
+        st.warning('目前沒有可用資料')
         return
 
-    work = source_df.copy()
+    work = src.copy()
+    customer_col = customer_col if customer_col in work.columns else _pick_col(work, ['客戶', 'customer'])
+    factory_col = factory_col if factory_col in work.columns else _pick_col(work, ['工廠', 'factory'])
+    qty_col = qty_col if qty_col in work.columns else _pick_col(work, ['qty', 'quantity', 'order q\'ty', 'pcs'])
 
-    if customer_col not in work.columns:
-        customer_col = _pick_existing(work, ["客戶", "customer", "customer name"])
-    if factory_col not in work.columns:
-        factory_col = _pick_existing(work, ["工廠", "factory"])
-    if qty_col not in work.columns:
-        qty_col = _pick_existing(work, ["Order Q'TY (PCS)", "Qty", "Quantity", "數量", "pcs"])
-    date_col = ship_date_col if ship_date_col in work.columns else None
-    if not date_col:
-        date_col = order_date_col if order_date_col in work.columns else None
-    if not date_col:
-        date_col = _pick_existing(work, ["Ship date", "Ship Date", "出貨日期", "日期", "Date", "Order Date"])
+    date_default = None
+    for c in [ship_date_col, order_date_col, 'Ship date', 'Ship Date', '出貨日期', '日期', 'Date']:
+        if c in work.columns:
+            date_default = c
+            break
 
-    numeric_cols = _candidate_numeric_columns(work)
+    order_amt_auto = _pick_col(work, ['接單金額', 'order amount', 'order amt', 'sales amount', 'amount', 'total amount', 'order total', 'usd amount'])
+    ship_amt_auto = _pick_col(work, ['出貨金額', 'shipment amount', 'ship amount', 'invoice amount', 'net shipment', 'net amount', 'sales usd', 'revenue'])
+    unit_price_auto = _pick_col(work, ['單價', 'unit price', 'price', 'unit usd', 'usd/pcs', 'us$/pcs'])
+    hold_auto = _pick_col(work, ['hold', 'hold amount', 'hold金額'])
+    discount_auto = _pick_col(work, ['折讓', 'discount', 'discount amount'])
 
-    order_amount_auto = _pick_existing(work, [
-        "接單金額", "order amount", "order amt", "sales amount", "amount", "usd amount", "total amount",
-        "net amount", "invoice amount", "金額"
-    ])
-    ship_amount_auto = _pick_existing(work, [
-        "出貨金額", "shipment amount", "ship amount", "invoice amount", "net shipment", "淨出貨金額"
-    ])
-    unit_price_auto = _pick_existing(work, [
-        "單價", "unit price", "price", "usd/pcs", "pcs price", "us$", "usd"
-    ])
-    hold_auto = _pick_existing(work, ["hold", "hold amount", "HOLD金額"])
-    discount_auto = _pick_existing(work, ["折讓", "discount", "discount amount"])
+    all_cols = ['(無)'] + [str(c) for c in work.columns]
+    def idx_for(col):
+        return all_cols.index(col) if col in all_cols else 0
 
-    month_default = datetime.now().strftime("%Y-%m")
     c1, c2, c3 = st.columns(3)
-    report_month = _normalize_month(c1.text_input("報表月份 (YYYY-MM)", value=month_default))
-    c2.text_input("子表名稱 / 公司名稱", value="")
-    currency_symbol = c3.text_input("幣別符號", value="US$")
+    report_month = c1.text_input('報表月份 (YYYY-MM)', value=datetime.now().strftime('%Y-%m'))
+    company_name = c2.text_input('子表名稱 / 公司名稱', value='')
+    currency_symbol = c3.text_input('幣別符號', value='US$')
 
-    with st.expander("欄位偵測"):
-        if not date_col:
-            st.error("找不到日期欄位")
-            return
-        date_options = [c for c in work.columns]
-        numeric_options = ["(無)"] + numeric_cols
-        d1, d2, d3, d4, d5, d6 = st.columns(6)
-        date_col = d1.selectbox("日期欄位", date_options, index=date_options.index(date_col) if date_col in date_options else 0)
-        order_amount_col = d2.selectbox("接單金額欄位", numeric_options, index=numeric_options.index(order_amount_auto) if order_amount_auto in numeric_options else 0)
-        ship_amount_col = d3.selectbox("出貨金額欄位", numeric_options, index=numeric_options.index(ship_amount_auto) if ship_amount_auto in numeric_options else 0)
-        unit_price_col = d4.selectbox("單價欄位", numeric_options, index=numeric_options.index(unit_price_auto) if unit_price_auto in numeric_options else 0)
-        hold_col = d5.selectbox("HOLD欄位", numeric_options, index=numeric_options.index(hold_auto) if hold_auto in numeric_options else 0)
-        discount_col = d6.selectbox("折讓欄位", numeric_options, index=numeric_options.index(discount_auto) if discount_auto in numeric_options else 0)
-        st.write(f"客戶欄位：{customer_col or '-'} / 工廠欄位：{factory_col or '-'} / 數量欄位：{qty_col or '-'}")
+    with st.expander('欄位偵測'):
+        d1, d2, d3 = st.columns(3)
+        date_col = d1.selectbox('日期欄位', all_cols, index=idx_for(date_default))
+        order_amt_col = d2.selectbox('接單金額欄位', all_cols, index=idx_for(order_amt_auto))
+        ship_amt_col = d3.selectbox('出貨金額欄位', all_cols, index=idx_for(ship_amt_auto))
+        e1, e2, e3 = st.columns(3)
+        unit_price_col = e1.selectbox('單價欄位', all_cols, index=idx_for(unit_price_auto))
+        hold_col = e2.selectbox('HOLD欄位', all_cols, index=idx_for(hold_auto))
+        discount_col = e3.selectbox('折讓欄位', all_cols, index=idx_for(discount_auto))
 
-    work["_report_date"] = pd.to_datetime(work[date_col], errors="coerce")
-    work["_month"] = work["_report_date"].dt.strftime("%Y-%m")
-    month_df = work[work["_month"] == report_month].copy()
+    if date_col == '(無)':
+        st.error('請在欄位偵測中指定日期欄位')
+        return
 
-    def parse_col(colname: str) -> pd.Series:
-        if not colname or colname == "(無)" or colname not in month_df.columns:
-            return pd.Series([0.0] * len(month_df), index=month_df.index)
-        return _parse_number_series(month_df[colname]).fillna(0.0)
+    work['_month'] = _to_month(work[date_col])
+    month_df = work[work['_month'] == report_month].copy()
 
-    qty_series = parse_col(qty_col) if qty_col in month_df.columns else pd.Series([0.0] * len(month_df), index=month_df.index)
-    unit_price_series = parse_col(unit_price_col)
-    order_amount_series = parse_col(order_amount_col)
-    ship_amount_series = parse_col(ship_amount_col)
-    hold_series = parse_col(hold_col)
-    discount_series = parse_col(discount_col)
+    if month_df.empty:
+        st.warning('所選月份沒有資料')
 
-    if float(order_amount_series.sum()) == 0 and float(unit_price_series.sum()) != 0 and float(qty_series.sum()) != 0:
-        order_amount_series = unit_price_series * qty_series
-    if float(ship_amount_series.sum()) == 0 and float(unit_price_series.sum()) != 0 and float(qty_series.sum()) != 0:
-        ship_amount_series = unit_price_series * qty_series
+    qty = _to_num(month_df[qty_col]) if qty_col and qty_col in month_df.columns else pd.Series(0.0, index=month_df.index)
+    unit_price = _to_num(month_df[unit_price_col]) if unit_price_col != '(無)' and unit_price_col in month_df.columns else pd.Series(0.0, index=month_df.index)
 
-    month_df["_order_amount"] = order_amount_series
-    month_df["_ship_amount"] = ship_amount_series
-    month_df["_hold"] = hold_series
-    month_df["_discount"] = discount_series
-    month_df["_net"] = month_df["_ship_amount"] - month_df["_hold"] - month_df["_discount"]
+    if order_amt_col != '(無)' and order_amt_col in month_df.columns:
+        month_df['_order_amt'] = _to_num(month_df[order_amt_col])
+    else:
+        month_df['_order_amt'] = unit_price * qty
 
-    total_order = float(month_df["_order_amount"].sum())
-    total_ship = float(month_df["_ship_amount"].sum())
-    total_net = float(month_df["_net"].sum())
+    if ship_amt_col != '(無)' and ship_amt_col in month_df.columns:
+        month_df['_ship_amt'] = _to_num(month_df[ship_amt_col])
+    else:
+        month_df['_ship_amt'] = unit_price * qty
 
-    customer_count = int(month_df[customer_col].astype(str).replace("", pd.NA).dropna().nunique()) if customer_col and customer_col in month_df.columns else 0
-    factory_count = int(month_df[factory_col].astype(str).replace("", pd.NA).dropna().nunique()) if factory_col and factory_col in month_df.columns else 0
+    hold = _to_num(month_df[hold_col]) if hold_col != '(無)' and hold_col in month_df.columns else pd.Series(0.0, index=month_df.index)
+    discount = _to_num(month_df[discount_col]) if discount_col != '(無)' and discount_col in month_df.columns else pd.Series(0.0, index=month_df.index)
+    month_df['_net'] = month_df['_ship_amt'] - hold - discount
 
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("接單金額", _fmt_money(total_order, currency_symbol))
-    m2.metric("出貨金額", _fmt_money(total_ship, currency_symbol))
-    m3.metric("淨出貨", _fmt_money(total_net, currency_symbol))
-    m4.metric("客戶數", customer_count)
-    m5.metric("廠商數", factory_count)
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric('接單金額', _fmt_money(month_df['_order_amt'].sum(), currency_symbol))
+    k2.metric('出貨金額', _fmt_money(month_df['_ship_amt'].sum(), currency_symbol))
+    k3.metric('淨出貨', _fmt_money(month_df['_net'].sum(), currency_symbol))
+    cust_count = int(month_df[customer_col].astype(str).replace('', pd.NA).dropna().nunique()) if customer_col and customer_col in month_df.columns else 0
+    fac_count = int(month_df[factory_col].astype(str).replace('', pd.NA).dropna().nunique()) if factory_col and factory_col in month_df.columns else 0
+    k4.metric('客戶數', cust_count)
+    k5.metric('廠商數', fac_count)
 
+    by_customer = pd.DataFrame(columns=['客戶', '出貨金額', '佔比%'])
     if customer_col and customer_col in month_df.columns:
-        by_customer = (
-            month_df.groupby(customer_col)["_ship_amount"]
-            .sum()
-            .reset_index()
-            .sort_values("_ship_amount", ascending=False)
-        )
-        left, right = st.columns(2)
-        with left:
-            st.markdown("**客戶業績比較**")
-            if by_customer.empty:
-                st.info("本月份沒有資料")
-            else:
-                chart_df = by_customer.set_index(customer_col)
-                st.bar_chart(chart_df)
-        with right:
-            st.markdown("**業績佔比**")
-            if by_customer.empty:
-                st.info("本月份沒有資料")
-            else:
-                show = by_customer.copy()
-                show.columns = ["客戶", "出貨金額"]
-                total = show["出貨金額"].sum()
-                show["佔比%"] = (show["出貨金額"] / total * 100).round(2) if total else 0
-                show["出貨金額"] = show["出貨金額"].map(lambda x: _fmt_money(x, currency_symbol))
-                st.dataframe(show, use_container_width=True, hide_index=True, height=340)
+        by_customer = month_df.groupby(customer_col, dropna=False)['_ship_amt'].sum().reset_index()
+        by_customer.columns = ['客戶', '出貨金額']
+        by_customer = by_customer.sort_values('出貨金額', ascending=False)
+        total_ship = float(by_customer['出貨金額'].sum())
+        by_customer['佔比%'] = (by_customer['出貨金額'] / total_ship * 100).round(2) if total_ship else 0.0
 
-    detail_cols = [c for c in [date_col, po_col, customer_col, part_col, qty_col, factory_col, wip_col, remark_col] if c and c in month_df.columns]
-    extra_cols = []
-    for col in [order_amount_col, ship_amount_col, unit_price_col, hold_col, discount_col]:
-        if col and col != "(無)" and col in month_df.columns and col not in detail_cols:
-            extra_cols.append(col)
-    st.markdown("**業績明細**")
-    st.dataframe(month_df[detail_cols + extra_cols], use_container_width=True, height=420, hide_index=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown('**客戶業績比較**')
+        if not by_customer.empty:
+            st.bar_chart(by_customer.set_index('客戶')[['出貨金額']])
+        else:
+            st.info('沒有可用金額欄位，請在欄位偵測指定金額或單價欄位。')
+    with c2:
+        st.markdown('**業績佔比**')
+        if not by_customer.empty:
+            show_pct = by_customer.copy()
+            show_pct['出貨金額'] = show_pct['出貨金額'].map(lambda x: _fmt_money(x, currency_symbol))
+            st.dataframe(show_pct, use_container_width=True, hide_index=True, height=320)
+        else:
+            st.info('沒有資料')
+
+    show_cols = [c for c in [date_col, po_col, customer_col, part_col, qty_col, factory_col, remark_col] if c and c in month_df.columns]
+    if '_order_amt' in month_df.columns:
+        month_df['接單金額'] = month_df['_order_amt']
+        show_cols.append('接單金額')
+    if '_ship_amt' in month_df.columns:
+        month_df['出貨金額'] = month_df['_ship_amt']
+        show_cols.append('出貨金額')
+    if '_net' in month_df.columns:
+        month_df['淨出貨'] = month_df['_net']
+        show_cols.append('淨出貨')
+
+    st.markdown('**明細**')
+    if show_cols:
+        st.dataframe(month_df[show_cols], use_container_width=True, height=420, hide_index=True)
+        st.download_button('下載明細 CSV', month_df[show_cols].to_csv(index=False).encode('utf-8-sig'), 'sales_report.csv', 'text/csv')
+        st.download_button('下載明細 Excel', _download_excel(month_df[show_cols]), 'sales_report.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
