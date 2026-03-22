@@ -312,8 +312,12 @@ with st.expander("Debug"):
     st.write("TABLE_URL:", cfg.TABLE_URL)
     st.write("Token loaded:", bool(cfg.TEABLE_TOKEN))
     st.write("Columns:", list(orders.columns) if not orders.empty else [])
+    st.write("Sales workbook path exists:", os.path.exists(SALES_BASE_PATH))
     st.write("Sales workbook loaded:", bool(not sales_df.empty))
     st.write("Sales shipment sheet loaded:", bool(not sales_shipment_df.empty))
+    if not sales_df.empty:
+        st.write("sales_df columns:", list(sales_df.columns))
+        st.write("sales_df sample:", sales_df[["Customer", "PO#", "Ship date", "INVOICE"]].head(10))
     if isinstance(api_text, str):
         st.text(api_text[:1200])
 
