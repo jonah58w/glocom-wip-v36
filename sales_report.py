@@ -20,7 +20,6 @@ def _pick_col(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
     for cand in candidates:
         if _norm(cand) in exact:
             return exact[_norm(cand)]
-    # score partial matches
     best = None
     best_score = -1
     for c in df.columns:
@@ -78,7 +77,7 @@ def render_sales_report_page(df=None, orders=None, po_col=None, customer_col=Non
     work = src.copy()
     customer_col = customer_col if customer_col in work.columns else _pick_col(work, ['客戶', 'customer'])
     factory_col = factory_col if factory_col in work.columns else _pick_col(work, ['工廠', 'factory'])
-    qty_col = qty_col if qty_col in work.columns else _pick_col(work, ['qty', 'quantity', 'order q\'ty', 'pcs'])
+    qty_col = qty_col if qty_col in work.columns else _pick_col(work, ['qty', 'quantity', "order q'ty", 'pcs'])
 
     date_default = None
     for c in [ship_date_col, order_date_col, 'Ship date', 'Ship Date', '出貨日期', '日期', 'Date']:
@@ -93,12 +92,16 @@ def render_sales_report_page(df=None, orders=None, po_col=None, customer_col=Non
     discount_auto = _pick_col(work, ['折讓', 'discount', 'discount amount'])
 
     all_cols = ['(無)'] + [str(c) for c in work.columns]
+
     def idx_for(col):
         return all_cols.index(col) if col in all_cols else 0
 
     c1, c2, c3 = st.columns(3)
     report_month = c1.text_input('報表月份 (YYYY-MM)', value=datetime.now().strftime('%Y-%m'))
-    company_name = c2.text_input('子表名稱 / 公司名稱', value='')
+
+    # 只改項目 1：預設公司改成 WESCO
+    company_name = c2.text_input('子表名稱 / 公司名稱', value='WESCO')
+
     currency_symbol = c3.text_input('幣別符號', value='US$')
 
     with st.expander('欄位偵測'):
@@ -118,8 +121,35 @@ def render_sales_report_page(df=None, orders=None, po_col=None, customer_col=Non
     work['_month'] = _to_month(work[date_col])
     month_df = work[work['_month'] == report_month].copy()
 
+    # 只改項目 2：實際套用公司篩選，避免業績明細抓錯或顯示 0
+    if company_name.strip():
+        candidate_company_cols = []
+
+        if customer_col and customer_col in month_df.columns:
+            candidate_company_cols.append(customer_col)
+
+        for col in ['子表名稱', '公司名稱', '客戶', 'Customer', 'customer']:
+            if col in month_df.columns and col not in candidate_company_cols:
+                candidate_company_cols.append(col)
+
+        filtered_df = pd.DataFrame()
+        matched_col = None
+
+        for col in candidate_company_cols:
+            temp = month_df[
+                month_df[col].astype(str).str.strip().str.upper()
+                == company_name.strip().upper()
+            ].copy()
+            if not temp.empty:
+                filtered_df = temp
+                matched_col = col
+                break
+
+        if matched_col is not None:
+            month_df = filtered_df
+
     if month_df.empty:
-        st.warning('所選月份沒有資料')
+        st.warning('所選月份或公司沒有資料')
 
     qty = _to_num(month_df[qty_col]) if qty_col and qty_col in month_df.columns else pd.Series(0.0, index=month_df.index)
     unit_price = _to_num(month_df[unit_price_col]) if unit_price_col != '(無)' and unit_price_col in month_df.columns else pd.Series(0.0, index=month_df.index)
