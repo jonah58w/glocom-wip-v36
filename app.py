@@ -86,7 +86,13 @@ def wip_display_html(value: str) -> str:
         label = text or "Inspection"
         bg = "#854d0e"
         fg = "#fef3c7"
-    elif any(k in lower for k in ["aoi", "drill", "route", "routing", "plating", "inner", "production", "防焊", "壓合", "外層", "內層", "成型"]):
+    elif any(
+        k in lower
+        for k in [
+            "aoi", "drill", "route", "routing", "plating", "inner", "production",
+            "防焊", "壓合", "外層", "內層", "成型"
+        ]
+    ):
         label = text or "Production"
         bg = "#9a3412"
         fg = "#ffedd5"
@@ -362,6 +368,88 @@ st.sidebar.caption("另建 Completed View：WIP = 完成")
 
 
 # ================================
+# IMPORT / UPDATE FALLBACK
+# ================================
+def fallback_import_update():
+    st.subheader("Import / Update")
+    st.caption("工廠進度輸入工具：檔案上傳、圖片截圖、貼上文字、手工輸入。")
+
+    tab1, tab2, tab3, tab4 = st.tabs(["檔案上傳", "圖片截圖", "貼上文字", "手工輸入"])
+
+    with tab1:
+        uploaded = st.file_uploader(
+            "上傳工廠進度檔案",
+            type=["xlsx", "xls", "csv", "txt"],
+            key="factory_upload_file",
+        )
+        if uploaded is not None:
+            name = uploaded.name.lower()
+            try:
+                if name.endswith((".xlsx", ".xls")):
+                    df_up = pd.read_excel(uploaded)
+                    st.success(f"已讀取 {len(df_up)} 筆")
+                    st.dataframe(df_up, use_container_width=True, height=420)
+                elif name.endswith(".csv"):
+                    df_up = pd.read_csv(uploaded)
+                    st.success(f"已讀取 {len(df_up)} 筆")
+                    st.dataframe(df_up, use_container_width=True, height=420)
+                else:
+                    text = uploaded.getvalue().decode("utf-8", errors="ignore")
+                    st.text_area("文字內容", value=text, height=260, key="factory_text_preview")
+            except Exception as e:
+                st.error(f"讀取失敗：{e}")
+
+    with tab2:
+        image_file = st.file_uploader(
+            "上傳截圖 / 圖片",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="factory_image_upload",
+        )
+        if image_file is not None:
+            st.image(image_file, caption="已上傳截圖")
+            try:
+                import pytesseract
+                from PIL import Image
+
+                img = Image.open(image_file)
+                text = pytesseract.image_to_string(img, lang="eng")
+                st.text_area("OCR 辨識文字", value=text, height=260, key="factory_ocr_text")
+            except Exception:
+                st.info("目前環境未啟用 OCR，可改用下方『貼上文字』或『手工輸入』。")
+
+    with tab3:
+        pasted = st.text_area("貼上工廠進度文字", height=280, key="factory_pasted_text")
+        if pasted.strip():
+            st.text_area("預覽", value=pasted, height=280, key="factory_pasted_preview")
+
+    with tab4:
+        rows = st.number_input("手工輸入列數", min_value=1, max_value=50, value=5, step=1, key="factory_manual_rows")
+        manual_df = pd.DataFrame(
+            {
+                "PO#": [""] * rows,
+                "Customer": [""] * rows,
+                "P/N": [""] * rows,
+                "QTY": [""] * rows,
+                "WIP": [""] * rows,
+                "Ship date": [""] * rows,
+                "Remark": [""] * rows,
+            }
+        )
+        edited = st.data_editor(
+            manual_df,
+            use_container_width=True,
+            num_rows="fixed",
+            key="factory_manual_editor",
+        )
+        st.download_button(
+            "下載手工輸入 CSV",
+            data=edited.to_csv(index=False).encode("utf-8-sig"),
+            file_name="factory_manual_input.csv",
+            mime="text/csv",
+        )
+
+
+# ================================
 # ROUTING
 # ================================
 common_kwargs = dict(
@@ -436,6 +524,6 @@ elif menu == "業績明細表":
 elif menu == "Import / Update":
     ok = call_report_function(["show_import_update_page", "show_import_update_report"], **common_kwargs)
     if ok is False:
-        st.info("Import / Update fallback not enabled.")
+        fallback_import_update()
 
 st.caption("Auto refresh cache: 60 seconds")
