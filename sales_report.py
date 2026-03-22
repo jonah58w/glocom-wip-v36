@@ -8,42 +8,24 @@ import pandas as pd
 import streamlit as st
 
 
+def _norm(text: Any) -> str:
+    return str(text).strip().lower()
+
+
 def _pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    normalized = {str(c).strip().lower(): c for c in df.columns}
+    normalized = {_norm(c): c for c in df.columns}
     for cand in candidates:
-        c = normalized.get(str(cand).strip().lower())
-        if c:
-            return c
+        hit = normalized.get(_norm(cand))
+        if hit:
+            return hit
     return None
-
-
-def _keyword_pick(df: pd.DataFrame, keywords: list[str]) -> str | None:
-    for col in df.columns:
-        c = str(col).strip().lower()
-        if any(k in c for k in keywords):
-            return col
-    return None
-
-
-def _num_like_cols(df: pd.DataFrame) -> list[str]:
-    out = []
-    for col in df.columns:
-        s = _to_num_series(df[col])
-        if s.notna().sum() and float(s.abs().sum()) > 0:
-            out.append(col)
-    return out
 
 
 def _to_num_series(series: pd.Series) -> pd.Series:
     s = series.astype(str)
     s = s.str.replace(",", "", regex=False)
-    s = s.str.replace("US$", "", regex=False)
-    s = s.str.replace("USD", "", regex=False)
-    s = s.str.replace("NT$", "", regex=False)
-    s = s.str.replace("$", "", regex=False)
-    s = s.str.replace("￥", "", regex=False)
-    s = s.str.replace("¥", "", regex=False)
-    s = s.str.replace("€", "", regex=False)
+    for token in ["US$", "USD", "NT$", "$", "¥", "￥", "€"]:
+        s = s.str.replace(token, "", regex=False)
     s = s.str.extract(r"([-+]?\d*\.?\d+)", expand=False)
     return pd.to_numeric(s, errors="coerce").fillna(0)
 
@@ -61,10 +43,48 @@ def _fmt_money(val: float, symbol: str = "US$") -> str:
     return f"{symbol} {val:,.0f}"
 
 
-def _safe_series(df: pd.DataFrame, col: str | None) -> pd.Series:
-    if col and col in df.columns:
-        return df[col]
-    return pd.Series([0] * len(df), index=df.index)
+def _numeric_cols(df: pd.DataFrame) -> list[str]:
+    out: list[str] = []
+    for col in df.columns:
+        s = _to_num_series(df[col])
+        if s.notna().sum() > 0 and float(s.abs().sum()) > 0:
+            out.append(col)
+    return out
+
+
+def _score_col_name(col: str, include_keywords: list[str], exclude_keywords: list[str]) -> int:
+    name = _norm(col)
+    score = 0
+    for kw in include_keywords:
+        if kw in name:
+            score += 10
+    for kw in exclude_keywords:
+        if kw in name:
+            score -= 10
+    return score
+
+
+def _best_numeric_col(df: pd.DataFrame, include_keywords: list[str], exclude_keywords: list[str], avoid: set[str] | None = None) -> str | None:
+    avoid = avoid or set()
+    candidates = []
+    for col in _numeric_cols(df):
+        if col in avoid:
+            continue
+        score = _score_col_name(col, include_keywords, exclude_keywords)
+        s = _to_num_series(df[col])
+        nonzero = int((s != 0).sum())
+        total = float(s.abs().sum())
+        candidates.append((score, nonzero, total, col))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+    top = candidates[0]
+    # avoid returning obviously bad columns when score is very low and looks like qty/id only
+    return top[3] if top[0] >= 0 or len(candidates) == 1 else None
+
+
+def _safe_col_options(df: pd.DataFrame) -> list[str]:
+    return ["(無)"] + list(df.columns)
 
 
 def render_sales_report_page(
@@ -84,7 +104,7 @@ def render_sales_report_page(
     source_df = orders if isinstance(orders, pd.DataFrame) and not orders.empty else df
 
     st.subheader("業績明細表")
-    st.caption("只統計所選月份；預設幣別為美金；可手動修正欄位對應。")
+    st.caption("只統計所選月份；預設幣別為美金。")
 
     if not isinstance(source_df, pd.DataFrame) or source_df.empty:
         st.warning("目前沒有可用資料")
@@ -100,26 +120,36 @@ def render_sales_report_page(
         order_date_col = _pick_col(work, ["Order date", "Order Date", "日期", "接單日期", "建立日期"])
     if not ship_date_col or ship_date_col not in work.columns:
         ship_date_col = _pick_col(work, ["Ship date", "Ship Date", "出貨日期", "日期"])
+    if not qty_col or qty_col not in work.columns:
+        qty_col = _pick_col(work, ["Order Q'TY (PCS)", "Qty", "QTY", "Quantity", "數量", "PCS"])
 
-    order_amount_candidates = [
-        "Order Amount", "Order Amt", "Order Value", "接單金額", "接單總額", "Amount", "Sales Amount", "USD Amount", "Total Amount", "Order USD", "Sales USD",
-    ]
-    ship_amount_candidates = [
+    qty_like = ["qty", "q'ty", "quantity", "pcs", "數量"]
+    id_like = ["po", "p/o", "order no", "單號", "id", "編號", "天數", "days", "week", "month", "year", "date"]
+    amount_like = ["amount", "amt", "value", "usd", "sales", "total", "金額", "總額", "價值"]
+    ship_like = ["shipment", "ship", "invoice", "net shipment", "net amount", "出貨", "淨出貨", "銷貨"]
+    order_like = ["order", "接單"]
+    price_like = ["unit price", "price", "單價", "sell price", "usd/pcs", "usd price", "sales price"]
+    hold_like = ["hold"]
+    discount_like = ["discount", "折讓"]
+
+    numeric_cols = _numeric_cols(work)
+    avoid_cols = {c for c in [qty_col, po_col] if c}
+
+    auto_order_amount_col = _pick_col(work, [
+        "Order Amount", "Order Amt", "Order Value", "接單金額", "接單總額", "Sales Amount", "USD Amount", "Total Amount", "Order USD", "Sales USD",
+    ]) or _best_numeric_col(work, order_like + amount_like, qty_like + id_like + ship_like, avoid=avoid_cols)
+
+    auto_ship_amount_col = _pick_col(work, [
         "Shipment Amount", "Ship Amount", "出貨金額", "出貨總額", "Invoice Amount", "Net Shipment", "淨出貨金額", "Net Amount", "Shipment USD", "Invoice USD",
-    ]
-    unit_price_candidates = [
+    ]) or _best_numeric_col(work, ship_like + amount_like, qty_like + id_like, avoid=avoid_cols)
+
+    auto_unit_price_col = _pick_col(work, [
         "Unit Price", "Price", "單價", "USD/PCS", "USD Price", "Sell Price", "Sales Price", "Price USD",
-    ]
-    hold_candidates = ["HOLD金額", "Hold Amount", "HOLD", "Hold"]
-    discount_candidates = ["折讓", "Discount", "Discount Amount"]
+    ]) or _best_numeric_col(work, price_like, qty_like + id_like + ship_like + order_like, avoid=avoid_cols)
 
-    auto_order_amount_col = _pick_col(work, order_amount_candidates) or _keyword_pick(work, ["order amount", "接單金額", "sales amount", "amount", "usd"])
-    auto_ship_amount_col = _pick_col(work, ship_amount_candidates) or _keyword_pick(work, ["shipment amount", "ship amount", "出貨金額", "invoice", "net shipment", "淨出貨"])
-    auto_unit_price_col = _pick_col(work, unit_price_candidates) or _keyword_pick(work, ["unit price", "單價", "price"])
-    auto_hold_col = _pick_col(work, hold_candidates) or _keyword_pick(work, ["hold"])
-    auto_discount_col = _pick_col(work, discount_candidates) or _keyword_pick(work, ["discount", "折讓"])
+    auto_hold_col = _pick_col(work, ["HOLD金額", "Hold Amount", "HOLD", "Hold"])
+    auto_discount_col = _pick_col(work, ["折讓", "Discount", "Discount Amount"])
 
-    numeric_cols = _num_like_cols(work)
     default_month = datetime.now().strftime("%Y-%m")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -131,24 +161,17 @@ def render_sales_report_page(
 
     report_month = _normalize_month_text(report_month_input)
 
-    with st.expander("欄位偵測", expanded=True):
-        cols = ["(無)"] + list(work.columns)
+    with st.expander("欄位偵測", expanded=False):
+        cols = _safe_col_options(work)
         date_default = ship_date_col or order_date_col or "(無)"
-        order_default = auto_order_amount_col or "(無)"
-        ship_default = auto_ship_amount_col or "(無)"
-        unit_default = auto_unit_price_col or "(無)"
-        hold_default = auto_hold_col or "(無)"
-        discount_default = auto_discount_col or "(無)"
+        date_col = st.selectbox("日期欄位", cols, index=cols.index(date_default) if date_default in cols else 0)
 
-        d1, d2, d3, d4, d5, d6 = st.columns(6)
-        date_col = d1.selectbox("日期欄位", cols, index=cols.index(date_default) if date_default in cols else 0)
-        order_amount_col = d2.selectbox("接單金額欄位", cols, index=cols.index(order_default) if order_default in cols else 0)
-        ship_amount_col = d3.selectbox("出貨金額欄位", cols, index=cols.index(ship_default) if ship_default in cols else 0)
-        unit_price_col = d4.selectbox("單價欄位", cols, index=cols.index(unit_default) if unit_default in cols else 0)
-        hold_col = d5.selectbox("HOLD欄位", cols, index=cols.index(hold_default) if hold_default in cols else 0)
-        discount_col = d6.selectbox("折讓欄位", cols, index=cols.index(discount_default) if discount_default in cols else 0)
-        st.write(f"客戶欄位：{customer_col or '(無)'} / 工廠欄位：{factory_col or '(無)'} / 數量欄位：{qty_col or '(無)'}")
-        st.write("可用數值欄位：", numeric_cols[:20])
+        d1, d2, d3, d4, d5 = st.columns(5)
+        order_amount_col = d1.selectbox("接單金額欄位", cols, index=cols.index(auto_order_amount_col) if auto_order_amount_col in cols else 0)
+        ship_amount_col = d2.selectbox("出貨金額欄位", cols, index=cols.index(auto_ship_amount_col) if auto_ship_amount_col in cols else 0)
+        unit_price_col = d3.selectbox("單價欄位", cols, index=cols.index(auto_unit_price_col) if auto_unit_price_col in cols else 0)
+        hold_col = d4.selectbox("HOLD欄位", cols, index=cols.index(auto_hold_col) if auto_hold_col in cols else 0)
+        discount_col = d5.selectbox("折讓欄位", cols, index=cols.index(auto_discount_col) if auto_discount_col in cols else 0)
 
     if date_col == "(無)":
         st.error("請指定日期欄位")
@@ -162,26 +185,38 @@ def render_sales_report_page(
         st.warning(f"{report_month} 沒有資料。")
         return
 
-    qty_series = _to_num_series(_safe_series(month_df, qty_col)) if qty_col and qty_col in month_df.columns else pd.Series([0] * len(month_df), index=month_df.index)
-    unit_price_series = _to_num_series(_safe_series(month_df, unit_price_col)) if unit_price_col != "(無)" else pd.Series([0] * len(month_df), index=month_df.index)
+    qty_series = _to_num_series(month_df[qty_col]) if qty_col and qty_col in month_df.columns else pd.Series(0, index=month_df.index)
+    unit_price_series = _to_num_series(month_df[unit_price_col]) if unit_price_col != "(無)" and unit_price_col in month_df.columns else pd.Series(0, index=month_df.index)
 
-    if order_amount_col != "(無)":
+    if order_amount_col != "(無)" and order_amount_col in month_df.columns:
         month_df["_order_amount"] = _to_num_series(month_df[order_amount_col])
     elif unit_price_col != "(無)" and qty_col and qty_col in month_df.columns:
         month_df["_order_amount"] = qty_series * unit_price_series
     else:
-        month_df["_order_amount"] = 0
+        fallback_order = _best_numeric_col(month_df, amount_like + order_like, qty_like + id_like + ship_like, avoid={qty_col} if qty_col else set())
+        month_df["_order_amount"] = _to_num_series(month_df[fallback_order]) if fallback_order else 0
 
-    if ship_amount_col != "(無)":
+    if ship_amount_col != "(無)" and ship_amount_col in month_df.columns:
         month_df["_ship_amount"] = _to_num_series(month_df[ship_amount_col])
     elif unit_price_col != "(無)" and qty_col and qty_col in month_df.columns:
         month_df["_ship_amount"] = qty_series * unit_price_series
     else:
-        month_df["_ship_amount"] = 0
+        fallback_ship = _best_numeric_col(month_df, amount_like + ship_like, qty_like + id_like, avoid={qty_col} if qty_col else set())
+        month_df["_ship_amount"] = _to_num_series(month_df[fallback_ship]) if fallback_ship else 0
 
-    month_df["_hold"] = _to_num_series(month_df[hold_col]) if hold_col != "(無)" else 0
-    month_df["_discount"] = _to_num_series(month_df[discount_col]) if discount_col != "(無)" else 0
+    month_df["_hold"] = _to_num_series(month_df[hold_col]) if hold_col != "(無)" and hold_col in month_df.columns else 0
+    month_df["_discount"] = _to_num_series(month_df[discount_col]) if discount_col != "(無)" and discount_col in month_df.columns else 0
     month_df["_net_ship"] = month_df["_ship_amount"] - month_df["_hold"] - month_df["_discount"]
+
+    # final rescue: if both totals are zero and there is a price column, try qty * price again with any best numeric candidate
+    if float(month_df["_order_amount"].sum()) == 0 and float(month_df["_ship_amount"].sum()) == 0 and qty_col and qty_col in month_df.columns:
+        if unit_price_col == "(無)" or unit_price_col not in month_df.columns:
+            fallback_price = _best_numeric_col(month_df, price_like + amount_like, qty_like + id_like + ship_like + order_like, avoid={qty_col} if qty_col else set())
+            if fallback_price:
+                unit_price_series = _to_num_series(month_df[fallback_price])
+                month_df["_order_amount"] = qty_series * unit_price_series
+                month_df["_ship_amount"] = qty_series * unit_price_series
+                month_df["_net_ship"] = month_df["_ship_amount"] - month_df["_hold"] - month_df["_discount"]
 
     order_total = float(month_df["_order_amount"].sum())
     ship_total = float(month_df["_ship_amount"].sum())
@@ -197,7 +232,7 @@ def render_sales_report_page(
     m5.metric("廠商數", factory_count)
 
     if order_total == 0 and ship_total == 0:
-        st.warning("目前接單/出貨金額仍為 0。請在『欄位偵測』中手動指定接單金額、出貨金額，或指定單價欄位搭配數量欄位計算。")
+        st.warning("目前金額仍為 0，請展開『欄位偵測』指定正確的金額欄位或單價欄位。")
 
     if customer_col and customer_col in month_df.columns:
         by_customer = (
@@ -234,10 +269,10 @@ def render_sales_report_page(
         st.line_chart(daily.set_index("日期")[["接單金額", "出貨金額", "淨出貨"]])
 
     show_cols = [
-        c for c in [date_col, po_col, customer_col, factory_col, part_col, qty_col, unit_price_col if unit_price_col != '(無)' else None, wip_col, ship_date_col, remark_col]
+        c for c in [date_col, po_col, customer_col, factory_col, part_col, qty_col, wip_col, ship_date_col, remark_col]
         if c and c in month_df.columns
     ]
-    for c in [order_amount_col, ship_amount_col, hold_col, discount_col]:
+    for c in [order_amount_col, ship_amount_col, unit_price_col, hold_col, discount_col]:
         if c != "(無)" and c in month_df.columns and c not in show_cols:
             show_cols.append(c)
 
