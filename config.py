@@ -8,8 +8,11 @@ TABLE_URL = "https://app.teable.ai/api/table/tbl6c05EPXYtJcZfeir/record"
 TEABLE_WEB_URL = "https://app.teable.ai/base/bsedgLzbHjiK0XoZH01/table/tbl6c05EPXYtJcZfeir"
 
 # 請從 Streamlit Secrets 或環境變數載入 Token
-# 在 .streamlit/secrets.toml 中設定:
-# TEABLE_TOKEN = "your_token_here"
+try:
+    import streamlit as st
+    TEABLE_TOKEN = st.secrets.get("TEABLE_TOKEN", "")
+except Exception:
+    TEABLE_TOKEN = ""
 
 # 欄位候補名稱（用於自動匹配不同工廠的 Excel 格式）
 PO_CANDIDATES = [
