@@ -9,8 +9,15 @@ import pandas as pd
 import requests
 from typing import Optional, Dict, Any, Tuple, List
 
-from config import TABLE_URL, TEABLE_TOKEN, HEADERS, PO_CANDIDATES, WIP_CANDIDATES
+# 修正：移除 HEADERS 的匯入
+from config import TABLE_URL, TEABLE_TOKEN, PO_CANDIDATES, WIP_CANDIDATES
 from utils import normalize_columns, get_series_by_col
+
+# 修正：在模組內部建構 HEADERS
+HEADERS = {
+    "Authorization": f"Bearer {TEABLE_TOKEN}",
+    "Content-Type": "application/json",
+}
 
 
 def load_orders() -> Tuple[pd.DataFrame, Any, str]:
@@ -162,7 +169,7 @@ def update_working_orders_local(
     return working_orders
 
 
-# ============ 新增：批量更新函數 ============
+# ============ 批量更新函數 ============
 
 def batch_update_wip_from_excel(
     current_df: pd.DataFrame,
@@ -171,15 +178,6 @@ def batch_update_wip_from_excel(
 ) -> Dict[str, Any]:
     """
     從工廠 Excel 批量更新 WIP 到 Teable
-    
-    支援多種工廠格式：
-    - 全興電子：多列製程，通過日期判斷當前進度
-    - Profit Grand：直接 WIP 列
-    - 祥竑電子：多列製程 + 數量判斷
-    - 西拓電子：簡單 進度 列
-    
-    Returns:
-        Dict with success_count, failed_count, details
     """
     results = {
         'success_count': 0,
@@ -206,7 +204,7 @@ def batch_update_wip_from_excel(
             wip_col = candidate
             break
     
-    # 檢測是否為多列製程格式（全興/祥竑類型）
+    # 檢測是否為多列製程格式
     process_cols = _detect_process_columns(uploaded_df)
     
     for idx, row in uploaded_df.iterrows():
@@ -219,12 +217,10 @@ def batch_update_wip_from_excel(
             wip_status = None
             
             if wip_col and wip_col in uploaded_df.columns:
-                # 簡單格式：直接讀取 WIP 列
                 raw_val = row.get(wip_col, "")
                 if pd.notna(raw_val) and str(raw_val).strip():
                     wip_status = str(raw_val).strip()
             elif process_cols:
-                # 多列製程格式：智能解析當前進度
                 wip_status = _parse_wip_from_process(row, process_cols)
             
             if not wip_status:
@@ -246,7 +242,6 @@ def batch_update_wip_from_excel(
             
             # 準備更新數據
             update_fields = {}
-            # 使用配置中的第一個 WIP 候選列名
             from config import WIP_CANDIDATES as CFG_WIP
             if CFG_WIP:
                 update_fields[CFG_WIP[0]] = wip_status
@@ -284,7 +279,6 @@ def batch_update_wip_from_excel(
 
 def _detect_process_columns(df: pd.DataFrame) -> List[str]:
     """檢測是否為多列製程格式，返回製程列名列表"""
-    # 常見製程關鍵詞
     process_keywords = [
         '下料', '壓合', '鑽孔', '一銅', '外層', '二銅', '防焊', '文字', '成型', '測試',
         '排版', '內層', '內測', '乾膜', 'AOI', '半測', '化金', 'OSP', '化銀', '包裝',
@@ -306,9 +300,7 @@ def _parse_wip_from_process(row: pd.Series, process_cols: List[str]) -> Optional
     last_active = None
     for col in reversed(process_cols):
         val = str(row.get(col, "")).strip()
-        # 排除空白、0、橫線、nan 等無效值
         if val and val.lower() not in ['nan', 'none', '', '-', '0', 'pcs', 'wip', 'wpnl']:
-            # 如果是日期格式（如 03-04, 0311）或數字，視為該製程有進度
             if _is_date_like(val) or _is_number_like(val):
                 last_active = col
                 break
@@ -327,14 +319,13 @@ def _parse_wip_from_process(row: pd.Series, process_cols: List[str]) -> Optional
 
 
 def _is_date_like(val: str) -> bool:
-    """判斷是否為日期格式（如 03-04, 0311, 03/24）"""
+    """判斷是否為日期格式"""
     import re
-    # 匹配 數字-數字, 數字/數字, 純數字(4位)
     return bool(re.match(r'^\d{2}[-/]\d{2}$|^\d{4}$|^\d{2}$', val.strip()))
 
 
 def _is_number_like(val: str) -> bool:
-    """判斷是否為數字（製程數量）"""
+    """判斷是否為數字"""
     try:
         float(val.replace(',', ''))
         return True
