@@ -1,1159 +1,506 @@
-import io
+-- coding: utf-8 --
+
+import inspect
 import os
-import re
-import json
-import math
-import time
-from datetime import datetime, date
-from typing import Any, Dict, List, Optional, Tuple
-
 import pandas as pd
-import requests
 import streamlit as st
+import config as cfg
+import utils as u
+import teable_api
+import reports
+from sales_report import render_sales_report_page
 
-# =========================================================
-# PAGE CONFIG
-# =========================================================
-st.set_page_config(
-    page_title="GLOCOM Control Tower",
-    page_icon="🏭",
-    layout="wide"
+================================
+
+
+STYLE
+
+
+================================
+
+st.markdown(
+"""
+
+""",
+unsafe_allow_html=True,
 )
 
-# =========================================================
-# DEFAULT CONFIG
-# =========================================================
-DEFAULT_TABLE_URL = "https://app.teable.ai/api/table/tbl6c05EPXYtJcZfeir/record"
-DEFAULT_TEABLE_WEB_URL = "https://app.teable.ai/base/bsedgLzbHjiK0XoZH01/table/tbl6c05EPXYtJcZfeir"
-
-try:
-    TEABLE_TOKEN = st.secrets.get("TEABLE_TOKEN", "")
-except Exception:
-    TEABLE_TOKEN = ""
-
-try:
-    TABLE_URL = st.secrets.get("TEABLE_TABLE_URL", DEFAULT_TABLE_URL)
-except Exception:
-    TABLE_URL = DEFAULT_TABLE_URL
-
-try:
-    TEABLE_WEB_URL = st.secrets.get("TEABLE_WEB_URL", DEFAULT_TEABLE_WEB_URL)
-except Exception:
-    TEABLE_WEB_URL = DEFAULT_TEABLE_WEB_URL
-
-# =========================================================
-# USER-ADJUSTABLE FIELD MAPPING
-# 請依你的 Teable 主表欄位名稱微調
-# =========================================================
-TEABLE_MATCH_FIELDS = [
-    "訂單號",
-    "PO",
-    "PO No",
-    "PO NO",
-    "Order No",
-    "訂單編號",
-    "工單號",
-]
-
-TEABLE_PART_FIELDS = [
-    "料號",
-    "客戶料號",
-    "Part No",
-    "Part Number",
-    "P/N",
-    "Customer P/N",
-    "Cust. P/N",
-    "品名料號",
-    "客戶品號",
-    "產品料號",
-]
-
-TEABLE_FACTORY_PART_FIELDS = [
-    "工廠料號",
-    "廠編",
-    "Vendor P/N",
-    "Factory P/N",
-    "LS P/N",
-    "祥竑料號",
-]
-
-TEABLE_PROGRESS_TARGET_FIELDS = [
-    "進度",
-    "WIP",
-    "WIP進度",
-    "目前進度",
-    "工廠進度",
-]
-
-TEABLE_REPLY_DATE_FIELDS = [
-    "工廠回覆日期",
-    "更新日期",
-    "WIP更新日期",
-    "最新回覆日期",
-]
-
-TEABLE_NOTE_FIELDS = [
-    "備註",
-    "工廠備註",
-    "WIP備註",
-]
-
-TEABLE_SOURCE_FIELDS = [
-    "資料來源",
-    "WIP來源",
-    "工廠來源",
-]
-
-TEABLE_QTY_FIELDS = [
-    "數量",
-    "QTY",
-    "Qty",
-    "訂單數量",
-]
-
-# =========================================================
-# HELPERS
-# =========================================================
-def safe_strip(v: Any) -> str:
-    if v is None:
-        return ""
-    if isinstance(v, float) and pd.isna(v):
-        return ""
-    return str(v).strip()
-
-
-def is_blank(v: Any) -> bool:
-    s = safe_strip(v)
-    return s == "" or s.lower() == "nan" or s.lower() == "none"
-
-
-def normalize_space(s: str) -> str:
-    s = s.replace("\u3000", " ")
-    s = re.sub(r"\s+", " ", s)
-    return s.strip()
-
-
-def normalize_part_no(s: Any) -> str:
-    """
-    料號正規化：
-    - 大寫
-    - 去括號內容
-    - 去 REV / VER / VERSION 之後內容
-    - 去空白與符號，只留英數
-    """
-    s = safe_strip(s).upper()
-    if not s:
-        return ""
-
-    s = normalize_space(s)
-
-    # 去掉括號內容
-    s = re.sub(r"\(.*?\)", "", s)
-    s = re.sub(r"\[.*?\]", "", s)
-
-    # 去掉版本字尾
-    s = re.sub(r"\bREV(?:ISION)?\b[.\s_-]*[A-Z0-9\-_/]*", "", s)
-    s = re.sub(r"\bVER(?:SION)?\b[.\s_-]*[A-Z0-9\-_/]*", "", s)
-
-    # 常見尾碼清理
-    s = re.sub(r"NEW VERSION.*$", "", s)
-    s = re.sub(r"版.*$", "", s)
-
-    # 只留英數
-    s = re.sub(r"[^A-Z0-9]", "", s)
-
-    return s.strip()
-
-
-def normalize_order_no(s: Any) -> str:
-    s = safe_strip(s).upper()
-    s = re.sub(r"\s+", "", s)
-    s = re.sub(r"[^A-Z0-9\-]", "", s)
-    return s
-
-
-def excel_serial_or_date_to_str(v: Any) -> str:
-    if pd.isna(v):
-        return ""
-    if isinstance(v, (datetime, date)):
-        return v.strftime("%Y-%m-%d")
-    s = safe_strip(v)
-    return s
-
-
-def first_existing_field(d: Dict[str, Any], names: List[str]) -> str:
-    for name in names:
-        if name in d and not is_blank(d.get(name)):
-            return safe_strip(d.get(name))
-    return ""
-
-
-def find_first_matching_col(columns: List[str], keywords: List[str]) -> Optional[str]:
-    cols_norm = [(c, normalize_space(str(c)).lower()) for c in columns]
-    for kw in keywords:
-        kw2 = normalize_space(kw).lower()
-        for original, c in cols_norm:
-            if kw2 == c:
-                return original
-        for original, c in cols_norm:
-            if kw2 in c:
-                return original
-    return None
-
-
-def try_parse_numeric(v: Any) -> Optional[float]:
-    if pd.isna(v):
-        return None
-    s = safe_strip(v)
-    if not s:
-        return None
-    s = s.replace(",", "")
-    try:
-        return float(s)
-    except Exception:
-        return None
-
-
-def normalize_progress_text(s: Any) -> str:
-    s = safe_strip(s)
-    s = normalize_space(s)
-    s = s.replace("待开料", "待開料")
-    s = s.replace("备料中", "備料中")
-    s = s.replace("备料", "備料")
-    s = s.replace("已出货", "已出貨")
-    s = s.replace("出货", "出貨")
-    return s
-
-
-def progress_rank_map() -> Dict[str, int]:
-    return {
-        "待開料": 5,
-        "備料中": 8,
-        "下料": 10,
-        "內層": 20,
-        "壓合": 30,
-        "鑽孔": 40,
-        "一銅": 50,
-        "外層": 55,
-        "二銅": 60,
-        "AOI": 65,
-        "半測": 70,
-        "防焊": 80,
-        "文字": 85,
-        "化金": 90,
-        "表面處理": 92,
-        "成型": 95,
-        "測試": 97,
-        "成檢": 98,
-        "包裝": 99,
-        "已出貨": 100,
-        "出貨": 100,
-    }
-
-
-def choose_better_progress(old_p: str, new_p: str) -> str:
-    rank = progress_rank_map()
-    old_r = rank.get(old_p, 0)
-    new_r = rank.get(new_p, 0)
-    return new_p if new_r >= old_r else old_p
-
-
-def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df = df.dropna(how="all")
-    df = df.dropna(axis=1, how="all")
-    df.columns = [safe_strip(c) for c in df.columns]
-    return df
-
-
-# =========================================================
-# TEABLE API
-# =========================================================
-def teable_headers() -> Dict[str, str]:
-    headers = {"Content-Type": "application/json"}
-    if TEABLE_TOKEN:
-        headers["Authorization"] = f"Bearer {TEABLE_TOKEN}"
-    return headers
-
-
-def fetch_teable_records(limit: int = 1000) -> List[Dict[str, Any]]:
-    if not TEABLE_TOKEN:
-        return []
-
-    all_records = []
-    page_token = None
-
-    while True:
-        params = {"pageSize": 200}
-        if page_token:
-            params["pageToken"] = page_token
-
-        try:
-            resp = requests.get(TABLE_URL, headers=teable_headers(), params=params, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            st.error(f"讀取 Teable 主表失敗：{e}")
-            return all_records
-
-        records = data.get("records", []) or data.get("data", {}).get("records", [])
-        all_records.extend(records)
-
-        if len(all_records) >= limit:
-            break
-
-        page_token = data.get("pageToken") or data.get("nextPageToken") or data.get("data", {}).get("pageToken")
-        if not page_token:
-            break
-
-    return all_records
-
-
-def update_teable_record(record_id: str, fields: Dict[str, Any]) -> Tuple[bool, str]:
-    if not TEABLE_TOKEN:
-        return False, "未設定 TEABLE_TOKEN"
-
-    payload = {"records": [{"id": record_id, "fields": fields}]}
-
-    try:
-        resp = requests.patch(TABLE_URL, headers=teable_headers(), json=payload, timeout=30)
-        if resp.status_code >= 400:
-            return False, f"{resp.status_code}: {resp.text}"
-        return True, "OK"
-    except Exception as e:
-        return False, str(e)
-
-
-# =========================================================
-# MAIN TABLE INDEX
-# =========================================================
-def build_teable_indexes(records: List[Dict[str, Any]]) -> Dict[str, Any]:
-    order_index: Dict[str, List[Dict[str, Any]]] = {}
-    part_index: Dict[str, List[Dict[str, Any]]] = {}
-    raw_index: List[Dict[str, Any]] = []
-
-    for rec in records:
-        fields = rec.get("fields", {}) or {}
-        rec_id = rec.get("id", "")
-
-        order_values = []
-        for f in TEABLE_MATCH_FIELDS:
-            if f in fields:
-                ov = normalize_order_no(fields.get(f))
-                if ov:
-                    order_values.append(ov)
-
-        part_values = []
-        for f in TEABLE_PART_FIELDS + TEABLE_FACTORY_PART_FIELDS:
-            if f in fields:
-                pv = normalize_part_no(fields.get(f))
-                if pv:
-                    part_values.append(pv)
-
-        item = {
-            "id": rec_id,
-            "fields": fields,
-            "order_values": list(set(order_values)),
-            "part_values": list(set(part_values)),
-        }
-        raw_index.append(item)
-
-        for ov in item["order_values"]:
-            order_index.setdefault(ov, []).append(item)
-
-        for pv in item["part_values"]:
-            part_index.setdefault(pv, []).append(item)
-
-    return {
-        "order_index": order_index,
-        "part_index": part_index,
-        "raw_index": raw_index,
-    }
-
-
-def match_teable_record(parsed_row: Dict[str, Any], indexes: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], str]:
-    row_order = normalize_order_no(parsed_row.get("order_no", ""))
-    row_part = normalize_part_no(parsed_row.get("part_no", ""))
-    row_factory_part = normalize_part_no(parsed_row.get("factory_part_no", ""))
-
-    # 1) 先用訂單號
-    if row_order and row_order in indexes["order_index"]:
-        candidates = indexes["order_index"][row_order]
-        if len(candidates) == 1:
-            return candidates[0], f"訂單號命中：{row_order}"
-        if row_part:
-            for c in candidates:
-                if row_part in c["part_values"]:
-                    return c, f"訂單號+料號命中：{row_order} / {row_part}"
-        if row_factory_part:
-            for c in candidates:
-                if row_factory_part in c["part_values"]:
-                    return c, f"訂單號+工廠料號命中：{row_order} / {row_factory_part}"
-        return candidates[0], f"訂單號多筆，先取第一筆：{row_order}"
-
-    # 2) 再用客戶料號
-    if row_part and row_part in indexes["part_index"]:
-        candidates = indexes["part_index"][row_part]
-        if len(candidates) == 1:
-            return candidates[0], f"料號命中：{row_part}"
-        if row_order:
-            for c in candidates:
-                if row_order in c["order_values"]:
-                    return c, f"料號+訂單號命中：{row_part} / {row_order}"
-        return candidates[0], f"料號多筆，先取第一筆：{row_part}"
-
-    # 3) 再用工廠料號
-    if row_factory_part and row_factory_part in indexes["part_index"]:
-        candidates = indexes["part_index"][row_factory_part]
-        if len(candidates) == 1:
-            return candidates[0], f"工廠料號命中：{row_factory_part}"
-        if row_order:
-            for c in candidates:
-                if row_order in c["order_values"]:
-                    return c, f"工廠料號+訂單號命中：{row_factory_part} / {row_order}"
-        return candidates[0], f"工廠料號多筆，先取第一筆：{row_factory_part}"
-
-    # 4) 最後做模糊包含比對
-    if row_part:
-        for c in indexes["raw_index"]:
-            for pv in c["part_values"]:
-                if row_part and pv and (row_part in pv or pv in row_part):
-                    return c, f"模糊料號命中：{row_part} ~ {pv}"
-
-    if row_factory_part:
-        for c in indexes["raw_index"]:
-            for pv in c["part_values"]:
-                if row_factory_part and pv and (row_factory_part in pv or pv in row_factory_part):
-                    return c, f"模糊工廠料號命中：{row_factory_part} ~ {pv}"
-
-    return None, "找不到對應主表資料"
-
-
-# =========================================================
-# PROCESS / PROGRESS LOGIC
-# =========================================================
-PROCESS_STEPS = [
-    ("待開料", ["待開料", "備料", "備料中"]),
-    ("下料", ["下料", "工", "下"]),
-    ("內層", ["內層", "內"]),
-    ("壓合", ["壓合", "壓"]),
-    ("鑽孔", ["鑽孔", "鑽"]),
-    ("一銅", ["一銅"]),
-    ("外層", ["外層"]),
-    ("二銅", ["二銅"]),
-    ("AOI", ["AOI"]),
-    ("半測", ["半測"]),
-    ("防焊", ["防焊"]),
-    ("文字", ["文字", "文"]),
-    ("化金", ["化金"]),
-    ("表面處理", ["表面處理", "面處理", "處理", "無鉛", "有鉛", "OSP", "化錫", "化銀"]),
-    ("成型", ["成型", "成"]),
-    ("測試", ["測試", "測"]),
-    ("成檢", ["成檢", "檢"]),
-    ("包裝", ["包裝", "包"]),
-    ("已出貨", ["出貨"]),
-]
-
-
-def has_real_value(v: Any) -> bool:
-    s = safe_strip(v)
-    if not s:
-        return False
-    if s.lower() in ("nan", "none"):
-        return False
-    if s in ("0", "0.0"):
-        return False
-    return True
-
-
-def derive_progress_from_row_values(row: pd.Series, col_map: Dict[str, List[str]]) -> str:
-    progress = ""
-
-    for step_name, aliases in PROCESS_STEPS:
-        actual_cols = col_map.get(step_name, [])
-        for col in actual_cols:
-            if col in row.index and has_real_value(row[col]):
-                progress = choose_better_progress(progress, step_name)
-
-    return progress
-
-
-def build_process_col_map(columns: List[str]) -> Dict[str, List[str]]:
-    result: Dict[str, List[str]] = {}
-    for step_name, aliases in PROCESS_STEPS:
-        matched = []
-        for col in columns:
-            c = normalize_space(str(col)).lower()
-            for alias in aliases:
-                a = normalize_space(alias).lower()
-                if a and a in c:
-                    matched.append(col)
-                    break
-        result[step_name] = list(dict.fromkeys(matched))
-    return result
-
-
-# =========================================================
-# FILE PARSERS
-# =========================================================
-def try_read_excel_all_sheets(uploaded_file) -> List[Tuple[str, pd.DataFrame]]:
-    data = uploaded_file.read()
-    uploaded_file.seek(0)
-
-    ext = os.path.splitext(uploaded_file.name)[1].lower()
-    engine = None
-    if ext == ".xlsx":
-        engine = "openpyxl"
-    elif ext == ".xls":
-        engine = "xlrd"
-
-    dfs = []
-    try:
-        xls = pd.ExcelFile(io.BytesIO(data), engine=engine)
-        for sheet_name in xls.sheet_names:
-            try:
-                df = pd.read_excel(io.BytesIO(data), sheet_name=sheet_name, header=None, engine=engine)
-                dfs.append((sheet_name, df))
-            except Exception:
-                pass
-    except Exception:
-        try:
-            df = pd.read_csv(io.BytesIO(data), header=None, encoding="utf-8")
-            dfs.append(("CSV", df))
-        except Exception:
-            try:
-                df = pd.read_csv(io.BytesIO(data), header=None, encoding="big5", errors="ignore")
-                dfs.append(("CSV", df))
-            except Exception:
-                pass
-
-    uploaded_file.seek(0)
-    return dfs
-
-
-def parse_ls_style(uploaded_file) -> List[Dict[str, Any]]:
-    sheets = try_read_excel_all_sheets(uploaded_file)
-    results = []
-
-    for sheet_name, df_raw in sheets:
-        if df_raw.empty:
-            continue
-
-        # 針對這種表頭直接在第一列
-        df = df_raw.copy()
-        if len(df) < 2:
-            continue
-
-        header = [safe_strip(x) for x in df.iloc[0].tolist()]
-        if not any("Cust. P / N" in h or "LS P/N" in h or "WIP" in h for h in header):
-            continue
-
-        body = df.iloc[1:].copy()
-        body.columns = header
-        body = clean_dataframe(body)
-
-        for _, row in body.iterrows():
-            order_no = first_existing_field(row.to_dict(), ["PO", "PO NO", "PO No"])
-            part_no = first_existing_field(row.to_dict(), ["Cust. P / N", "Customer P/N", "P/N"])
-            factory_part_no = first_existing_field(row.to_dict(), ["LS P/N", "Factory P/N"])
-            qty = first_existing_field(row.to_dict(), ["Q'TY", "QTY", "Qty"])
-            progress = normalize_progress_text(first_existing_field(row.to_dict(), ["WIP", "進度"]))
-            note = first_existing_field(row.to_dict(), ["Note", "備註"])
-            due_date = first_existing_field(row.to_dict(), ["Required Ship date", "confrimed DD"])
-
-            if not any([order_no, part_no, factory_part_no]):
-                continue
-
-            results.append({
-                "source_file": uploaded_file.name,
-                "source_sheet": sheet_name,
-                "factory_name": "LS/PG",
-                "order_no": order_no,
-                "part_no": part_no,
-                "factory_part_no": factory_part_no,
-                "qty": qty,
-                "progress": progress,
-                "due_date": due_date,
-                "note": note,
-            })
-
-    return results
-
-
-def parse_xituo_simple(uploaded_file) -> List[Dict[str, Any]]:
-    sheets = try_read_excel_all_sheets(uploaded_file)
-    results = []
-
-    for sheet_name, df_raw in sheets:
-        if df_raw.empty:
-            continue
-
-        # 找到包含料號/進度的 header row
-        header_row = None
-        for i in range(min(len(df_raw), 10)):
-            row_vals = [safe_strip(x) for x in df_raw.iloc[i].tolist()]
-            joined = " | ".join(row_vals)
-            if "料" in joined and "進度" in joined:
-                header_row = i
-                break
-
-        if header_row is None:
-            continue
-
-        header = [safe_strip(x) for x in df_raw.iloc[header_row].tolist()]
-        body = df_raw.iloc[header_row + 1:].copy()
-        body.columns = header
-        body = clean_dataframe(body)
-
-        for _, row in body.iterrows():
-            rowd = row.to_dict()
-            part_no = first_existing_field(rowd, ["料         號", "料號", "料 號", "品號"])
-            qty = first_existing_field(rowd, ["數量(PCS)", "數量", "QTY", "Qty"])
-            order_date = first_existing_field(rowd, ["下單日期"])
-            due_date = first_existing_field(rowd, ["出貨日期", "交期"])
-            progress = normalize_progress_text(first_existing_field(rowd, ["進度", "WIP"]))
-            note = first_existing_field(rowd, ["備註"])
-
-            if not part_no:
-                continue
-
-            results.append({
-                "source_file": uploaded_file.name,
-                "source_sheet": sheet_name,
-                "factory_name": "西拓",
-                "order_no": "",
-                "part_no": part_no,
-                "factory_part_no": "",
-                "qty": qty,
-                "progress": progress,
-                "due_date": due_date or order_date,
-                "note": note,
-            })
-
-    return results
-
-
-def parse_quanxing_process(uploaded_file) -> List[Dict[str, Any]]:
-    sheets = try_read_excel_all_sheets(uploaded_file)
-    results = []
-
-    for sheet_name, df_raw in sheets:
-        if df_raw.empty or len(df_raw) < 6:
-            continue
-
-        # 這類型第 3,4 列合成表頭
-        header1 = [safe_strip(x) for x in df_raw.iloc[3].tolist()] if len(df_raw) > 3 else []
-        header2 = [safe_strip(x) for x in df_raw.iloc[4].tolist()] if len(df_raw) > 4 else []
-        if not header1 or not header2:
-            continue
-
-        combined_cols = []
-        for a, b in zip(header1, header2):
-            col = normalize_space(f"{a} {b}")
-            combined_cols.append(col)
-
-        joined_cols = " | ".join(combined_cols)
-        if "訂 單 號 碼" not in joined_cols and "客 料 號" not in joined_cols and "出 貨" not in joined_cols:
-            continue
-
-        body = df_raw.iloc[5:].copy()
-        body.columns = combined_cols
-        body = clean_dataframe(body)
-
-        col_map = build_process_col_map(list(body.columns))
-
-        order_col = find_first_matching_col(list(body.columns), ["訂 單 號", "訂單號", "P/O"])
-        part_col = find_first_matching_col(list(body.columns), ["客 料 號", "客料號", "料號"])
-        qty_col = find_first_matching_col(list(body.columns), ["訂購量", "(PCS)", "數量"])
-        due_col = find_first_matching_col(list(body.columns), ["交貨 日期", "交貨", "日期"])
-        note_col = find_first_matching_col(list(body.columns), ["備註", "備 註"])
-
-        for _, row in body.iterrows():
-            order_no = safe_strip(row[order_col]) if order_col and order_col in row.index else ""
-            part_no = safe_strip(row[part_col]) if part_col and part_col in row.index else ""
-            qty = safe_strip(row[qty_col]) if qty_col and qty_col in row.index else ""
-            due_date = safe_strip(row[due_col]) if due_col and due_col in row.index else ""
-            note = safe_strip(row[note_col]) if note_col and note_col in row.index else ""
-
-            if not any([order_no, part_no]):
-                continue
-
-            progress = derive_progress_from_row_values(row, col_map)
-            progress = normalize_progress_text(progress)
-
-            results.append({
-                "source_file": uploaded_file.name,
-                "source_sheet": sheet_name,
-                "factory_name": "全興/西拓流程表",
-                "order_no": order_no,
-                "part_no": part_no,
-                "factory_part_no": "",
-                "qty": qty,
-                "progress": progress,
-                "due_date": due_date,
-                "note": note,
-            })
-
-    return results
-
-
-def parse_xianghong_wip(uploaded_file) -> List[Dict[str, Any]]:
-    sheets = try_read_excel_all_sheets(uploaded_file)
-    results = []
-
-    for sheet_name, df_raw in sheets:
-        if df_raw.empty or len(df_raw) < 4:
-            continue
-
-        header_row = 2
-        header = [normalize_space(safe_strip(x).replace("\n", "")) for x in df_raw.iloc[header_row].tolist()]
-        joined = " | ".join(header)
-
-        if "訂單編號" not in joined and "祥竑料號" not in joined and "未出貨數量" not in joined:
-            continue
-
-        body = df_raw.iloc[header_row + 1:].copy()
-        body.columns = header
-        body = clean_dataframe(body)
-
-        col_map = build_process_col_map(list(body.columns))
-
-        for idx in range(0, len(body), 2):
-            row_top = body.iloc[idx]
-            row_bottom = body.iloc[idx + 1] if idx + 1 < len(body) else pd.Series(dtype=object)
-
-            rowd = row_top.to_dict()
-
-            order_no = first_existing_field(rowd, ["訂單編號"])
-            factory_part_no = first_existing_field(rowd, ["祥竑料號"])
-            part_no = first_existing_field(rowd, ["料號"])
-            surface = first_existing_field(rowd, ["表面處理"])
-            qty = first_existing_field(rowd, ["訂單數量"])
-            due_date = first_existing_field(rowd, ["交貨日期"])
-            note = first_existing_field(rowd, ["備註"])
-
-            if not any([order_no, part_no, factory_part_no]):
-                continue
-
-            progress = derive_progress_from_row_values(row_bottom if not row_bottom.empty else row_top, col_map)
-            progress = normalize_progress_text(progress)
-
-            if not progress:
-                # 若全部 0，但未出貨數量 > 0，至少標示待開料或備料中
-                unshipped = first_existing_field(rowd, ["未出貨數量"])
-                uv = try_parse_numeric(unshipped)
-                if uv and uv > 0:
-                    progress = "待開料"
-
-            note2 = note
-            if surface:
-                note2 = f"{note2} / 表面:{surface}".strip(" /")
-
-            results.append({
-                "source_file": uploaded_file.name,
-                "source_sheet": sheet_name,
-                "factory_name": "祥竑",
-                "order_no": order_no,
-                "part_no": part_no,
-                "factory_part_no": factory_part_no,
-                "qty": qty,
-                "progress": progress,
-                "due_date": due_date,
-                "note": note2,
-            })
-
-    return results
-
-
-def parse_generic_excel(uploaded_file) -> List[Dict[str, Any]]:
-    sheets = try_read_excel_all_sheets(uploaded_file)
-    results = []
-
-    for sheet_name, df_raw in sheets:
-        if df_raw.empty:
-            continue
-
-        # 嘗試前 10 列找 header
-        best_header_row = None
-        best_score = -1
-
-        for i in range(min(len(df_raw), 10)):
-            row_vals = [safe_strip(x) for x in df_raw.iloc[i].tolist()]
-            joined = " | ".join(row_vals).lower()
-            score = 0
-            for kw in ["料號", "進度", "wip", "訂單", "po", "qty", "數量"]:
-                if kw in joined:
-                    score += 1
-            if score > best_score:
-                best_score = score
-                best_header_row = i
-
-        if best_header_row is None or best_score <= 0:
-            continue
-
-        header = [normalize_space(safe_strip(x).replace("\n", "")) for x in df_raw.iloc[best_header_row].tolist()]
-        body = df_raw.iloc[best_header_row + 1:].copy()
-        body.columns = header
-        body = clean_dataframe(body)
-
-        part_col = find_first_matching_col(list(body.columns), ["料號", "Part", "P/N"])
-        order_col = find_first_matching_col(list(body.columns), ["訂單", "PO"])
-        qty_col = find_first_matching_col(list(body.columns), ["數量", "Qty", "QTY"])
-        progress_col = find_first_matching_col(list(body.columns), ["進度", "WIP"])
-        note_col = find_first_matching_col(list(body.columns), ["備註", "Note"])
-        due_col = find_first_matching_col(list(body.columns), ["交期", "出貨", "日期"])
-
-        for _, row in body.iterrows():
-            part_no = safe_strip(row[part_col]) if part_col and part_col in row.index else ""
-            order_no = safe_strip(row[order_col]) if order_col and order_col in row.index else ""
-            qty = safe_strip(row[qty_col]) if qty_col and qty_col in row.index else ""
-            progress = normalize_progress_text(safe_strip(row[progress_col])) if progress_col and progress_col in row.index else ""
-            note = safe_strip(row[note_col]) if note_col and note_col in row.index else ""
-            due_date = safe_strip(row[due_col]) if due_col and due_col in row.index else ""
-
-            if not any([part_no, order_no]):
-                continue
-
-            results.append({
-                "source_file": uploaded_file.name,
-                "source_sheet": sheet_name,
-                "factory_name": "Generic",
-                "order_no": order_no,
-                "part_no": part_no,
-                "factory_part_no": "",
-                "qty": qty,
-                "progress": progress,
-                "due_date": due_date,
-                "note": note,
-            })
-
-    return results
-
-
-def parse_uploaded_wip_file(uploaded_file) -> List[Dict[str, Any]]:
-    filename = uploaded_file.name.lower()
-
-    results = []
-
-    # 依檔名與內容優先套專屬 parser
-    if "祥竑" in filename:
-        results = parse_xianghong_wip(uploaded_file)
-        if results:
-            return results
-
-    if "西拓" in filename and ("進度表" in filename or filename.endswith(".xlsx")):
-        results = parse_xituo_simple(uploaded_file)
-        if results:
-            return results
-
-    if "wip" in filename or "203" in filename or "全興" in filename:
-        results = parse_quanxing_process(uploaded_file)
-        if results:
-            return results
-
-    if "glocom-pg" in filename or "pg" in filename or "ls" in filename:
-        results = parse_ls_style(uploaded_file)
-        if results:
-            return results
-
-    # fallback
-    for parser in [parse_ls_style, parse_xituo_simple, parse_quanxing_process, parse_xianghong_wip, parse_generic_excel]:
-        try:
-            uploaded_file.seek(0)
-            results = parser(uploaded_file)
-            if results:
-                return results
-        except Exception:
-            continue
-
-    return []
-
-
-# =========================================================
-# BUILD UPDATE PAYLOAD
-# =========================================================
-def pick_first_existing_teable_field(fields: Dict[str, Any], candidates: List[str]) -> Optional[str]:
-    for c in candidates:
-        if c in fields:
-            return c
-    return None
-
-
-def build_update_fields(teable_fields: Dict[str, Any], parsed_row: Dict[str, Any]) -> Dict[str, Any]:
-    updates = {}
-
-    progress_col = pick_first_existing_teable_field(teable_fields, TEABLE_PROGRESS_TARGET_FIELDS)
-    reply_date_col = pick_first_existing_teable_field(teable_fields, TEABLE_REPLY_DATE_FIELDS)
-    note_col = pick_first_existing_teable_field(teable_fields, TEABLE_NOTE_FIELDS)
-    source_col = pick_first_existing_teable_field(teable_fields, TEABLE_SOURCE_FIELDS)
-    qty_col = pick_first_existing_teable_field(teable_fields, TEABLE_QTY_FIELDS)
-
-    if progress_col and parsed_row.get("progress"):
-        updates[progress_col] = parsed_row["progress"]
-
-    if reply_date_col:
-        updates[reply_date_col] = datetime.now().strftime("%Y-%m-%d")
-
-    if note_col:
-        note_text = parsed_row.get("note", "")
-        src = parsed_row.get("source_file", "")
-        match_detail = parsed_row.get("_match_detail", "")
-        merged = " / ".join([x for x in [note_text, f"來源:{src}" if src else "", match_detail] if x])
-        if merged:
-            updates[note_col] = merged[:500]
-
-    if source_col:
-        updates[source_col] = parsed_row.get("factory_name", "")
-
-    # 若主表數量為空才補
-    if qty_col and parsed_row.get("qty"):
-        current_qty = teable_fields.get(qty_col)
-        if is_blank(current_qty):
-            updates[qty_col] = parsed_row["qty"]
-
-    return updates
-
-
-# =========================================================
-# DATAFRAME DISPLAY
-# =========================================================
-def parsed_rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
-    if not rows:
-        return pd.DataFrame()
-
-    show = []
-    for r in rows:
-        show.append({
-            "來源檔案": r.get("source_file", ""),
-            "Sheet": r.get("source_sheet", ""),
-            "工廠": r.get("factory_name", ""),
-            "訂單號": r.get("order_no", ""),
-            "客戶料號": r.get("part_no", ""),
-            "工廠料號": r.get("factory_part_no", ""),
-            "數量": r.get("qty", ""),
-            "進度": r.get("progress", ""),
-            "交期": r.get("due_date", ""),
-            "備註": r.get("note", ""),
-            "正規化料號": normalize_part_no(r.get("part_no", "")),
-        })
-    return pd.DataFrame(show)
-
-
-# =========================================================
-# UI
-# =========================================================
-st.title("🏭 GLOCOM WIP 進度匯入 / 更新 Teable 主表")
-st.caption("修正版：已補上 料號正規化、流程表轉進度、Teable 主表匹配與更新邏輯")
-
-with st.expander("設定與說明", expanded=False):
-    st.write(f"**Teable API URL**: {TABLE_URL}")
-    st.write(f"**Teable Web URL**: {TEABLE_WEB_URL}")
-    if TEABLE_TOKEN:
-        st.success("已偵測到 TEABLE_TOKEN")
-    else:
-        st.warning("尚未設定 TEABLE_TOKEN，無法更新 Teable。可先測試解析結果。")
-
-    st.markdown(
-        """
-**這版已改善：**
-- 西拓簡單進度表：直接抓料號 / 進度
-- 全興 / 西拓流程表：由最右側已完成工序推算 WIP 進度
-- 祥竑 WIP：由工序數量列推算當前站別
-- PG / LS 表：直接抓 Cust. P/N / LS P/N / WIP
-- 更新主表時，先比訂單號，再比正規化料號，再做模糊比對
-        """
-    )
-
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    uploaded_files = st.file_uploader(
-        "上傳工廠 WIP 檔案（可多檔）",
-        type=["xls", "xlsx", "csv"],
-        accept_multiple_files=True
-    )
-
-with col2:
-    st.link_button("Open Teable", TEABLE_WEB_URL)
-
-if "parsed_rows_cache" not in st.session_state:
-    st.session_state["parsed_rows_cache"] = []
-
-if st.button("解析上傳檔案", type="primary", use_container_width=True):
-    all_rows = []
-    parse_logs = []
-
-    if not uploaded_files:
-        st.warning("請先上傳檔案。")
-    else:
-        for f in uploaded_files:
-            try:
-                rows = parse_uploaded_wip_file(f)
-                if rows:
-                    all_rows.extend(rows)
-                    parse_logs.append(f"✅ {f.name}：解析 {len(rows)} 筆")
-                else:
-                    parse_logs.append(f"⚠️ {f.name}：沒有抓到有效資料")
-            except Exception as e:
-                parse_logs.append(f"❌ {f.name}：解析失敗 - {e}")
-
-        st.session_state["parsed_rows_cache"] = all_rows
-
-        for msg in parse_logs:
-            st.write(msg)
-
-rows = st.session_state.get("parsed_rows_cache", [])
-df_preview = parsed_rows_to_df(rows)
-
-st.subheader("解析結果預覽")
-if not df_preview.empty:
-    st.dataframe(df_preview, use_container_width=True, height=420)
+================================
+
+
+HELPERS
+
+
+================================
+
+def refresh_after_update():
+st.cache_data.clear()
+for k in list(st.session_state.keys()):
+del st.session_state[k]
+st.rerun()
+def split_tags(value):
+return u.split_tags(value)
+def wip_display_html(value: str) -> str:
+text = u.safe_text(value)
+lower = text.lower()
+```
+if any(k in lower for k in ["完成"]) or text.upper() in getattr(cfg, "DONE_WIP_VALUES", []):
+    label = text or "完成"
+    bg = "#065f46"
+    fg = "#d1fae5"
+elif any(k in lower for k in ["ship", "shipping", "出貨"]):
+    label = text or "Shipping"
+    bg = "#14532d"
+    fg = "#dcfce7"
+elif any(k in lower for k in ["pack", "包裝"]):
+    label = text or "Packing"
+    bg = "#166534"
+    fg = "#dcfce7"
+elif any(k in lower for k in ["fqc", "qa", "inspection", "成檢", "測試"]):
+    label = text or "Inspection"
+    bg = "#854d0e"
+    fg = "#fef3c7"
+elif any(
+    k in lower
+    for k in [
+        "aoi", "drill", "route", "routing", "plating", "inner", "production",
+        "防焊", "壓合", "外層", "內層", "成型"
+    ]
+):
+    label = text or "Production"
+    bg = "#9a3412"
+    fg = "#ffedd5"
+elif any(k in lower for k in ["eng", "gerber", "cam", "eq"]):
+    label = text or "Engineering"
+    bg = "#1d4ed8"
+    fg = "#dbeafe"
+elif any(k in lower for k in ["hold", "等待", "暫停"]):
+    label = text or "On Hold"
+    bg = "#7f1d1d"
+    fg = "#fee2e2"
 else:
-    st.info("尚無解析結果。請先上傳並按『解析上傳檔案』。")
-
-with st.expander("原始解析 JSON", expanded=False):
-    st.json(rows if rows else [])
-
-st.subheader("更新 Teable 主表")
-
-if st.button("讀取主表並比對", use_container_width=True):
-    if not TEABLE_TOKEN:
-        st.error("未設定 TEABLE_TOKEN，無法讀取主表。")
-    elif not rows:
-        st.warning("請先解析檔案。")
-    else:
-        with st.spinner("讀取 Teable 主表中..."):
-            teable_records = fetch_teable_records(limit=5000)
-
-        if not teable_records:
-            st.error("讀不到 Teable 主表資料。")
-        else:
-            indexes = build_teable_indexes(teable_records)
-
-            compare_rows = []
-            matched_cache = []
-
-            for r in rows:
-                matched, reason = match_teable_record(r, indexes)
-                rr = dict(r)
-                rr["_match_detail"] = reason
-                rr["_matched_record"] = matched
-                matched_cache.append(rr)
-
-                compare_rows.append({
-                    "來源檔案": r.get("source_file", ""),
-                    "訂單號": r.get("order_no", ""),
-                    "客戶料號": r.get("part_no", ""),
-                    "工廠料號": r.get("factory_part_no", ""),
-                    "進度": r.get("progress", ""),
-                    "比對結果": "命中" if matched else "未命中",
-                    "說明": reason,
-                })
-
-            st.session_state["matched_rows_cache"] = matched_cache
-            st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, height=420)
-
-if "matched_rows_cache" not in st.session_state:
-    st.session_state["matched_rows_cache"] = []
-
-matched_rows = st.session_state.get("matched_rows_cache", [])
-
-if st.button("更新到 Teable 主表", type="primary", use_container_width=True):
-    if not TEABLE_TOKEN:
-        st.error("未設定 TEABLE_TOKEN。")
-    elif not matched_rows:
-        st.warning("請先按『讀取主表並比對』。")
-    else:
-        ok_count = 0
-        fail_count = 0
-        logs = []
-
-        progress_bar = st.progress(0)
-        total = len(matched_rows)
-
-        for i, row in enumerate(matched_rows, start=1):
-            matched = row.get("_matched_record")
-            if not matched:
-                fail_count += 1
-                logs.append({
-                    "來源檔案": row.get("source_file", ""),
-                    "訂單號": row.get("order_no", ""),
-                    "料號": row.get("part_no", ""),
-                    "結果": "未更新",
-                    "原因": row.get("_match_detail", "找不到主表"),
-                })
-                progress_bar.progress(i / total)
-                continue
-
-            rec_id = matched["id"]
-            teable_fields = matched["fields"]
-            update_fields = build_update_fields(teable_fields, row)
-
-            if not update_fields:
-                fail_count += 1
-                logs.append({
-                    "來源檔案": row.get("source_file", ""),
-                    "訂單號": row.get("order_no", ""),
-                    "料號": row.get("part_no", ""),
-                    "結果": "未更新",
-                    "原因": "找不到可更新的主表欄位名稱，請檢查 TEABLE_*_FIELDS 設定",
-                })
-                progress_bar.progress(i / total)
-                continue
-
-            ok, msg = update_teable_record(rec_id, update_fields)
-            if ok:
-                ok_count += 1
-                logs.append({
-                    "來源檔案": row.get("source_file", ""),
-                    "訂單號": row.get("order_no", ""),
-                    "料號": row.get("part_no", ""),
-                    "結果": "成功",
-                    "原因": row.get("_match_detail", ""),
-                })
-            else:
-                fail_count += 1
-                logs.append({
-                    "來源檔案": row.get("source_file", ""),
-                    "訂單號": row.get("order_no", ""),
-                    "料號": row.get("part_no", ""),
-                    "結果": "失敗",
-                    "原因": msg,
-                })
-
-            progress_bar.progress(i / total)
-            time.sleep(0.03)
-
-        if ok_count:
-            st.success(f"更新完成：成功 {ok_count} 筆，失敗 {fail_count} 筆")
-        else:
-            st.error(f"沒有成功更新。失敗 {fail_count} 筆")
-
-        st.dataframe(pd.DataFrame(logs), use_container_width=True, height=420)
-
+    label = text or "-"
+    bg = "#374151"
+    fg = "#f3f4f6"
+ 
+return f'<span class="wip-chip" style="background:{bg};color:{fg};">{label}</span>'
+ 
+```
+def show_metrics(df: pd.DataFrame, wip_col: str | None):
+total_orders = len(df)
+shipping = 0
+```
+if wip_col and wip_col in df.columns:
+    wip_series = u.get_series_by_col(df, wip_col)
+    if wip_series is not None:
+        shipping = len(
+            df[
+                wip_series.astype(str).str.contains(
+                    "ship|shipping|出貨",
+                    case=False,
+                    na=False,
+                )
+            ]
+        )
+ 
+production = total_orders - shipping
+ 
+c1, c2, c3 = st.columns(3)
+c1.metric("Total Orders", total_orders)
+c2.metric("Production", production)
+c3.metric("Shipping", shipping)
+ 
+```
+def show_no_data_layout():
+c1, c2, c3 = st.columns(3)
+c1.metric("Total Orders", 0)
+c2.metric("Production", 0)
+c3.metric("Shipping", 0)
 st.divider()
+st.warning("No data from Teable")
+def customer_portal_columns(df, po_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col):
+return [
+c for c in [
+po_col,
+part_col,
+qty_col,
+wip_col,
+ship_date_col,
+customer_tag_col,
+remark_col,
+]
+if c and c in df.columns
+]
+def call_report_function(possible_names, **kwargs):
+for name in possible_names:
+func = getattr(reports, name, None)
+if callable(func):
+sig = inspect.signature(func)
+has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+if has_var_kw:
+return func(**kwargs)
+accepted = {k: v for k, v in kwargs.items() if k in sig.parameters}
+return func(**accepted)
+return False
+@st.cache_data(ttl=60)
+def load_sales_workbook(path: str):
+if not os.path.exists(path):
+raise FileNotFoundError(f"找不到銷貨底檔案: {path}")
+```
+xls = pd.ExcelFile(path)
+ 
+if "主表" not in xls.sheet_names:
+    raise ValueError(f"Excel 缺少工作表: 主表，現有工作表: {xls.sheet_names}")
+ 
+main_df = pd.read_excel(path, sheet_name="主表")
+shipment_df = pd.read_excel(path, sheet_name="銷貨底") if "銷貨底" in xls.sheet_names else pd.DataFrame()
+return main_df, shipment_df
+ 
+```
 
-st.subheader("除錯工具")
+================================
 
-with st.expander("手動測試料號正規化", expanded=False):
-    test_part = st.text_input("輸入料號")
-    if test_part:
-        st.write("原始：", test_part)
-        st.write("正規化：", normalize_part_no(test_part))
 
-with st.expander("建議檢查項目", expanded=False):
+LOAD DATA
+
+
+================================
+
+try:
+orders, api_status, api_text = teable_api.load_orders()
+except Exception as e:
+orders = pd.DataFrame()
+api_status = "EXCEPTION"
+api_text = str(e)
+SALES_BASE_PATH = "Sandy需要的銷貨底.xlsx"
+try:
+sales_df, sales_shipment_df = load_sales_workbook(SALES_BASE_PATH)
+sales_error_text = ""
+except Exception as e:
+sales_df, sales_shipment_df = pd.DataFrame(), pd.DataFrame()
+sales_error_text = str(e)
+
+================================
+
+
+DETECT KEY COLUMNS
+
+
+================================
+
+po_col = u.get_first_matching_column(orders, cfg.PO_CANDIDATES)
+customer_col = u.get_first_matching_column(orders, cfg.CUSTOMER_CANDIDATES)
+part_col = u.get_first_matching_column(orders, cfg.PART_CANDIDATES)
+qty_col = u.get_first_matching_column(orders, cfg.QTY_CANDIDATES)
+factory_col = u.get_first_matching_column(orders, cfg.FACTORY_CANDIDATES)
+wip_col = u.get_first_matching_column(orders, cfg.WIP_CANDIDATES)
+factory_due_col = u.get_first_matching_column(orders, cfg.FACTORY_DUE_CANDIDATES)
+ship_date_col = u.get_first_matching_column(orders, cfg.SHIP_DATE_CANDIDATES)
+remark_col = u.get_first_matching_column(orders, cfg.REMARK_CANDIDATES)
+customer_tag_col = u.get_first_matching_column(orders, cfg.CUSTOMER_TAG_CANDIDATES)
+merge_date_col = u.get_first_matching_column(orders, cfg.MERGE_DATE_CANDIDATES)
+order_date_col = u.get_first_matching_column(orders, cfg.ORDER_DATE_CANDIDATES)
+factory_order_date_col = u.get_first_matching_column(orders, cfg.FACTORY_ORDER_DATE_CANDIDATES)
+changed_due_date_col = u.get_first_matching_column(orders, cfg.CHANGED_DUE_DATE_CANDIDATES)
+
+================================
+
+
+CUSTOMER MODE
+
+
+================================
+
+query = st.query_params
+customer_param = query.get("customer", None)
+if customer_param:
+st.title("GLOCOM Order Status")
+st.caption("Customer WIP Progress")
+```
+if not customer_col:
+    st.error("Customer column not found")
+    st.stop()
+ 
+customer_series = u.get_series_by_col(orders, customer_col)
+if customer_series is None:
+    st.error("Customer data unavailable")
+    st.stop()
+ 
+cust_orders = orders[
+    customer_series.astype(str).str.strip().str.lower()
+    == str(customer_param).strip().lower()
+].copy()
+ 
+if cust_orders.empty:
+    st.warning("No orders found")
+    st.stop()
+ 
+show_metrics(cust_orders, wip_col)
+st.divider()
+ 
+for _, row in cust_orders.iterrows():
+    po_val = u.safe_text(row.get(po_col, "")) if po_col else ""
+    part_val = u.safe_text(row.get(part_col, "")) if part_col else ""
+    qty_val = u.safe_text(row.get(qty_col, "")) if qty_col else ""
+    wip_val = u.safe_text(row.get(wip_col, "")) if wip_col else ""
+    ship_val = u.safe_text(row.get(ship_date_col, "")) if ship_date_col else ""
+    remark_val = u.safe_text(row.get(remark_col, "")) if remark_col else ""
+    tags_val = split_tags(row.get(customer_tag_col, "")) if customer_tag_col else []
+ 
+    tag_html = "".join([f'<span class="tag-chip">{t}</span>' for t in tags_val]) if tags_val else '<span class="tag-chip">-</span>'
+ 
     st.markdown(
-        """
-1. 先確認 **TEABLE_TOKEN** 是否正確  
-2. 確認 Teable 主表實際欄位名稱，是否與下列候選欄位相符：  
-   - 訂單號 / PO / Order No  
-   - 料號 / 客戶料號 / Part No / P/N  
-   - 進度 / WIP / WIP進度  
-3. 若主表欄位名稱不同，直接修改本檔最上方這幾個清單：  
-   - `TEABLE_MATCH_FIELDS`
-   - `TEABLE_PART_FIELDS`
-   - `TEABLE_FACTORY_PART_FIELDS`
-   - `TEABLE_PROGRESS_TARGET_FIELDS`
-4. 若某工廠有特殊格式，再補一個專屬 parser 即可
-        """
+        f"""
+        <div class="portal-box">
+            <div class="portal-title">{po_val or "-"}</div>
+            <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+                <div>
+                    <div><strong>P/N</strong> : {part_val or "-"}</div>
+                    <div><strong>Qty</strong> : {qty_val or "-"}</div>
+                </div>
+                <div>
+                    <div><strong>WIP</strong> : {wip_display_html(wip_val)}</div>
+                    <div style="margin-top:8px;"><strong>Ship Date</strong> : {ship_val or "-"}</div>
+                </div>
+            </div>
+            <div style="margin-top:12px;"><strong>Customer Remark Tags</strong> : {tag_html}</div>
+            <div style="margin-top:10px;"><strong>Remark</strong> : {remark_val or "-"}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
+ 
+portal_cols = customer_portal_columns(
+    cust_orders,
+    po_col,
+    part_col,
+    qty_col,
+    wip_col,
+    ship_date_col,
+    customer_tag_col,
+    remark_col,
+)
+csv_data = cust_orders[portal_cols].to_csv(index=False).encode("utf-8-sig")
+ 
+st.download_button(
+    "Download WIP CSV",
+    data=csv_data,
+    file_name=f"{customer_param}_wip.csv",
+    mime="text/csv",
+)
+st.stop()
+ 
+```
+
+================================
+
+
+INTERNAL MODE
+
+
+================================
+
+st.title("🏭 GLOCOM Control Tower")
+st.caption("Internal PCB Production Monitoring System")
+with st.expander("Debug"):
+st.write("API Status:", api_status)
+st.write("TABLE_URL:", cfg.TABLE_URL)
+st.write("Token loaded:", bool(cfg.TEABLE_TOKEN))
+st.write("Columns:", list(orders.columns) if not orders.empty else [])
+st.write("SALES_BASE_PATH:", SALES_BASE_PATH)
+st.write("Sales workbook path exists:", os.path.exists(SALES_BASE_PATH))
+st.write("sales_df loaded:", bool(isinstance(sales_df, pd.DataFrame) and not sales_df.empty))
+st.write("sales_shipment_df loaded:", bool(isinstance(sales_shipment_df, pd.DataFrame) and not sales_shipment_df.empty))
+if isinstance(sales_df, pd.DataFrame) and not sales_df.empty:
+st.write("sales_df columns:", list(sales_df.columns))
+st.dataframe(sales_df.head(5), use_container_width=True)
+if sales_error_text:
+st.error(f"銷貨底 Excel 載入失敗: {sales_error_text}")
+if isinstance(api_text, str):
+st.text(api_text[:1200])
+if orders.empty:
+show_no_data_layout()
+st.stop()
+st.sidebar.title("GLOCOM Internal")
+st.sidebar.link_button("Open Teable", cfg.TEABLE_WEB_URL, use_container_width=True)
+menu = st.sidebar.radio(
+"功能選單",
+[
+"Dashboard",
+"Factory Load",
+"Delayed Orders",
+"Shipment Forecast",
+"Orders",
+"Customer Preview",
+"Sandy 內部 WIP",
+"Sandy 銷貨底",
+"新訂單 WIP",
+"業績明細表",
+"Import / Update",
+],
+)
+if st.sidebar.button("Refresh"):
+refresh_after_update()
+st.sidebar.markdown("---")
+st.sidebar.caption("完成案件請在 Teable 主 View 設定篩選：WIP ≠ 完成")
+st.sidebar.caption("另建 Completed View：WIP = 完成")
+
+================================
+
+
+IMPORT / UPDATE FALLBACK
+
+
+================================
+
+def fallback_import_update():
+st.subheader("Import / Update")
+st.caption("工廠進度輸入工具：檔案上傳、圖片截圖、貼上文字、手工輸入。")
+```
+tab1, tab2, tab3, tab4 = st.tabs(["檔案上傳", "圖片截圖", "貼上文字", "手工輸入"])
+ 
+with tab1:
+    uploaded = st.file_uploader(
+        "上傳工廠進度檔案",
+        type=["xlsx", "xls", "csv", "txt"],
+        key="factory_upload_file",
+    )
+    if uploaded is not None:
+        name = uploaded.name.lower()
+        try:
+            if name.endswith((".xlsx", ".xls")):
+                df_up = pd.read_excel(uploaded)
+                st.success(f"已讀取 {len(df_up)} 筆")
+                st.dataframe(df_up, use_container_width=True, height=420)
+            elif name.endswith(".csv"):
+                df_up = pd.read_csv(uploaded)
+                st.success(f"已讀取 {len(df_up)} 筆")
+                st.dataframe(df_up, use_container_width=True, height=420)
+            else:
+                text = uploaded.getvalue().decode("utf-8", errors="ignore")
+                st.text_area("文字內容", value=text, height=260, key="factory_text_preview")
+        except Exception as e:
+            st.error(f"讀取失敗：{e}")
+ 
+with tab2:
+    image_file = st.file_uploader(
+        "上傳截圖 / 圖片",
+        type=["png", "jpg", "jpeg", "webp"],
+        key="factory_image_upload",
+    )
+    if image_file is not None:
+        st.image(image_file, caption="已上傳截圖")
+        try:
+            import pytesseract
+            from PIL import Image
+ 
+            img = Image.open(image_file)
+            text = pytesseract.image_to_string(img, lang="eng")
+            st.text_area("OCR 辨識文字", value=text, height=260, key="factory_ocr_text")
+        except Exception:
+            st.info("目前環境未啟用 OCR，可改用下方『貼上文字』或『手工輸入』。")
+ 
+with tab3:
+    pasted = st.text_area("貼上工廠進度文字", height=280, key="factory_pasted_text")
+    if pasted.strip():
+        st.text_area("預覽", value=pasted, height=280, key="factory_pasted_preview")
+ 
+with tab4:
+    rows = st.number_input("手工輸入列數", min_value=1, max_value=50, value=5, step=1, key="factory_manual_rows")
+    manual_df = pd.DataFrame(
+        {
+            "PO#": [""] * rows,
+            "Customer": [""] * rows,
+            "P/N": [""] * rows,
+            "QTY": [""] * rows,
+            "WIP": [""] * rows,
+            "Ship date": [""] * rows,
+            "Remark": [""] * rows,
+        }
+    )
+    edited = st.data_editor(
+        manual_df,
+        use_container_width=True,
+        num_rows="fixed",
+        key="factory_manual_editor",
+    )
+    st.download_button(
+        "下載手工輸入 CSV",
+        data=edited.to_csv(index=False).encode("utf-8-sig"),
+        file_name="factory_manual_input.csv",
+        mime="text/csv",
+    )
+ 
+```
+
+================================
+
+
+ROUTING
+
+
+================================
+
+common_kwargs = dict(
+df=orders,
+orders=orders,
+sales_df=sales_df,
+sales_shipment_df=sales_shipment_df,
+po_col=po_col,
+customer_col=customer_col,
+part_col=part_col,
+qty_col=qty_col,
+factory_col=factory_col,
+wip_col=wip_col,
+factory_due_col=factory_due_col,
+ship_date_col=ship_date_col,
+remark_col=remark_col,
+customer_tag_col=customer_tag_col,
+merge_date_col=merge_date_col,
+order_date_col=order_date_col,
+factory_order_date_col=factory_order_date_col,
+changed_due_date_col=changed_due_date_col,
+)
+if menu == "Dashboard":
+ok = call_report_function(["show_dashboard_report"], **common_kwargs)
+if ok is False:
+show_metrics(orders, wip_col)
+elif menu == "Factory Load":
+ok = call_report_function(["show_factory_load_report"], **common_kwargs)
+if ok is False:
+st.info("Factory Load fallback not enabled.")
+elif menu == "Delayed Orders":
+ok = call_report_function(["show_delayed_orders_report"], **common_kwargs)
+if ok is False:
+st.info("Delayed Orders fallback not enabled.")
+elif menu == "Shipment Forecast":
+ok = call_report_function(["show_shipment_forecast_report"], **common_kwargs)
+if ok is False:
+st.info("Shipment Forecast fallback not enabled.")
+elif menu == "Orders":
+ok = call_report_function(["show_orders_report"], **common_kwargs)
+if ok is False:
+st.dataframe(orders, use_container_width=True)
+elif menu == "Customer Preview":
+ok = call_report_function(["show_customer_preview_report"], **common_kwargs)
+if ok is False:
+st.info("Customer Preview fallback not enabled.")
+elif menu == "Sandy 內部 WIP":
+ok = call_report_function(["show_sandy_internal_wip_report"], **common_kwargs)
+if ok is False:
+st.info("Sandy 內部 WIP fallback not enabled.")
+elif menu == "Sandy 銷貨底":
+ok = call_report_function(["show_sandy_shipment_report"], **common_kwargs)
+if ok is False:
+st.info("Sandy 銷貨底 fallback not enabled.")
+elif menu == "新訂單 WIP":
+ok = call_report_function(["show_new_orders_wip_report"], **common_kwargs)
+if ok is False:
+st.info("新訂單 WIP fallback not enabled.")
+elif menu == "業績明細表":
+render_sales_report_page(**common_kwargs)
+elif menu == "Import / Update":
+ok = call_report_function(["show_import_update_page", "show_import_update_report"], **common_kwargs)
+if ok is False:
+fallback_import_update()
+st.caption("Auto refresh cache: 60 seconds")
