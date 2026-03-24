@@ -16,22 +16,14 @@ PO#, Part No, Qty, Factory Due Date, Ship Date, WIP, Remark, Customer Remark Tag
 
 from __future__ import annotations
 
-import io
-import re
-from typing import Any, Dict, List, Optional, Tuple
-
 import pandas as pd
+from typing import Any, Dict, List, Optional, Tuple
 
 from excel_reader import (
     read_first_nonempty_sheet_raw,
     read_first_nonempty_sheet_with_header,
 )
-from utils import (
-    safe_text,
-    normalize_columns,
-    compact_text,
-    normalize_due_text,
-)
+from utils import safe_text, normalize_columns, compact_text, normalize_due_text
 from text_ocr_parsers import parse_email_text_to_rows
 
 
@@ -46,7 +38,7 @@ PO_CANDIDATES = [
 PART_CANDIDATES = [
     "Part No", "Part No.", "P/N", "PN", "料號", "品號", "客戶料號",
     "Cust. P / N", "LS P/N", "客戶品號", "成品料號", "產品料號",
-    "產品編號", "Product No", "Model"
+    "產品編號", "Product No", "Model", "祥竑料號"
 ]
 
 QTY_CANDIDATES = [
@@ -74,7 +66,6 @@ REMARK_CANDIDATES = [
     "Remark", "備註", "情況", "備註說明", "Note", "說明", "異常備註"
 ]
 
-
 PROCESS_ORDER_GENERIC = [
     "發料", "下料", "排版", "內層", "內乾", "內蝕", "黑化", "壓合", "壓板",
     "鑽孔", "沉銅", "一銅", "電鍍", "乾膜", "外層", "二銅", "二銅蝕刻",
@@ -93,18 +84,6 @@ def _first_existing(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
         if c in df.columns:
             return c
     return None
-
-
-def _norm_key(v: Any) -> str:
-    s = safe_text(v)
-    if not s:
-        return ""
-    return s.replace(" ", "").replace("-", "").replace("_", "").lower()
-
-
-def _is_blank(v: Any) -> bool:
-    s = safe_text(v)
-    return s == "" or s.lower() in {"nan", "none", "null"}
 
 
 def _make_result_row(
@@ -133,16 +112,13 @@ def _make_result_row(
     }
 
 
-def _has_any_col(df: pd.DataFrame, keywords: List[str]) -> bool:
-    cols = [compact_text(c) for c in df.columns]
-    return any(any(compact_text(k) == c or compact_text(k) in c for c in cols) for k in keywords)
-
-
-def _row_join(raw_df: pd.DataFrame, max_rows: int = 8) -> str:
-    lines = []
-    for i in range(min(len(raw_df), max_rows)):
-        lines.append("|".join(compact_text(x) for x in raw_df.iloc[i].tolist()))
-    return "\n".join(lines)
+def _detect_process_columns(df: pd.DataFrame) -> List[str]:
+    matched = []
+    for col in df.columns:
+        c = compact_text(col)
+        if c in PROCESS_ORDER_GENERIC or any(k in c for k in PROCESS_ORDER_GENERIC):
+            matched.append(col)
+    return matched
 
 
 def _guess_wip_from_processes(row: pd.Series, process_cols: List[str]) -> str:
@@ -155,25 +131,15 @@ def _guess_wip_from_processes(row: pd.Series, process_cols: List[str]) -> str:
     if not last_step:
         return ""
 
-    if last_step in {"出貨"}:
+    if last_step == "出貨":
         return "Shipping"
-    if last_step in {"包裝"}:
+    if last_step == "包裝":
         return "Packing"
     if last_step in {"測試", "成檢", "成檢(1)", "成檢(2)", "FQC", "QA"}:
         return "Inspection"
     if last_step in {"工程", "Gerber", "EQ"}:
         return "Engineering"
     return "Production"
-
-
-def _detect_process_columns(df: pd.DataFrame) -> List[str]:
-    matched = []
-    for col in df.columns:
-        c = compact_text(col)
-        if c in PROCESS_ORDER_GENERIC or any(k in c for k in PROCESS_ORDER_GENERIC):
-            matched.append(col)
-    # 保持原始欄位順序
-    return matched
 
 
 def _standardize_generic_df(df: pd.DataFrame, source_type: str, sheet_name: str = "") -> pd.DataFrame:
@@ -192,7 +158,6 @@ def _standardize_generic_df(df: pd.DataFrame, source_type: str, sheet_name: str 
     ship_col = _first_existing(df, SHIP_DATE_CANDIDATES)
     wip_col = _first_existing(df, WIP_CANDIDATES)
     remark_col = _first_existing(df, REMARK_CANDIDATES)
-
     process_cols = _detect_process_columns(df)
 
     rows: List[Dict[str, Any]] = []
@@ -231,7 +196,7 @@ def _standardize_generic_df(df: pd.DataFrame, source_type: str, sheet_name: str 
 # =========================================================
 # 西拓 parser
 # =========================================================
-def detect_xitop_header_row(raw_df: pd.DataFrame) -> Optional[int]:
+def detect_xitop_header_row(raw_df: pd.DataFrame):
     for i in range(min(len(raw_df), 12)):
         row_text = "".join([compact_text(x) for x in raw_df.iloc[i].tolist()])
         if ("P/O" in row_text or "訂單號碼" in row_text) and (
@@ -241,7 +206,7 @@ def detect_xitop_header_row(raw_df: pd.DataFrame) -> Optional[int]:
     return None
 
 
-def combine_header_cells(a: Any, b: Any) -> str:
+def combine_header_cells(a, b):
     a1, b1 = compact_text(a), compact_text(b)
     if not a1 and not b1:
         return ""
@@ -304,20 +269,20 @@ def parse_xitop_workflow_report(uploaded_file) -> pd.DataFrame:
 
     headers = []
     for idx in range(raw_df.shape[1]):
-        top = raw_df.iat[header_row, idx] if idx < raw_df.shape[1] else ""
-        bottom = raw_df.iat[second_header_row, idx] if idx < raw_df.shape[1] else ""
-        headers.append(combine_header_cells(top, bottom) or f"COL_{idx}")
+        headers.append(
+            combine_header_cells(raw_df.iloc[header_row, idx], raw_df.iloc[second_header_row, idx]) or f"COL_{idx}"
+        )
 
-    data_df = raw_df.iloc[header_row + 2:].copy()
-    data_df.columns = headers
-    data_df = data_df.dropna(how="all").reset_index(drop=True)
-    data_df = normalize_columns(data_df)
+    df = raw_df.iloc[second_header_row + 1:].copy()
+    df.columns = headers
+    df = df.dropna(how="all").reset_index(drop=True)
+    df.columns = [compact_text(c) or f"UNNAMED_{i}" for i, c in enumerate(df.columns)]
 
-    po_source = _first_existing(data_df, ["P/O", "訂單號碼"] + PO_CANDIDATES)
-    part_source = _first_existing(data_df, ["客戶料號"] + PART_CANDIDATES)
-    qty_source = _first_existing(data_df, ["訂購量(PCS)"] + QTY_CANDIDATES)
-    due_source = _first_existing(data_df, ["交貨日期"] + DUE_CANDIDATES)
-    remark_source = _first_existing(data_df, ["備註"] + REMARK_CANDIDATES)
+    po_source = _first_existing(df, ["P/O", "訂單號碼"] + PO_CANDIDATES)
+    due_source = _first_existing(df, ["交貨日期", "交貨"] + DUE_CANDIDATES)
+    part_source = _first_existing(df, ["客戶料號", "料號"] + PART_CANDIDATES)
+    qty_source = _first_existing(df, ["訂購量(PCS)", "訂購量"] + QTY_CANDIDATES)
+    remark_source = _first_existing(df, ["備註"] + REMARK_CANDIDATES)
 
     process_order = [
         "發料", "下料", "內層", "內乾", "內蝕", "黑化", "壓合", "鑽孔",
@@ -325,10 +290,10 @@ def parse_xitop_workflow_report(uploaded_file) -> pd.DataFrame:
         "防焊", "文字", "化金", "OSP", "化銀", "成型", "測試", "成檢",
         "包裝", "出貨"
     ]
-    existing_process_cols = [p for p in process_order if p in data_df.columns]
+    existing_process_cols = [p for p in process_order if p in df.columns]
 
-    rows: List[Dict[str, Any]] = []
-    for _, row in data_df.iterrows():
+    rows = []
+    for _, row in df.iterrows():
         po_val = safe_text(row.get(po_source, "")) if po_source else ""
         part_val = safe_text(row.get(part_source, "")) if part_source else ""
 
@@ -350,11 +315,6 @@ def parse_xitop_workflow_report(uploaded_file) -> pd.DataFrame:
             wip = "Production" if last_step else ""
 
         remark_val = safe_text(row.get(remark_source, "")) if remark_source else ""
-        full_remark = " | ".join([x for x in [
-            f"Last process: {last_step}" if last_step else "",
-            remark_val
-        ] if x])[:300]
-
         rows.append(_make_result_row(
             po=po_val,
             part=part_val,
@@ -362,7 +322,7 @@ def parse_xitop_workflow_report(uploaded_file) -> pd.DataFrame:
             due=row.get(due_source, "") if due_source else "",
             ship=row.get(due_source, "") if due_source else "",
             wip=wip,
-            remark=full_remark,
+            remark=" | ".join([x for x in [f"Last process: {last_step}" if last_step else "", remark_val] if x])[:300],
             tags=["Shipped"] if wip == "Shipping" else [],
             source_sheet=sheet_name or "",
             source_type="xitop_workflow",
@@ -412,7 +372,7 @@ def parse_xianghong_two_rows(uploaded_file) -> pd.DataFrame:
         "成檢(1)", "OSP", "化銀", "成檢(2)", "包裝", "庫存"
     ]
 
-    rows: List[Dict[str, Any]] = []
+    rows = []
     i = header_idx + 1
     while i < len(raw):
         row1 = raw.iloc[i].tolist()
@@ -513,8 +473,6 @@ def parse_profit_grand(uploaded_file) -> pd.DataFrame:
         raise ValueError("Profit Grand 報表讀取失敗")
 
     df = normalize_columns(df)
-
-    # 有些報表會有空白列或說明列
     df = df[df.notna().any(axis=1)].reset_index(drop=True)
 
     po_col = _first_existing(df, ["PO"] + PO_CANDIDATES)
@@ -525,7 +483,7 @@ def parse_profit_grand(uploaded_file) -> pd.DataFrame:
     wip_col = _first_existing(df, ["WIP"] + WIP_CANDIDATES)
     remark_col = _first_existing(df, REMARK_CANDIDATES)
 
-    rows: List[Dict[str, Any]] = []
+    rows = []
     for _, row in df.iterrows():
         po_val = safe_text(row.get(po_col, "")) if po_col else ""
         part_val = safe_text(row.get(part_col, "")) if part_col else ""
@@ -554,15 +512,13 @@ def parse_profit_grand(uploaded_file) -> pd.DataFrame:
 
 
 # =========================================================
-# 一般 Excel parser
+# 一般 Excel fallback
 # =========================================================
 def _score_standard_df(df: pd.DataFrame) -> int:
     if df is None or df.empty:
         return -999
 
     score = 0
-    cols = list(df.columns)
-
     if _first_existing(df, PO_CANDIDATES):
         score += 20
     if _first_existing(df, PART_CANDIDATES):
@@ -578,15 +534,14 @@ def _score_standard_df(df: pd.DataFrame) -> int:
     if len(process_cols) >= 3:
         score += 10
 
-    non_empty_cols = len([c for c in cols if compact_text(c)])
+    non_empty_cols = len([c for c in df.columns if compact_text(c)])
     if non_empty_cols >= 5:
         score += 5
     if len(df) >= 3:
         score += 5
 
-    unnamed = sum(1 for c in cols if compact_text(c).startswith("unnamed"))
+    unnamed = sum(1 for c in df.columns if compact_text(c).startswith("unnamed"))
     score -= unnamed
-
     return score
 
 
@@ -638,7 +593,7 @@ def parse_csv_file(uploaded_file) -> pd.DataFrame:
 # =========================================================
 # 主入口
 # =========================================================
-def read_import_dataframe(uploaded_file) -> Tuple[pd.DataFrame, str]:
+def read_import_dataframe(uploaded_file):
     """
     app.py 匯入主入口
     回傳：
@@ -652,24 +607,21 @@ def read_import_dataframe(uploaded_file) -> Tuple[pd.DataFrame, str]:
     if name.endswith(".csv"):
         return parse_csv_file(uploaded_file), "csv"
 
-    raw_df, raw_sheet = read_first_nonempty_sheet_raw(uploaded_file)
+    raw_df, _ = read_first_nonempty_sheet_raw(uploaded_file)
     if raw_df is None or raw_df.empty:
         raise ValueError("Excel 檔案沒有可讀資料")
 
-    # 先判斷特殊格式
     if looks_like_xitop_workflow(raw_df):
         return parse_xitop_workflow_report(uploaded_file), "xitop_workflow"
 
     if looks_like_xianghong_two_rows(raw_df):
         return parse_xianghong_two_rows(uploaded_file), "xianghong_two_rows"
 
-    # 先讀一次標準 header 判斷 PG
     try:
-        df0, sheet0 = read_first_nonempty_sheet_with_header(uploaded_file, header=0)
+        df0, _sheet0 = read_first_nonempty_sheet_with_header(uploaded_file, header=0)
         if looks_like_profit_grand(df0, filename=name):
             return parse_profit_grand(uploaded_file), "profit_grand"
     except Exception:
         pass
 
-    # 其他全部走一般 fallback
     return parse_standard_excel(uploaded_file), "standard_excel"
