@@ -82,7 +82,6 @@ def refresh_after_update() -> None:
         st.cache_data.clear()
     except Exception:
         pass
-    # 這裡不強制清空 session_state，避免 query_params 等一起被清掉
     st.rerun()
 
 
@@ -205,10 +204,6 @@ def call_report_function(candidate_names: List[str], **kwargs) -> Optional[bool]
     成功呼叫回傳 True
     找到但回傳 False 則回傳 False（代表要 fallback）
     都找不到回傳 False
-
-    加強版：
-    - 支援 df / orders / data / dataset 自動別名補齊
-    - 避免 reports.py 參數命名不同造成 missing positional argument
     """
     alias_map = {
         "df": ["orders", "data", "dataset"],
@@ -224,12 +219,10 @@ def call_report_function(candidate_names: List[str], **kwargs) -> Optional[bool]
                 sig = inspect.signature(fn)
                 accepted = {}
 
-                # 先收直接同名參數
                 for k, v in kwargs.items():
                     if k in sig.parameters:
                         accepted[k] = v
 
-                # 再補 alias
                 for param_name in sig.parameters:
                     if param_name in accepted:
                         continue
@@ -250,7 +243,6 @@ def call_report_function(candidate_names: List[str], **kwargs) -> Optional[bool]
 
 
 def _detect_factory_name(filename: str) -> str:
-    """從檔案名識別工廠"""
     name_lower = filename.lower()
     if "全興" in filename or "quanxing" in name_lower or "203-" in name_lower:
         return "全興電子"
@@ -270,7 +262,6 @@ def _detect_factory_name(filename: str) -> str:
 
 
 def _display_update_results(results: Dict[str, Any]) -> None:
-    """顯示更新結果"""
     c1, c2, c3 = st.columns(3)
     c1.metric("✅ 成功", results.get("success_count", 0))
     c2.metric("❌ 失敗", results.get("failed_count", 0))
@@ -312,7 +303,6 @@ def show_orders_page(orders: pd.DataFrame) -> None:
         return
 
     df = orders.copy()
-
     filter_cols = st.columns(4)
 
     if customer_col and customer_col in df.columns:
@@ -379,7 +369,6 @@ def show_customer_preview_page(orders: pd.DataFrame) -> None:
         return
 
     df = orders.copy()
-
     customer_from_query = st.query_params.get("customer", "")
     if isinstance(customer_from_query, list) and customer_from_query:
         customer_from_query = customer_from_query[0]
@@ -409,14 +398,16 @@ def show_customer_preview_page(orders: pd.DataFrame) -> None:
     st.dataframe(df[display_cols], use_container_width=True, height=560)
 
 
-def fallback_import_update(orders: pd.DataFrame) -> None:
-    """後備導入/更新功能 - 支援批量更新到 Teable"""
+def show_import_update_page(orders: pd.DataFrame) -> None:
+    """
+    Import / Update 正式頁面
+    直接由 app.py 接管，不再經過 reports.py fallback
+    """
     st.subheader("📤 Import / Update")
     st.caption("工廠進度輸入工具：檔案上傳、圖片截圖、貼上文字、手工輸入 + 批量同步到 Teable")
 
     tab1, tab2, tab3, tab4 = st.tabs(["📁 檔案上傳", "🖼️ 圖片截圖", "📋 貼上文字", "✏️ 手工輸入"])
 
-    # 檔案上傳
     with tab1:
         uploaded = st.file_uploader(
             "上傳工廠進度檔案",
@@ -433,59 +424,63 @@ def fallback_import_update(orders: pd.DataFrame) -> None:
 
                 if df_up is None or df_up.empty:
                     st.warning("⚠️ 解析後沒有有效資料")
-                    return
+                else:
+                    st.success(f"✅ 已解析 **{len(df_up)}** 筆記錄 | 模式: **{parse_mode}**")
+                    st.dataframe(df_up.head(20), use_container_width=True, height=320)
 
-                st.success(f"✅ 已解析 **{len(df_up)}** 筆記錄 | 模式: **{parse_mode}**")
-                st.dataframe(df_up.head(20), use_container_width=True, height=320)
+                    with st.expander("📋 欄位匹配預覽"):
+                        po_match = get_first_matching_column(df_up, _cfg_list("PO_CANDIDATES"))
+                        part_match = get_first_matching_column(df_up, _cfg_list("PART_CANDIDATES"))
+                        wip_match = get_first_matching_column(df_up, _cfg_list("WIP_CANDIDATES"))
 
-                with st.expander("📋 欄位匹配預覽"):
-                    po_match = get_first_matching_column(df_up, _cfg_list("PO_CANDIDATES"))
-                    part_match = get_first_matching_column(df_up, _cfg_list("PART_CANDIDATES"))
-                    wip_match = get_first_matching_column(df_up, _cfg_list("WIP_CANDIDATES"))
-                    process_cols = teable_api._detect_process_columns(df_up)
+                        process_cols = []
+                        detect_process_fn = getattr(teable_api, "_detect_process_columns", None)
+                        if callable(detect_process_fn):
+                            try:
+                                process_cols = detect_process_fn(df_up)
+                            except Exception:
+                                process_cols = []
 
-                    st.write(f"**PO 列**: `{po_match}`" if po_match else "**PO 列**: ❌ 未找到")
-                    st.write(
-                        f"**Part / 料號列**: `{part_match}`"
-                        if part_match
-                        else "**Part / 料號列**: ❌ 未找到"
-                    )
-                    st.write(
-                        f"**WIP 列**: `{wip_match}`"
-                        if wip_match
-                        else "**WIP 列**: ℹ️ 將嘗試多列製程解析"
-                    )
-
-                    if process_cols:
-                        st.write(f"**製程列檢測**: {len(process_cols)} 個 → {process_cols[:8]}")
-
-                    if not po_match and not part_match:
-                        st.warning("這份檔案目前沒有找到 PO 或料號欄，更新時可能失敗。")
-
-                if st.button("📤 更新到 Teable", type="primary", key="update_teable_btn"):
-                    with st.spinner("🔄 正在批量更新到 Teable..."):
-                        results = teable_api.batch_update_wip_from_excel(
-                            current_df=orders,
-                            uploaded_df=df_up,
-                            factory_name=factory_name,
+                        st.write(f"**PO 列**: `{po_match}`" if po_match else "**PO 列**: ❌ 未找到")
+                        st.write(
+                            f"**Part / 料號列**: `{part_match}`"
+                            if part_match
+                            else "**Part / 料號列**: ❌ 未找到"
                         )
-                        _display_update_results(results)
+                        st.write(
+                            f"**WIP 列**: `{wip_match}`"
+                            if wip_match
+                            else "**WIP 列**: ℹ️ 將嘗試多列製程解析"
+                        )
 
-                        if results.get("success_count", 0) > 0:
-                            st.balloons()
-                            st.success("✨ 更新完成！頁面將自動刷新...")
-                            refresh_after_update()
+                        if process_cols:
+                            st.write(f"**製程列檢測**: {len(process_cols)} 個 → {process_cols[:8]}")
 
-                st.caption("支援 PO / 訂單編號 / 料號 匹配；若無 WIP 欄會嘗試從製程欄推算。")
+                        if not po_match and not part_match:
+                            st.warning("這份檔案目前沒有找到 PO 或料號欄，更新時可能失敗。")
+
+                    if st.button("📤 更新到 Teable", type="primary", key="update_teable_btn"):
+                        with st.spinner("🔄 正在批量更新到 Teable..."):
+                            results = teable_api.batch_update_wip_from_excel(
+                                current_df=orders,
+                                uploaded_df=df_up,
+                                factory_name=factory_name,
+                            )
+                            _display_update_results(results)
+
+                            if results.get("success_count", 0) > 0:
+                                st.balloons()
+                                st.success("✨ 更新完成！頁面將自動刷新...")
+                                refresh_after_update()
+
+                    st.caption("支援 PO / 訂單編號 / 料號 匹配；若無 WIP 欄會嘗試從製程欄推算。")
 
             except Exception as e:
                 st.error(f"❌ 讀取失敗：{e}")
                 import traceback
-
                 with st.expander("🔍 錯誤詳情"):
                     st.code(traceback.format_exc())
 
-    # 圖片截圖
     with tab2:
         image_file = st.file_uploader(
             "上傳截圖 / 圖片",
@@ -504,14 +499,12 @@ def fallback_import_update(orders: pd.DataFrame) -> None:
             except Exception as e:
                 st.error(f"OCR 失敗：{e}")
 
-    # 貼上文字
     with tab3:
         pasted = st.text_area("請貼上工廠進度文字", height=260, key="factory_text_input")
         if pasted:
             st.caption("已接收貼上文字，可先複製成 .txt 上傳，或之後再串接 text parser 即時更新。")
             st.text_area("文字預覽", value=pasted, height=220, key="factory_text_preview_2")
 
-    # 手工輸入
     with tab4:
         st.info("手工輸入模式保留。若你要，下一版也可以把手工輸入接成可更新 Teable。")
 
@@ -594,7 +587,6 @@ changed_due_date_col = get_first_matching_column(
     getattr(cfg, "CHANGED_DUE_DATE_CANDIDATES", ["Changed Due Date", "更改交期", "新交期"]),
 )
 
-# Debug 區
 with st.expander("🔧 Debug / System Info", expanded=False):
     st.write("Orders loaded:", 0 if orders is None else len(orders))
     st.write(
@@ -612,8 +604,6 @@ with st.expander("🔧 Debug / System Info", expanded=False):
 
 if orders is None or orders.empty:
     show_no_data_layout()
-    # 讓 Import / Update 仍然可用，不直接 stop
-    # st.stop()
 
 
 # ==================================
@@ -652,12 +642,10 @@ st.sidebar.caption("📁 另建 Completed View：WIP = 完成")
 # COMMON KWARGS
 # ==================================
 common_kwargs = dict(
-    # 核心資料別名一起給，避免 reports.py 參數命名不同
     orders=orders,
     df=orders,
     data=orders,
     dataset=orders,
-
     sales_df=sales_df,
     sales_shipment_df=sales_shipment_df,
     po_col=po_col,
@@ -704,7 +692,6 @@ elif menu == "Shipment Forecast":
         st.info("Shipment Forecast fallback not enabled.")
 
 elif menu == "Orders":
-    # 先用內建 Orders 頁，若未來你想讓 reports.py 接管再調整
     show_orders_page(orders)
 
 elif menu == "Customer Preview":
@@ -732,9 +719,7 @@ elif menu == "業績明細表":
         st.error(f"業績明細表載入失敗：{e}")
 
 elif menu == "📤 Import / Update":
-    ok = call_report_function(["show_import_update_page", "show_import_update_report"], **common_kwargs)
-    if ok is False:
-        fallback_import_update(orders)
+    show_import_update_page(orders)
 
 st.caption(
     "🔄 Auto refresh cache: 60 seconds | 📊 Last updated: "
