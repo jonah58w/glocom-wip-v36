@@ -30,7 +30,6 @@ st.set_page_config(
     layout="wide",
 )
 
-
 # ==================================
 # STYLE
 # ==================================
@@ -58,14 +57,6 @@ st.markdown(
         border-radius: 16px;
         font-size: 0.85em;
         font-weight: 600;
-    }
-    .tag-chip {
-        display: inline-block;
-        background: rgba(255,255,255,0.2);
-        padding: 2px 8px;
-        border-radius: 8px;
-        margin: 2px;
-        font-size: 0.8em;
     }
     .small-muted { color: #6b7280; font-size: 0.9em; }
     </style>
@@ -103,8 +94,11 @@ def split_tags(value: Any) -> List[str]:
 def safe_text(value: Any) -> str:
     if hasattr(u, "safe_text"):
         return u.safe_text(value)
-    if pd.isna(value):
-        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
     return str(value).strip()
 
 
@@ -128,6 +122,16 @@ def _cfg_list(name: str, default: Optional[List[str]] = None) -> List[str]:
 
 def normalize_date_series(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, errors="coerce")
+
+
+def fmt_date(v: Any) -> str:
+    try:
+        dt = pd.to_datetime(v, errors="coerce")
+        if pd.isna(dt):
+            return ""
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return safe_text(v)
 
 
 def wip_display_html(value: str) -> str:
@@ -171,40 +175,7 @@ def show_no_data_layout() -> None:
     )
 
 
-def show_metrics(orders: pd.DataFrame, wip_col: Optional[str]) -> None:
-    if orders is None or orders.empty:
-        st.info("目前沒有資料可顯示。")
-        return
-
-    total = len(orders)
-    done_count = 0
-
-    if wip_col and wip_col in orders.columns:
-        s = orders[wip_col].astype(str).str.strip()
-        done_values = {str(x).upper() for x in getattr(cfg, "DONE_WIP_VALUES", set())}
-        done_count = int((s.str.upper().isin(done_values) | s.str.contains("完成", na=False)).sum())
-
-    active = max(total - done_count, 0)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("總筆數", total)
-    c2.metric("進行中", active)
-    c3.metric("完成", done_count)
-
-    if wip_col and wip_col in orders.columns:
-        st.markdown("### WIP 分布")
-        vc = orders[wip_col].fillna("").astype(str).str.strip()
-        vc = vc[vc != ""].value_counts().head(15)
-        if not vc.empty:
-            st.bar_chart(vc)
-
-
 def call_report_function(candidate_names: List[str], **kwargs) -> Optional[bool]:
-    """
-    依序呼叫 reports 模組中的函數
-    成功呼叫回傳 True
-    找到但回傳 False 則回傳 False（代表要 fallback）
-    都找不到回傳 False
-    """
     alias_map = {
         "df": ["orders", "data", "dataset"],
         "orders": ["df", "data", "dataset"],
@@ -280,8 +251,6 @@ def _display_update_results(results: Dict[str, Any]) -> None:
                 po_text = item.get("po") or "-"
                 part_text = item.get("part") or "-"
                 st.error(f"行 {item.get('row')}: PO={po_text} / PART={part_text} - {item.get('error')}")
-        if len(failed) > 20:
-            st.caption(f"... 還有 {len(failed) - 20} 筆失敗記錄")
 
     success = [d for d in results.get("details", []) if d.get("status") == "更新成功"]
     if success:
@@ -290,9 +259,206 @@ def _display_update_results(results: Dict[str, Any]) -> None:
                 po_text = item.get("po") or "-"
                 part_text = item.get("part") or "-"
                 matched_by = item.get("matched_by") or "-"
-                st.success(
-                    f"✓ PO: {po_text} / PART: {part_text} → WIP: {item.get('wip')} 〔match: {matched_by}〕"
-                )
+                st.success(f"✓ PO: {po_text} / PART: {part_text} → WIP: {item.get('wip')} 〔match: {matched_by}〕")
+
+
+def _safe_dataframe(df: pd.DataFrame, cols: List[Optional[str]]) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    final_cols = []
+    for c in cols:
+        if c and c in df.columns and c not in final_cols:
+            final_cols.append(c)
+    if not final_cols:
+        return df.copy()
+    return df[final_cols].copy()
+
+
+def _is_done_value(x: Any) -> bool:
+    text = safe_text(x)
+    if not text:
+        return False
+    done_values = {str(v).upper() for v in getattr(cfg, "DONE_WIP_VALUES", set())}
+    return text.upper() in done_values or ("完成" in text)
+
+
+def _is_hold_value(x: Any) -> bool:
+    text = safe_text(x).lower()
+    return any(k in text for k in ["hold", "暫停", "等待"])
+
+
+def _get_active_orders(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty or not wip_col or wip_col not in df.columns:
+        return df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    mask = ~df[wip_col].apply(_is_done_value)
+    return df[mask].copy()
+
+
+def _get_delayed_orders(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    date_col = factory_due_col or ship_date_col
+    if not date_col or date_col not in df.columns:
+        return pd.DataFrame()
+
+    temp = df.copy()
+    temp["_due_dt"] = pd.to_datetime(temp[date_col], errors="coerce")
+    temp = temp[temp["_due_dt"].notna()].copy()
+
+    if wip_col and wip_col in temp.columns:
+        temp = temp[~temp[wip_col].apply(_is_done_value)].copy()
+
+    today = pd.Timestamp.today().normalize()
+    temp = temp[temp["_due_dt"] < today].copy()
+    temp = temp.sort_values("_due_dt")
+    return temp
+
+
+def _get_new_orders(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    date_col = order_date_col or factory_order_date_col or merge_date_col
+    if not date_col or date_col not in df.columns:
+        return pd.DataFrame()
+
+    temp = df.copy()
+    temp["_new_dt"] = pd.to_datetime(temp[date_col], errors="coerce")
+    temp = temp[temp["_new_dt"].notna()].copy()
+
+    cutoff = pd.Timestamp.today().normalize() - pd.Timedelta(days=14)
+    temp = temp[temp["_new_dt"] >= cutoff].copy()
+    temp = temp.sort_values("_new_dt", ascending=False)
+    return temp
+
+
+def _get_shipment_forecast(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    date_col = ship_date_col or factory_due_col
+    if not date_col or date_col not in df.columns:
+        return pd.DataFrame()
+
+    temp = df.copy()
+    temp["_ship_dt"] = pd.to_datetime(temp[date_col], errors="coerce")
+    temp = temp[temp["_ship_dt"].notna()].copy()
+
+    today = pd.Timestamp.today().normalize()
+    end_date = today + pd.Timedelta(days=30)
+
+    if wip_col and wip_col in temp.columns:
+        temp = temp[~temp[wip_col].apply(_is_done_value)].copy()
+
+    temp = temp[(temp["_ship_dt"] >= today) & (temp["_ship_dt"] <= end_date)].copy()
+    temp = temp.sort_values("_ship_dt")
+    return temp
+
+
+# ==================================
+# PAGE FUNCTIONS
+# ==================================
+def show_dashboard_page(orders: pd.DataFrame) -> None:
+    st.subheader("📊 Dashboard")
+
+    if orders is None or orders.empty:
+        st.info("目前沒有資料。")
+        return
+
+    total = len(orders)
+    done_count = 0
+    hold_count = 0
+
+    if wip_col and wip_col in orders.columns:
+        done_count = int(orders[wip_col].apply(_is_done_value).sum())
+        hold_count = int(orders[wip_col].apply(_is_hold_value).sum())
+
+    active = max(total - done_count, 0)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("總筆數", total)
+    c2.metric("進行中", active)
+    c3.metric("完成", done_count)
+    c4.metric("On Hold", hold_count)
+
+    if wip_col and wip_col in orders.columns:
+        st.markdown("### WIP 分布")
+        vc = orders[wip_col].fillna("").astype(str).str.strip()
+        vc = vc[vc != ""].value_counts().head(15)
+        if not vc.empty:
+            st.bar_chart(vc)
+
+    date_col = ship_date_col or factory_due_col
+    if date_col and date_col in orders.columns:
+        temp = orders.copy()
+        temp["_ship_dt"] = pd.to_datetime(temp[date_col], errors="coerce")
+        temp = temp[temp["_ship_dt"].notna()].copy()
+        if not temp.empty:
+            st.markdown("### 出貨 / 交期趨勢")
+            trend = temp.groupby(temp["_ship_dt"].dt.date).size()
+            st.line_chart(trend)
+
+
+def show_factory_load_page(orders: pd.DataFrame) -> None:
+    st.subheader("🏭 Factory Load")
+
+    if orders is None or orders.empty:
+        st.info("目前沒有資料。")
+        return
+
+    df = _get_active_orders(orders)
+
+    if factory_col and factory_col in df.columns:
+        st.markdown("### 工廠在製筆數")
+        vc = df[factory_col].fillna("未指定").astype(str).value_counts()
+        st.bar_chart(vc)
+
+        view = vc.reset_index()
+        view.columns = ["Factory", "Active Orders"]
+        st.dataframe(view, use_container_width=True, height=320)
+    else:
+        st.info("找不到工廠欄位。")
+        st.dataframe(_safe_dataframe(df, [po_col, part_col, qty_col, wip_col, ship_date_col]), use_container_width=True)
+
+
+def show_delayed_orders_page(orders: pd.DataFrame) -> None:
+    st.subheader("⏰ Delayed Orders")
+
+    delayed = _get_delayed_orders(orders)
+    if delayed.empty:
+        st.info("目前沒有 Delay 案件。")
+        return
+
+    date_col = factory_due_col or ship_date_col
+    delayed["_Delay Days"] = (pd.Timestamp.today().normalize() - delayed["_due_dt"]).dt.days
+
+    cols = [customer_col, po_col, part_col, qty_col, factory_col, wip_col, date_col, remark_col]
+    view = _safe_dataframe(delayed, cols)
+    if "_Delay Days" in delayed.columns:
+        view["Delay Days"] = delayed["_Delay Days"].values
+
+    st.metric("Delay 筆數", len(delayed))
+    st.dataframe(view, use_container_width=True, height=560)
+
+
+def show_shipment_forecast_page(orders: pd.DataFrame) -> None:
+    st.subheader("🚚 Shipment Forecast")
+
+    forecast = _get_shipment_forecast(orders)
+    if forecast.empty:
+        st.info("未來 30 天目前沒有可顯示的出貨預估。")
+        return
+
+    date_col = ship_date_col or factory_due_col
+    forecast["_Ship Date"] = forecast["_ship_dt"].dt.date
+
+    summary = forecast.groupby("_Ship Date").size().reset_index(name="Count")
+    st.markdown("### 未來 30 天出貨分布")
+    st.bar_chart(summary.set_index("_Ship Date")["Count"])
+
+    cols = [customer_col, po_col, part_col, qty_col, factory_col, wip_col, date_col, remark_col]
+    st.dataframe(_safe_dataframe(forecast, cols), use_container_width=True, height=560)
 
 
 def show_orders_page(orders: pd.DataFrame) -> None:
@@ -398,11 +564,63 @@ def show_customer_preview_page(orders: pd.DataFrame) -> None:
     st.dataframe(df[display_cols], use_container_width=True, height=560)
 
 
+def show_sandy_internal_wip_page(orders: pd.DataFrame) -> None:
+    st.subheader("🧾 Sandy 內部 WIP")
+
+    if orders is None or orders.empty:
+        st.info("目前沒有資料。")
+        return
+
+    df = _get_active_orders(orders)
+
+    if customer_col and customer_col in df.columns:
+        keywords = ["SANDY", "Sandy", "sandy"]
+        mask = pd.Series(False, index=df.index)
+        for kw in keywords:
+            mask = mask | df[customer_col].astype(str).str.contains(kw, case=False, na=False)
+        sandy_df = df[mask].copy()
+        if not sandy_df.empty:
+            df = sandy_df
+
+    cols = [customer_col, po_col, part_col, qty_col, factory_col, wip_col, factory_due_col, ship_date_col, remark_col]
+    st.caption(f"顯示 {len(df)} 筆")
+    st.dataframe(_safe_dataframe(df, cols), use_container_width=True, height=560)
+
+
+def show_sandy_shipment_page(sales_df: pd.DataFrame, sales_shipment_df: pd.DataFrame) -> None:
+    st.subheader("📦 Sandy 銷貨底")
+
+    df = pd.DataFrame()
+    if isinstance(sales_shipment_df, pd.DataFrame) and not sales_shipment_df.empty:
+        df = sales_shipment_df.copy()
+    elif isinstance(sales_df, pd.DataFrame) and not sales_df.empty:
+        df = sales_df.copy()
+
+    if df.empty:
+        st.info("目前沒有銷貨底資料。")
+        return
+
+    st.caption(f"顯示 {len(df)} 筆")
+    st.dataframe(df, use_container_width=True, height=560)
+
+
+def show_new_orders_wip_page(orders: pd.DataFrame) -> None:
+    st.subheader("🆕 新訂單 WIP")
+
+    df = _get_new_orders(orders)
+
+    if df.empty:
+        st.info("近 14 天目前沒有新訂單資料。")
+        return
+
+    date_col = order_date_col or factory_order_date_col or merge_date_col
+    cols = [date_col, customer_col, po_col, part_col, qty_col, factory_col, wip_col, ship_date_col, remark_col]
+
+    st.metric("新訂單筆數", len(df))
+    st.dataframe(_safe_dataframe(df, cols), use_container_width=True, height=560)
+
+
 def show_import_update_page(orders: pd.DataFrame) -> None:
-    """
-    Import / Update 正式頁面
-    直接由 app.py 接管，不再經過 reports.py fallback
-    """
     st.subheader("📤 Import / Update")
     st.caption("工廠進度輸入工具：檔案上傳、圖片截圖、貼上文字、手工輸入 + 批量同步到 Teable")
 
@@ -442,16 +660,8 @@ def show_import_update_page(orders: pd.DataFrame) -> None:
                                 process_cols = []
 
                         st.write(f"**PO 列**: `{po_match}`" if po_match else "**PO 列**: ❌ 未找到")
-                        st.write(
-                            f"**Part / 料號列**: `{part_match}`"
-                            if part_match
-                            else "**Part / 料號列**: ❌ 未找到"
-                        )
-                        st.write(
-                            f"**WIP 列**: `{wip_match}`"
-                            if wip_match
-                            else "**WIP 列**: ℹ️ 將嘗試多列製程解析"
-                        )
+                        st.write(f"**Part / 料號列**: `{part_match}`" if part_match else "**Part / 料號列**: ❌ 未找到")
+                        st.write(f"**WIP 列**: `{wip_match}`" if wip_match else "**WIP 列**: ℹ️ 將嘗試多列製程解析")
 
                         if process_cols:
                             st.write(f"**製程列檢測**: {len(process_cols)} 個 → {process_cols[:8]}")
@@ -473,8 +683,6 @@ def show_import_update_page(orders: pd.DataFrame) -> None:
                                 st.success("✨ 更新完成！頁面將自動刷新...")
                                 refresh_after_update()
 
-                    st.caption("支援 PO / 訂單編號 / 料號 匹配；若無 WIP 欄會嘗試從製程欄推算。")
-
             except Exception as e:
                 st.error(f"❌ 讀取失敗：{e}")
                 import traceback
@@ -492,7 +700,6 @@ def show_import_update_page(orders: pd.DataFrame) -> None:
             try:
                 import pytesseract
                 from PIL import Image
-
                 img = Image.open(image_file)
                 text = pytesseract.image_to_string(img, lang="eng+chi_tra")
                 st.text_area("OCR 結果", value=text, height=260, key="ocr_result_preview")
@@ -506,7 +713,7 @@ def show_import_update_page(orders: pd.DataFrame) -> None:
             st.text_area("文字預覽", value=pasted, height=220, key="factory_text_preview_2")
 
     with tab4:
-        st.info("手工輸入模式保留。若你要，下一版也可以把手工輸入接成可更新 Teable。")
+        st.info("手工輸入模式保留。若您要，我下一版可幫您把手工輸入直接接成可更新 Teable。")
 
 
 # ==================================
@@ -605,7 +812,6 @@ with st.expander("🔧 Debug / System Info", expanded=False):
 if orders is None or orders.empty:
     show_no_data_layout()
 
-
 # ==================================
 # SIDEBAR
 # ==================================
@@ -637,7 +843,6 @@ st.sidebar.markdown("---")
 st.sidebar.caption("✅ 完成案件請在 Teable 主 View 設定篩選：WIP ≠ 完成")
 st.sidebar.caption("📁 另建 Completed View：WIP = 完成")
 
-
 # ==================================
 # COMMON KWARGS
 # ==================================
@@ -667,29 +872,20 @@ common_kwargs = dict(
     wip_display_html=wip_display_html,
 )
 
-
 # ==================================
 # ROUTER
 # ==================================
 if menu == "Dashboard":
-    ok = call_report_function(["show_dashboard_report"], **common_kwargs)
-    if ok is False:
-        show_metrics(orders, wip_col)
+    show_dashboard_page(orders)
 
 elif menu == "Factory Load":
-    ok = call_report_function(["show_factory_load_report"], **common_kwargs)
-    if ok is False:
-        st.info("Factory Load fallback not enabled.")
+    show_factory_load_page(orders)
 
 elif menu == "Delayed Orders":
-    ok = call_report_function(["show_delayed_orders_report"], **common_kwargs)
-    if ok is False:
-        st.info("Delayed Orders fallback not enabled.")
+    show_delayed_orders_page(orders)
 
 elif menu == "Shipment Forecast":
-    ok = call_report_function(["show_shipment_forecast_report"], **common_kwargs)
-    if ok is False:
-        st.info("Shipment Forecast fallback not enabled.")
+    show_shipment_forecast_page(orders)
 
 elif menu == "Orders":
     show_orders_page(orders)
@@ -698,19 +894,13 @@ elif menu == "Customer Preview":
     show_customer_preview_page(orders)
 
 elif menu == "Sandy 內部 WIP":
-    ok = call_report_function(["show_sandy_internal_wip_report"], **common_kwargs)
-    if ok is False:
-        st.info("Sandy 內部 WIP fallback not enabled.")
+    show_sandy_internal_wip_page(orders)
 
 elif menu == "Sandy 銷貨底":
-    ok = call_report_function(["show_sandy_shipment_report"], **common_kwargs)
-    if ok is False:
-        st.info("Sandy 銷貨底 fallback not enabled.")
+    show_sandy_shipment_page(sales_df, sales_shipment_df)
 
 elif menu == "新訂單 WIP":
-    ok = call_report_function(["show_new_orders_wip_report"], **common_kwargs)
-    if ok is False:
-        st.info("新訂單 WIP fallback not enabled.")
+    show_new_orders_wip_page(orders)
 
 elif menu == "業績明細表":
     try:
