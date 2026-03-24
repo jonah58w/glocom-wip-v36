@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -96,7 +97,6 @@ def _find_first_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
         if key in normalized:
             return normalized[key]
 
-    # 模糊比對
     for cand in candidates:
         key = _normalize_key(cand)
         for col in df.columns:
@@ -118,18 +118,15 @@ def _extract_table_id(table_url: str) -> Optional[str]:
     if not table_url:
         return None
 
-    m = re.search(r"/table/(tbl[a-zA-Z0-9]+)/record", table_url)
-    if m:
-        return m.group(1)
-
-    m = re.search(r"/table/(tbl[a-zA-Z0-9]+)", table_url)
-    if m:
-        return m.group(1)
-
-    m = re.search(r"(tbl[a-zA-Z0-9]+)", table_url)
-    if m:
-        return m.group(1)
-
+    patterns = [
+        r"/table/(tbl[a-zA-Z0-9]+)/record",
+        r"/table/(tbl[a-zA-Z0-9]+)",
+        r"(tbl[a-zA-Z0-9]+)",
+    ]
+    for p in patterns:
+        m = re.search(p, table_url)
+        if m:
+            return m.group(1)
     return None
 
 
@@ -140,15 +137,38 @@ def _headers() -> Dict[str, str]:
     }
 
 
-def _build_record_api_url() -> str:
-    if TABLE_URL and "/api/table/" in TABLE_URL and TABLE_URL.rstrip("/").endswith("/record"):
-        return TABLE_URL.rstrip("/")
+def _candidate_record_api_urls() -> List[str]:
+    urls: List[str] = []
 
-    table_id = _extract_table_id(TABLE_URL or DEFAULT_TABLE_URL)
+    raw = _safe_text(TABLE_URL)
+
+    if raw and "/api/table/" in raw and raw.rstrip("/").endswith("/record"):
+        urls.append(raw.rstrip("/"))
+
+        if "app.teable.ai" in raw:
+            urls.append(raw.replace("app.teable.ai", "app.teable.io").rstrip("/"))
+        elif "app.teable.io" in raw:
+            urls.append(raw.replace("app.teable.io", "app.teable.ai").rstrip("/"))
+
+    table_id = _extract_table_id(raw or DEFAULT_TABLE_URL)
     if not table_id:
         table_id = _extract_table_id(DEFAULT_TABLE_URL)
 
-    return f"https://app.teable.ai/api/table/{table_id}/record"
+    if table_id:
+        urls.extend([
+            f"https://app.teable.io/api/table/{table_id}/record",
+            f"https://app.teable.ai/api/table/{table_id}/record",
+        ])
+
+    # 去重但保留順序
+    seen = set()
+    deduped = []
+    for u in urls:
+        if u and u not in seen:
+            seen.add(u)
+            deduped.append(u)
+
+    return deduped
 
 
 def _normalize_records_to_df(records: List[Dict[str, Any]]) -> pd.DataFrame:
@@ -170,11 +190,16 @@ def _normalize_records_to_df(records: List[Dict[str, Any]]) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
-
-    # 去除欄名空白
     df.columns = [str(c).strip() for c in df.columns]
-
     return df
+
+
+def _try_parse_json(resp: requests.Response) -> Tuple[Optional[dict], str]:
+    try:
+        return resp.json(), ""
+    except Exception as e:
+        text = resp.text[:2000] if hasattr(resp, "text") else ""
+        return None, f"JSON parse failed: {e}\nResponse text: {text}"
 
 
 # ==================================
@@ -187,58 +212,69 @@ def load_orders() -> Tuple[pd.DataFrame, str, str]:
     if not TEABLE_TOKEN:
         return pd.DataFrame(), "error", "Missing TEABLE_TOKEN in Streamlit secrets."
 
-    api_url = _build_record_api_url()
-    if not api_url:
-        return pd.DataFrame(), "error", f"Invalid TABLE_URL: {TABLE_URL}"
+    api_urls = _candidate_record_api_urls()
+    if not api_urls:
+        return pd.DataFrame(), "error", f"Cannot build record API URL from TABLE_URL={TABLE_URL}"
 
-    all_records: List[Dict[str, Any]] = []
-    take = 1000
-    skip = 0
-
-    debug_msgs = [
-        f"api_url={api_url}",
-        f"view_id={TEABLE_VIEW_ID or '(none)'}",
+    debug_msgs: List[str] = [
+        f"TABLE_URL={TABLE_URL}",
+        f"TEABLE_VIEW_ID={TEABLE_VIEW_ID or '(none)'}",
+        f"candidate_urls={json.dumps(api_urls, ensure_ascii=False)}",
     ]
 
-    try:
-        while True:
-            params = {
-                "take": take,
-                "skip": skip,
-                "fieldKeyType": "name",
-                "cellFormat": "text",
-            }
-            if TEABLE_VIEW_ID:
-                params["viewId"] = TEABLE_VIEW_ID
+    for api_url in api_urls:
+        all_records: List[Dict[str, Any]] = []
+        take = 1000
+        skip = 0
 
-            resp = requests.get(api_url, headers=_headers(), params=params, timeout=30)
-            debug_msgs.append(f"GET {resp.url} -> {resp.status_code}")
+        try:
+            debug_msgs.append(f"Trying api_url={api_url}")
 
-            if resp.status_code != 200:
-                return pd.DataFrame(), "error", "\n".join(debug_msgs + [resp.text[:2000]])
+            while True:
+                params = {
+                    "take": take,
+                    "skip": skip,
+                    "fieldKeyType": "name",
+                    "cellFormat": "text",
+                }
+                if TEABLE_VIEW_ID:
+                    params["viewId"] = TEABLE_VIEW_ID
 
-            data = resp.json()
+                resp = requests.get(api_url, headers=_headers(), params=params, timeout=30)
+                debug_msgs.append(f"GET {resp.url} -> {resp.status_code}")
 
-            records = data.get("records", [])
-            if not isinstance(records, list):
-                return pd.DataFrame(), "error", "\n".join(debug_msgs + [f"Unexpected response JSON: {str(data)[:2000]}"])
+                if resp.status_code != 200:
+                    debug_msgs.append(resp.text[:1200])
+                    break
 
-            all_records.extend(records)
+                data, json_err = _try_parse_json(resp)
+                if data is None:
+                    debug_msgs.append(json_err)
+                    break
 
-            if len(records) < take:
-                break
+                records = data.get("records", [])
+                if not isinstance(records, list):
+                    debug_msgs.append(f"Unexpected JSON shape: {str(data)[:1500]}")
+                    break
 
-            skip += take
+                all_records.extend(records)
 
-        df = _normalize_records_to_df(all_records)
+                if len(records) < take:
+                    df = _normalize_records_to_df(all_records)
+                    if df.empty:
+                        debug_msgs.append("Connected successfully, but 0 records returned.")
+                        break
 
-        if df.empty:
-            return df, "ok", "\n".join(debug_msgs + ["Teable connected, but 0 records returned."])
+                    debug_msgs.append(f"Loaded records: {len(df)}")
+                    debug_msgs.append(f"Columns: {list(df.columns)}")
+                    return df, "ok", "\n".join(debug_msgs)
 
-        return df, "ok", "\n".join(debug_msgs + [f"Loaded records: {len(df)}"])
+                skip += take
 
-    except Exception as e:
-        return pd.DataFrame(), "error", "\n".join(debug_msgs + [f"Exception: {e}"])
+        except Exception as e:
+            debug_msgs.append(f"Exception on {api_url}: {e}")
+
+    return pd.DataFrame(), "error", "\n".join(debug_msgs)
 
 
 # ==================================
@@ -301,20 +337,28 @@ def _infer_wip_from_row(row: pd.Series, uploaded_df: pd.DataFrame, direct_wip_co
 
 
 def _patch_record(record_id: str, fields: Dict[str, Any]) -> Tuple[bool, str]:
-    api_url = f"{_build_record_api_url()}/{record_id}"
+    api_urls = _candidate_record_api_urls()
+    if not api_urls:
+        return False, "Cannot build API URL."
+
     body = {
         "record": {
             "fields": fields
         }
     }
 
-    try:
-        resp = requests.patch(api_url, headers=_headers(), json=body, timeout=30)
-        if resp.status_code == 200:
-            return True, "ok"
-        return False, f"HTTP {resp.status_code}: {resp.text[:1000]}"
-    except Exception as e:
-        return False, str(e)
+    errors = []
+    for base_api in api_urls:
+        api_url = f"{base_api}/{record_id}"
+        try:
+            resp = requests.patch(api_url, headers=_headers(), json=body, timeout=30)
+            if resp.status_code == 200:
+                return True, "ok"
+            errors.append(f"{api_url} -> HTTP {resp.status_code}: {resp.text[:800]}")
+        except Exception as e:
+            errors.append(f"{api_url} -> Exception: {e}")
+
+    return False, "\n".join(errors)
 
 
 # ==================================
