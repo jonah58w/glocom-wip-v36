@@ -30,6 +30,7 @@ st.set_page_config(
     layout="wide",
 )
 
+
 # ==================================
 # STYLE
 # ==================================
@@ -57,6 +58,14 @@ st.markdown(
         border-radius: 16px;
         font-size: 0.85em;
         font-weight: 600;
+    }
+    .tag-chip {
+        display: inline-block;
+        background: rgba(255,255,255,0.2);
+        padding: 2px 8px;
+        border-radius: 8px;
+        margin: 2px;
+        font-size: 0.8em;
     }
     .small-muted { color: #6b7280; font-size: 0.9em; }
     </style>
@@ -122,16 +131,6 @@ def _cfg_list(name: str, default: Optional[List[str]] = None) -> List[str]:
 
 def normalize_date_series(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, errors="coerce")
-
-
-def fmt_date(v: Any) -> str:
-    try:
-        dt = pd.to_datetime(v, errors="coerce")
-        if pd.isna(dt):
-            return ""
-        return dt.strftime("%Y-%m-%d")
-    except Exception:
-        return safe_text(v)
 
 
 def wip_display_html(value: str) -> str:
@@ -251,6 +250,8 @@ def _display_update_results(results: Dict[str, Any]) -> None:
                 po_text = item.get("po") or "-"
                 part_text = item.get("part") or "-"
                 st.error(f"行 {item.get('row')}: PO={po_text} / PART={part_text} - {item.get('error')}")
+        if len(failed) > 20:
+            st.caption(f"... 還有 {len(failed) - 20} 筆失敗記錄")
 
     success = [d for d in results.get("details", []) if d.get("status") == "更新成功"]
     if success:
@@ -265,13 +266,15 @@ def _display_update_results(results: Dict[str, Any]) -> None:
 def _safe_dataframe(df: pd.DataFrame, cols: List[Optional[str]]) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
+
     final_cols = []
     for c in cols:
         if c and c in df.columns and c not in final_cols:
             final_cols.append(c)
-    if not final_cols:
-        return df.copy()
-    return df[final_cols].copy()
+
+    if final_cols:
+        return df[final_cols].copy()
+    return df.copy()
 
 
 def _is_done_value(x: Any) -> bool:
@@ -288,10 +291,12 @@ def _is_hold_value(x: Any) -> bool:
 
 
 def _get_active_orders(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or df.empty or not wip_col or wip_col not in df.columns:
-        return df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
-    mask = ~df[wip_col].apply(_is_done_value)
-    return df[mask].copy()
+    if df is None or df.empty:
+        return pd.DataFrame()
+    temp = df.copy()
+    if wip_col and wip_col in temp.columns:
+        temp = temp.loc[~temp[wip_col].apply(_is_done_value)].copy()
+    return temp
 
 
 def _get_delayed_orders(df: pd.DataFrame) -> pd.DataFrame:
@@ -304,13 +309,13 @@ def _get_delayed_orders(df: pd.DataFrame) -> pd.DataFrame:
 
     temp = df.copy()
     temp["_due_dt"] = pd.to_datetime(temp[date_col], errors="coerce")
-    temp = temp[temp["_due_dt"].notna()].copy()
+    temp = temp.loc[temp["_due_dt"].notna()].copy()
 
     if wip_col and wip_col in temp.columns:
-        temp = temp[~temp[wip_col].apply(_is_done_value)].copy()
+        temp = temp.loc[~temp[wip_col].apply(_is_done_value)].copy()
 
     today = pd.Timestamp.today().normalize()
-    temp = temp[temp["_due_dt"] < today].copy()
+    temp = temp.loc[temp["_due_dt"] < today].copy()
     temp = temp.sort_values("_due_dt")
     return temp
 
@@ -324,11 +329,12 @@ def _get_new_orders(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     temp = df.copy()
-    temp["_new_dt"] = pd.to_datetime(temp[date_col], errors="coerce")
-    temp = temp[temp["_new_dt"].notna()].copy()
+    temp["_new_dt"] = pd.to_datetime(temp[date_col], errors="coerce", utc=True)
+    temp = temp.loc[temp["_new_dt"].notna()].copy()
+    temp["_new_dt"] = temp["_new_dt"].dt.tz_convert(None)
 
-    cutoff = pd.Timestamp.today().normalize() - pd.Timedelta(days=14)
-    temp = temp[temp["_new_dt"] >= cutoff].copy()
+    cutoff = pd.Timestamp.utcnow().tz_localize(None).normalize() - pd.Timedelta(days=14)
+    temp = temp.loc[temp["_new_dt"] >= cutoff].copy()
     temp = temp.sort_values("_new_dt", ascending=False)
     return temp
 
@@ -343,15 +349,14 @@ def _get_shipment_forecast(df: pd.DataFrame) -> pd.DataFrame:
 
     temp = df.copy()
     temp["_ship_dt"] = pd.to_datetime(temp[date_col], errors="coerce")
-    temp = temp[temp["_ship_dt"].notna()].copy()
+    temp = temp.loc[temp["_ship_dt"].notna()].copy()
+
+    if wip_col and wip_col in temp.columns:
+        temp = temp.loc[~temp[wip_col].apply(_is_done_value)].copy()
 
     today = pd.Timestamp.today().normalize()
     end_date = today + pd.Timedelta(days=30)
-
-    if wip_col and wip_col in temp.columns:
-        temp = temp[~temp[wip_col].apply(_is_done_value)].copy()
-
-    temp = temp[(temp["_ship_dt"] >= today) & (temp["_ship_dt"] <= end_date)].copy()
+    temp = temp.loc[(temp["_ship_dt"] >= today) & (temp["_ship_dt"] <= end_date)].copy()
     temp = temp.sort_values("_ship_dt")
     return temp
 
@@ -393,7 +398,7 @@ def show_dashboard_page(orders: pd.DataFrame) -> None:
     if date_col and date_col in orders.columns:
         temp = orders.copy()
         temp["_ship_dt"] = pd.to_datetime(temp[date_col], errors="coerce")
-        temp = temp[temp["_ship_dt"].notna()].copy()
+        temp = temp.loc[temp["_ship_dt"].notna()].copy()
         if not temp.empty:
             st.markdown("### 出貨 / 交期趨勢")
             trend = temp.groupby(temp["_ship_dt"].dt.date).size()
@@ -412,14 +417,18 @@ def show_factory_load_page(orders: pd.DataFrame) -> None:
     if factory_col and factory_col in df.columns:
         st.markdown("### 工廠在製筆數")
         vc = df[factory_col].fillna("未指定").astype(str).value_counts()
-        st.bar_chart(vc)
-
+        if not vc.empty:
+            st.bar_chart(vc)
         view = vc.reset_index()
         view.columns = ["Factory", "Active Orders"]
         st.dataframe(view, use_container_width=True, height=320)
     else:
         st.info("找不到工廠欄位。")
-        st.dataframe(_safe_dataframe(df, [po_col, part_col, qty_col, wip_col, ship_date_col]), use_container_width=True)
+        st.dataframe(
+            _safe_dataframe(df, [po_col, part_col, qty_col, wip_col, ship_date_col]),
+            use_container_width=True,
+            height=560,
+        )
 
 
 def show_delayed_orders_page(orders: pd.DataFrame) -> None:
@@ -430,13 +439,11 @@ def show_delayed_orders_page(orders: pd.DataFrame) -> None:
         st.info("目前沒有 Delay 案件。")
         return
 
-    date_col = factory_due_col or ship_date_col
     delayed["_Delay Days"] = (pd.Timestamp.today().normalize() - delayed["_due_dt"]).dt.days
 
-    cols = [customer_col, po_col, part_col, qty_col, factory_col, wip_col, date_col, remark_col]
+    cols = [customer_col, po_col, part_col, qty_col, factory_col, wip_col, factory_due_col, ship_date_col, remark_col]
     view = _safe_dataframe(delayed, cols)
-    if "_Delay Days" in delayed.columns:
-        view["Delay Days"] = delayed["_Delay Days"].values
+    view["Delay Days"] = delayed["_Delay Days"].values
 
     st.metric("Delay 筆數", len(delayed))
     st.dataframe(view, use_container_width=True, height=560)
@@ -450,14 +457,13 @@ def show_shipment_forecast_page(orders: pd.DataFrame) -> None:
         st.info("未來 30 天目前沒有可顯示的出貨預估。")
         return
 
-    date_col = ship_date_col or factory_due_col
     forecast["_Ship Date"] = forecast["_ship_dt"].dt.date
 
     summary = forecast.groupby("_Ship Date").size().reset_index(name="Count")
     st.markdown("### 未來 30 天出貨分布")
     st.bar_chart(summary.set_index("_Ship Date")["Count"])
 
-    cols = [customer_col, po_col, part_col, qty_col, factory_col, wip_col, date_col, remark_col]
+    cols = [customer_col, po_col, part_col, qty_col, factory_col, wip_col, factory_due_col, ship_date_col, remark_col]
     st.dataframe(_safe_dataframe(forecast, cols), use_container_width=True, height=560)
 
 
@@ -507,17 +513,7 @@ def show_orders_page(orders: pd.DataFrame) -> None:
     st.caption(f"共 {len(df)} 筆")
 
     display_cols = []
-    for c in [
-        customer_col,
-        po_col,
-        part_col,
-        qty_col,
-        factory_col,
-        wip_col,
-        factory_due_col,
-        ship_date_col,
-        remark_col,
-    ]:
+    for c in [customer_col, po_col, part_col, qty_col, factory_col, wip_col, factory_due_col, ship_date_col, remark_col]:
         if c and c in df.columns and c not in display_cols:
             display_cols.append(c)
 
@@ -539,16 +535,29 @@ def show_customer_preview_page(orders: pd.DataFrame) -> None:
     if isinstance(customer_from_query, list) and customer_from_query:
         customer_from_query = customer_from_query[0]
 
+    selected_customer = None
+
     if customer_col and customer_col in df.columns:
         customer_options = sorted(
             [x for x in df[customer_col].dropna().astype(str).unique() if x.strip()]
         )
+
         if customer_from_query and customer_from_query in customer_options:
-            default_ix = customer_options.index(customer_from_query)
+            selected_customer = customer_from_query
         else:
-            default_ix = 0 if customer_options else None
+            wesco_match = None
+            for c in customer_options:
+                if str(c).strip().upper() == "WESCO":
+                    wesco_match = c
+                    break
+
+            if wesco_match:
+                selected_customer = wesco_match
+            elif customer_options:
+                selected_customer = customer_options[0]
 
         if customer_options:
+            default_ix = customer_options.index(selected_customer) if selected_customer in customer_options else 0
             selected_customer = st.selectbox("Customer", customer_options, index=default_ix)
             df = df[df[customer_col].astype(str) == selected_customer]
 
@@ -574,11 +583,8 @@ def show_sandy_internal_wip_page(orders: pd.DataFrame) -> None:
     df = _get_active_orders(orders)
 
     if customer_col and customer_col in df.columns:
-        keywords = ["SANDY", "Sandy", "sandy"]
-        mask = pd.Series(False, index=df.index)
-        for kw in keywords:
-            mask = mask | df[customer_col].astype(str).str.contains(kw, case=False, na=False)
-        sandy_df = df[mask].copy()
+        mask = df[customer_col].astype(str).str.contains("SANDY", case=False, na=False)
+        sandy_df = df.loc[mask].copy()
         if not sandy_df.empty:
             df = sandy_df
 
@@ -608,7 +614,6 @@ def show_new_orders_wip_page(orders: pd.DataFrame) -> None:
     st.subheader("🆕 新訂單 WIP")
 
     df = _get_new_orders(orders)
-
     if df.empty:
         st.info("近 14 天目前沒有新訂單資料。")
         return
@@ -683,6 +688,8 @@ def show_import_update_page(orders: pd.DataFrame) -> None:
                                 st.success("✨ 更新完成！頁面將自動刷新...")
                                 refresh_after_update()
 
+                    st.caption("支援 PO / 訂單編號 / 料號 匹配；若無 WIP 欄會嘗試從製程欄推算。")
+
             except Exception as e:
                 st.error(f"❌ 讀取失敗：{e}")
                 import traceback
@@ -700,6 +707,7 @@ def show_import_update_page(orders: pd.DataFrame) -> None:
             try:
                 import pytesseract
                 from PIL import Image
+
                 img = Image.open(image_file)
                 text = pytesseract.image_to_string(img, lang="eng+chi_tra")
                 st.text_area("OCR 結果", value=text, height=260, key="ocr_result_preview")
@@ -713,7 +721,7 @@ def show_import_update_page(orders: pd.DataFrame) -> None:
             st.text_area("文字預覽", value=pasted, height=220, key="factory_text_preview_2")
 
     with tab4:
-        st.info("手工輸入模式保留。若您要，我下一版可幫您把手工輸入直接接成可更新 Teable。")
+        st.info("手工輸入模式保留。若您要，下一版可幫您把手工輸入直接接成可更新 Teable。")
 
 
 # ==================================
@@ -812,6 +820,7 @@ with st.expander("🔧 Debug / System Info", expanded=False):
 if orders is None or orders.empty:
     show_no_data_layout()
 
+
 # ==================================
 # SIDEBAR
 # ==================================
@@ -843,6 +852,7 @@ st.sidebar.markdown("---")
 st.sidebar.caption("✅ 完成案件請在 Teable 主 View 設定篩選：WIP ≠ 完成")
 st.sidebar.caption("📁 另建 Completed View：WIP = 完成")
 
+
 # ==================================
 # COMMON KWARGS
 # ==================================
@@ -871,6 +881,7 @@ common_kwargs = dict(
     safe_text=safe_text,
     wip_display_html=wip_display_html,
 )
+
 
 # ==================================
 # ROUTER
