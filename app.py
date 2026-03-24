@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import inspect
 import os
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -61,13 +61,18 @@ st.markdown(
     }
     .tag-chip {
         display: inline-block;
-        background: rgba(255,255,255,0.2);
+        background: rgba(255,255,255,0.12);
         padding: 2px 8px;
         border-radius: 8px;
         margin: 2px;
         font-size: 0.8em;
     }
-    .small-muted { color: #6b7280; font-size: 0.9em; }
+    .small-muted { color: #9ca3af; font-size: 0.9em; }
+    .debug-box {
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 10px;
+        padding: 12px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -103,8 +108,11 @@ def split_tags(value: Any) -> List[str]:
 def safe_text(value: Any) -> str:
     if hasattr(u, "safe_text"):
         return u.safe_text(value)
-    if pd.isna(value):
-        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
     return str(value).strip()
 
 
@@ -124,10 +132,6 @@ def _cfg_list(name: str, default: Optional[List[str]] = None) -> List[str]:
     if isinstance(value, list):
         return value
     return default or []
-
-
-def normalize_date_series(series: pd.Series) -> pd.Series:
-    return pd.to_datetime(series, errors="coerce")
 
 
 def wip_display_html(value: str) -> str:
@@ -153,57 +157,117 @@ def wip_display_html(value: str) -> str:
     return f'<span class="wip-chip" style="background:{bg};color:{fg};">{label}</span>'
 
 
-def show_no_data_layout() -> None:
+def show_no_data_layout(api_status: Any = "", api_text: Any = "") -> None:
     st.markdown(
         """
         <div class="portal-box">
             <div class="portal-title">GLOCOM Control Tower</div>
-            <div>目前未讀取到 Teable 資料。</div>
+            <div>目前未讀取到 Teable 主資料，但系統仍可使用 Import / Update。</div>
             <div style="margin-top:8px;">請確認：</div>
             <ul>
                 <li>Streamlit secrets 已設定 TEABLE_TOKEN</li>
-                <li>TABLE_URL 是否正確</li>
+                <li>TABLE_URL / TEABLE_TABLE_URL 是否正確</li>
                 <li>Teable API 是否可正常連線</li>
             </ul>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    if api_status or api_text:
+        with st.expander("🔍 Teable 連線回傳"):
+            st.write("api_status:", api_status)
+            st.text(str(api_text)[:2000])
+
+
+def normalize_orders_result(raw: Any) -> Tuple[pd.DataFrame, str, str]:
+    """
+    兼容 teable_api.load_orders() 的多種回傳型態：
+    1) DataFrame
+    2) (df, status, text)
+    3) dict with keys: df/orders/data, status/api_status, text/api_text/message
+    4) 其他型態 -> 空 DataFrame + 說明
+    """
+    empty_df = pd.DataFrame()
+
+    if isinstance(raw, pd.DataFrame):
+        return raw.copy(), "ok", ""
+
+    if isinstance(raw, tuple):
+        df = empty_df
+        status = ""
+        text = ""
+
+        if len(raw) >= 1 and isinstance(raw[0], pd.DataFrame):
+            df = raw[0].copy()
+        if len(raw) >= 2:
+            status = safe_text(raw[1])
+        if len(raw) >= 3:
+            text = safe_text(raw[2])
+
+        return df, status, text
+
+    if isinstance(raw, dict):
+        df = raw.get("df")
+        if not isinstance(df, pd.DataFrame):
+            df = raw.get("orders")
+        if not isinstance(df, pd.DataFrame):
+            df = raw.get("data")
+        if not isinstance(df, pd.DataFrame):
+            df = empty_df
+
+        status = safe_text(raw.get("status") or raw.get("api_status") or "")
+        text = safe_text(raw.get("text") or raw.get("api_text") or raw.get("message") or "")
+        return df.copy() if isinstance(df, pd.DataFrame) else empty_df, status, text
+
+    return empty_df, "unknown", f"Unsupported load_orders() return type: {type(raw)}"
 
 
 def show_metrics(orders: pd.DataFrame, wip_col: Optional[str]) -> None:
+    st.subheader("📊 Dashboard")
+
     if orders is None or orders.empty:
-        st.info("目前沒有資料可顯示。")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("總筆數", 0)
+        c2.metric("進行中", 0)
+        c3.metric("完成", 0)
+        c4.metric("On Hold", 0)
+        st.info("目前沒有資料。")
         return
 
     total = len(orders)
     done_count = 0
+    hold_count = 0
 
     if wip_col and wip_col in orders.columns:
-        s = orders[wip_col].astype(str).str.strip()
+        s = orders[wip_col].fillna("").astype(str).str.strip()
         done_values = {str(x).upper() for x in getattr(cfg, "DONE_WIP_VALUES", set())}
         done_count = int((s.str.upper().isin(done_values) | s.str.contains("完成", na=False)).sum())
+        hold_count = int(s.str.contains("hold|暫停|等待", case=False, na=False).sum())
 
-    active = max(total - done_count, 0)
-    c1, c2, c3 = st.columns(3)
+    active = max(total - done_count - hold_count, 0)
+
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("總筆數", total)
     c2.metric("進行中", active)
     c3.metric("完成", done_count)
+    c4.metric("On Hold", hold_count)
 
     if wip_col and wip_col in orders.columns:
         st.markdown("### WIP 分布")
-        vc = orders[wip_col].fillna("").astype(str).str.strip()
-        vc = vc[vc != ""].value_counts().head(15)
+        vc = (
+            orders[wip_col]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+        )
+        vc = vc[vc != ""].value_counts().head(20)
         if not vc.empty:
             st.bar_chart(vc)
+        else:
+            st.info("目前沒有 WIP 分布資料。")
 
 
 def call_report_function(candidate_names: List[str], **kwargs) -> Optional[bool]:
-    """
-    依序呼叫 reports 模組中的函數
-    成功呼叫回傳 True
-    都找不到回傳 False
-    """
     alias_map = {
         "df": ["orders", "data", "dataset"],
         "orders": ["df", "data", "dataset"],
@@ -232,7 +296,6 @@ def call_report_function(candidate_names: List[str], **kwargs) -> Optional[bool]
                                 break
 
                 result = fn(**accepted)
-
                 if result is False:
                     return False
                 return True
@@ -246,7 +309,7 @@ def _detect_factory_name(filename: str) -> str:
     name_lower = filename.lower()
     if "全興" in filename or "quanxing" in name_lower or "203-" in name_lower:
         return "全興電子"
-    elif "profit" in name_lower or "pg" in name_lower or "glocom-pg" in name_lower:
+    elif "profit" in name_lower or "glocom-pg" in name_lower or "pg" in name_lower:
         return "Profit Grand"
     elif "祥竑" in filename or "xianghong" in name_lower:
         return "祥竑電子"
@@ -300,27 +363,27 @@ def show_orders_page(orders: pd.DataFrame) -> None:
 
     df = orders.copy()
 
-    filter_cols = st.columns(4)
+    cols = st.columns(4)
 
     if customer_col and customer_col in df.columns:
         customer_options = ["全部"] + sorted([x for x in df[customer_col].dropna().astype(str).unique() if x.strip()])
-        sel_customer = filter_cols[0].selectbox("Customer", customer_options, index=0)
+        sel_customer = cols[0].selectbox("Customer", customer_options, index=0)
         if sel_customer != "全部":
             df = df[df[customer_col].astype(str) == sel_customer]
 
     if factory_col and factory_col in df.columns:
         factory_options = ["全部"] + sorted([x for x in df[factory_col].dropna().astype(str).unique() if x.strip()])
-        sel_factory = filter_cols[1].selectbox("Factory", factory_options, index=0)
+        sel_factory = cols[1].selectbox("Factory", factory_options, index=0)
         if sel_factory != "全部":
             df = df[df[factory_col].astype(str) == sel_factory]
 
     if wip_col and wip_col in df.columns:
         wip_options = ["全部"] + sorted([x for x in df[wip_col].dropna().astype(str).unique() if x.strip()])
-        sel_wip = filter_cols[2].selectbox("WIP", wip_options, index=0)
+        sel_wip = cols[2].selectbox("WIP", wip_options, index=0)
         if sel_wip != "全部":
             df = df[df[wip_col].astype(str) == sel_wip]
 
-    keyword = filter_cols[3].text_input("搜尋 PO / Part / Remark")
+    keyword = cols[3].text_input("搜尋 PO / Part / Remark")
 
     if keyword:
         mask = pd.Series(False, index=df.index)
@@ -350,18 +413,14 @@ def show_customer_preview_page(orders: pd.DataFrame) -> None:
         return
 
     df = orders.copy()
-
-    customer_from_query = st.query_params.get("customer", "")
-    customer_from_query = customer_from_query[0] if isinstance(customer_from_query, list) and customer_from_query else customer_from_query
+    qp = st.query_params.get("customer", "")
+    if isinstance(qp, list):
+        qp = qp[0] if qp else ""
 
     if customer_col and customer_col in df.columns:
         customer_options = sorted([x for x in df[customer_col].dropna().astype(str).unique() if x.strip()])
-        if customer_from_query and customer_from_query in customer_options:
-            default_ix = customer_options.index(customer_from_query)
-        else:
-            default_ix = 0 if customer_options else None
-
         if customer_options:
+            default_ix = customer_options.index(qp) if qp in customer_options else 0
             selected_customer = st.selectbox("Customer", customer_options, index=default_ix)
             df = df[df[customer_col].astype(str) == selected_customer]
 
@@ -399,36 +458,40 @@ def fallback_import_update(orders: pd.DataFrame) -> None:
 
                 if df_up is None or df_up.empty:
                     st.warning("⚠️ 解析後沒有有效資料")
-                    return
+                else:
+                    st.success(f"✅ 已解析 **{len(df_up)}** 筆記錄 | 模式: **{parse_mode}**")
+                    st.dataframe(df_up.head(20), use_container_width=True, height=320)
 
-                st.success(f"✅ 已解析 **{len(df_up)}** 筆記錄 | 模式: **{parse_mode}**")
-                st.dataframe(df_up.head(20), use_container_width=True, height=320)
+                    with st.expander("📋 欄位匹配預覽"):
+                        po_match = get_first_matching_column(df_up, _cfg_list("PO_CANDIDATES"))
+                        part_match = get_first_matching_column(df_up, _cfg_list("PART_CANDIDATES"))
+                        wip_match = get_first_matching_column(df_up, _cfg_list("WIP_CANDIDATES"))
+                        process_cols = []
+                        if hasattr(teable_api, "_detect_process_columns"):
+                            try:
+                                process_cols = teable_api._detect_process_columns(df_up)
+                            except Exception:
+                                process_cols = []
 
-                with st.expander("📋 欄位匹配預覽"):
-                    po_match = get_first_matching_column(df_up, _cfg_list("PO_CANDIDATES"))
-                    part_match = get_first_matching_column(df_up, _cfg_list("PART_CANDIDATES"))
-                    wip_match = get_first_matching_column(df_up, _cfg_list("WIP_CANDIDATES"))
-                    process_cols = teable_api._detect_process_columns(df_up)
+                        st.write(f"**PO 列**: `{po_match}`" if po_match else "**PO 列**: ❌ 未找到")
+                        st.write(f"**Part / 料號列**: `{part_match}`" if part_match else "**Part / 料號列**: ❌ 未找到")
+                        st.write(f"**WIP 列**: `{wip_match}`" if wip_match else "**WIP 列**: ℹ️ 將嘗試多列製程解析")
 
-                    st.write(f"**PO 列**: `{po_match}`" if po_match else "**PO 列**: ❌ 未找到")
-                    st.write(f"**Part / 料號列**: `{part_match}`" if part_match else "**Part / 料號列**: ❌ 未找到")
-                    st.write(f"**WIP 列**: `{wip_match}`" if wip_match else "**WIP 列**: ℹ️ 將嘗試多列製程解析")
+                        if process_cols:
+                            st.write(f"**製程列檢測**: {len(process_cols)} 個 → {process_cols[:8]}")
 
-                    if process_cols:
-                        st.write(f"**製程列檢測**: {len(process_cols)} 個 → {process_cols[:8]}")
+                    if st.button("📤 更新到 Teable", type="primary", key="update_teable_btn"):
+                        with st.spinner("🔄 正在批量更新到 Teable..."):
+                            results = teable_api.batch_update_wip_from_excel(
+                                current_df=orders if isinstance(orders, pd.DataFrame) else pd.DataFrame(),
+                                uploaded_df=df_up,
+                                factory_name=factory_name,
+                            )
+                            _display_update_results(results)
 
-                if st.button("📤 更新到 Teable", type="primary", key="update_teable_btn"):
-                    with st.spinner("🔄 正在批量更新到 Teable..."):
-                        results = teable_api.batch_update_wip_from_excel(
-                            current_df=orders,
-                            uploaded_df=df_up,
-                            factory_name=factory_name,
-                        )
-                        _display_update_results(results)
-
-                        if results.get("success_count", 0) > 0:
-                            st.success("✨ 更新完成，頁面刷新中...")
-                            refresh_after_update()
+                            if results.get("success_count", 0) > 0:
+                                st.success("✨ 更新完成，頁面刷新中...")
+                                refresh_after_update()
 
             except Exception as e:
                 st.error(f"❌ 讀取失敗：{e}")
@@ -469,7 +532,8 @@ def fallback_import_update(orders: pd.DataFrame) -> None:
 # ==================================
 @st.cache_data(ttl=60, show_spinner=False)
 def cached_load_orders():
-    return teable_api.load_orders()
+    raw = teable_api.load_orders()
+    return normalize_orders_result(raw)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -542,29 +606,13 @@ changed_due_date_col = get_first_matching_column(
     getattr(cfg, "CHANGED_DUE_DATE_CANDIDATES", ["Changed Due Date", "更改交期", "新交期"]),
 )
 
-with st.expander("🔧 Debug / System Info", expanded=False):
-    st.write("API status:", api_status)
-    st.write("Orders loaded:", 0 if orders is None else len(orders))
-    st.write("Orders columns:", list(orders.columns) if isinstance(orders, pd.DataFrame) and not orders.empty else [])
-    st.write("Detected PO col:", po_col)
-    st.write("Detected WIP col:", wip_col)
-    st.write("SALES_BASE_PATH:", SALES_BASE_PATH)
-    st.write("Sales workbook exists:", os.path.exists(SALES_BASE_PATH) if SALES_BASE_PATH else False)
-    if sales_error_text:
-        st.error(f"銷貨底 Excel 載入失敗: {sales_error_text}")
-    if isinstance(api_text, str):
-        st.text(api_text[:1200])
-
-if orders is None or orders.empty:
-    show_no_data_layout()
-    st.stop()
-
 
 # ==================================
 # SIDEBAR
 # ==================================
 st.sidebar.title("GLOCOM Internal")
-st.sidebar.link_button("🔗 Open Teable", cfg.TEABLE_WEB_URL, use_container_width=True)
+if hasattr(cfg, "TEABLE_WEB_URL") and cfg.TEABLE_WEB_URL:
+    st.sidebar.link_button("🔗 Open Teable", cfg.TEABLE_WEB_URL, use_container_width=True)
 
 menu = st.sidebar.radio(
     "📋 功能選單",
@@ -589,6 +637,24 @@ if st.sidebar.button("🔄 Refresh"):
 st.sidebar.markdown("---")
 st.sidebar.caption("✅ 完成案件請在 Teable 主 View 設定篩選：WIP ≠ 完成")
 st.sidebar.caption("📁 另建 Completed View：WIP = 完成")
+
+
+# ==================================
+# DEBUG
+# ==================================
+with st.expander("🔧 Debug / System Info", expanded=False):
+    st.write("api_status:", api_status)
+    st.write("orders rows:", 0 if orders is None else len(orders))
+    st.write("orders type:", type(orders).__name__)
+    st.write("orders columns:", list(orders.columns) if isinstance(orders, pd.DataFrame) and not orders.empty else [])
+    st.write("Detected PO col:", po_col)
+    st.write("Detected WIP col:", wip_col)
+    st.write("SALES_BASE_PATH:", SALES_BASE_PATH)
+    st.write("Sales workbook exists:", os.path.exists(SALES_BASE_PATH) if SALES_BASE_PATH else False)
+    if sales_error_text:
+        st.error(f"銷貨底 Excel 載入失敗: {sales_error_text}")
+    if isinstance(api_text, str) and api_text.strip():
+        st.text(api_text[:2000])
 
 
 # ==================================
@@ -625,35 +691,64 @@ common_kwargs = dict(
 # ROUTER
 # ==================================
 if menu == "Dashboard":
-    ok = call_report_function(["show_dashboard_report"], **common_kwargs)
-    if ok is False:
+    if orders is None or orders.empty:
         show_metrics(orders, wip_col)
+        show_no_data_layout(api_status, api_text)
+    else:
+        ok = call_report_function(["show_dashboard_report"], **common_kwargs)
+        if ok is False:
+            show_metrics(orders, wip_col)
 
 elif menu == "Factory Load":
-    ok = call_report_function(["show_factory_load_report"], **common_kwargs)
-    if ok is False:
-        st.info("Factory Load fallback not enabled.")
+    if orders is None or orders.empty:
+        st.subheader("🏭 Factory Load")
+        st.info("目前沒有資料。")
+        show_no_data_layout(api_status, api_text)
+    else:
+        ok = call_report_function(["show_factory_load_report"], **common_kwargs)
+        if ok is False:
+            st.subheader("🏭 Factory Load")
+            st.info("Factory Load fallback not enabled.")
 
 elif menu == "Delayed Orders":
-    ok = call_report_function(["show_delayed_orders_report"], **common_kwargs)
-    if ok is False:
-        st.info("Delayed Orders fallback not enabled.")
+    if orders is None or orders.empty:
+        st.subheader("⏰ Delayed Orders")
+        st.info("目前沒有資料。")
+        show_no_data_layout(api_status, api_text)
+    else:
+        ok = call_report_function(["show_delayed_orders_report"], **common_kwargs)
+        if ok is False:
+            st.info("Delayed Orders fallback not enabled.")
 
 elif menu == "Shipment Forecast":
-    ok = call_report_function(["show_shipment_forecast_report"], **common_kwargs)
-    if ok is False:
-        st.info("Shipment Forecast fallback not enabled.")
+    if orders is None or orders.empty:
+        st.subheader("🚚 Shipment Forecast")
+        st.info("目前沒有資料。")
+        show_no_data_layout(api_status, api_text)
+    else:
+        ok = call_report_function(["show_shipment_forecast_report"], **common_kwargs)
+        if ok is False:
+            st.info("Shipment Forecast fallback not enabled.")
 
 elif menu == "Orders":
     show_orders_page(orders)
+    if orders is None or orders.empty:
+        show_no_data_layout(api_status, api_text)
 
 elif menu == "Customer Preview":
     show_customer_preview_page(orders)
+    if orders is None or orders.empty:
+        show_no_data_layout(api_status, api_text)
 
 elif menu == "Sandy 內部 WIP":
-    ok = call_report_function(["show_sandy_internal_wip_report"], **common_kwargs)
-    if ok is False:
-        st.info("Sandy 內部 WIP fallback not enabled.")
+    if orders is None or orders.empty:
+        st.subheader("🧾 Sandy 內部 WIP")
+        st.info("目前沒有資料。")
+        show_no_data_layout(api_status, api_text)
+    else:
+        ok = call_report_function(["show_sandy_internal_wip_report"], **common_kwargs)
+        if ok is False:
+            st.info("Sandy 內部 WIP fallback not enabled.")
 
 elif menu == "Sandy 銷貨底":
     ok = call_report_function(["show_sandy_shipment_report"], **common_kwargs)
@@ -661,9 +756,14 @@ elif menu == "Sandy 銷貨底":
         st.info("Sandy 銷貨底 fallback not enabled.")
 
 elif menu == "新訂單 WIP":
-    ok = call_report_function(["show_new_orders_wip_report"], **common_kwargs)
-    if ok is False:
-        st.info("新訂單 WIP fallback not enabled.")
+    if orders is None or orders.empty:
+        st.subheader("🆕 新訂單 WIP")
+        st.info("目前沒有資料。")
+        show_no_data_layout(api_status, api_text)
+    else:
+        ok = call_report_function(["show_new_orders_wip_report"], **common_kwargs)
+        if ok is False:
+            st.info("新訂單 WIP fallback not enabled.")
 
 elif menu == "業績明細表":
     try:
