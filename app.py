@@ -67,8 +67,6 @@ st.markdown(
         margin: 2px;
         font-size: 0.8em;
     }
-    .update-success { background: #065f46; color: #d1fae5; }
-    .update-fail { background: #7f1d1d; color: #fee2e2; }
     .small-muted { color: #6b7280; font-size: 0.9em; }
     </style>
     """,
@@ -80,14 +78,10 @@ st.markdown(
 # HELPERS
 # ==================================
 def refresh_after_update() -> None:
-    """清除緩存並重新運行"""
     try:
         st.cache_data.clear()
     except Exception:
         pass
-
-    for k in list(st.session_state.keys()):
-        del st.session_state[k]
     st.rerun()
 
 
@@ -101,7 +95,9 @@ def split_tags(value: Any) -> List[str]:
     text = str(value).strip()
     if not text:
         return []
-    return [x.strip() for x in text.replace("；", ";").replace("，", ",").replace("/", ",").split(",") if x.strip()]
+    for sep in ["；", ";", "，", "/", "|"]:
+        text = text.replace(sep, ",")
+    return [x.strip() for x in text.split(",") if x.strip()]
 
 
 def safe_text(value: Any) -> str:
@@ -130,41 +126,29 @@ def _cfg_list(name: str, default: Optional[List[str]] = None) -> List[str]:
     return default or []
 
 
+def normalize_date_series(series: pd.Series) -> pd.Series:
+    return pd.to_datetime(series, errors="coerce")
+
+
 def wip_display_html(value: str) -> str:
-    """生成 WIP 狀態 HTML"""
     text = safe_text(value)
     lower = text.lower()
-
     done_values = {str(x).upper() for x in getattr(cfg, "DONE_WIP_VALUES", set())}
 
     if any(k in lower for k in ["完成"]) or text.upper() in done_values:
-        label = text or "完成"
-        bg = "#065f46"
-        fg = "#d1fae5"
+        label, bg, fg = text or "完成", "#065f46", "#d1fae5"
     elif any(k in lower for k in ["ship", "shipping", "出貨"]):
-        label = text or "Shipping"
-        bg = "#14532d"
-        fg = "#dcfce7"
+        label, bg, fg = text or "Shipping", "#14532d", "#dcfce7"
     elif any(k in lower for k in ["pack", "包裝"]):
-        label = text or "Packing"
-        bg = "#1d4ed8"
-        fg = "#dbeafe"
+        label, bg, fg = text or "Packing", "#1d4ed8", "#dbeafe"
     elif any(k in lower for k in ["inspec", "qa", "fqc", "iqc", "檢", "測試"]):
-        label = text or "Inspection"
-        bg = "#92400e"
-        fg = "#fef3c7"
+        label, bg, fg = text or "Inspection", "#92400e", "#fef3c7"
     elif any(k in lower for k in ["eng", "gerber", "工程"]):
-        label = text or "Engineering"
-        bg = "#6d28d9"
-        fg = "#ede9fe"
+        label, bg, fg = text or "Engineering", "#6d28d9", "#ede9fe"
     elif any(k in lower for k in ["hold", "暫停", "等待"]):
-        label = text or "On Hold"
-        bg = "#7f1d1d"
-        fg = "#fee2e2"
+        label, bg, fg = text or "On Hold", "#7f1d1d", "#fee2e2"
     else:
-        label = text or "Production"
-        bg = "#0f766e"
-        fg = "#ccfbf1"
+        label, bg, fg = text or "Production", "#0f766e", "#ccfbf1"
 
     return f'<span class="wip-chip" style="background:{bg};color:{fg};">{label}</span>'
 
@@ -193,15 +177,14 @@ def show_metrics(orders: pd.DataFrame, wip_col: Optional[str]) -> None:
         return
 
     total = len(orders)
-
     done_count = 0
+
     if wip_col and wip_col in orders.columns:
         s = orders[wip_col].astype(str).str.strip()
         done_values = {str(x).upper() for x in getattr(cfg, "DONE_WIP_VALUES", set())}
-        done_count = int(s.str.upper().isin(done_values).sum() + s.str.contains("完成", na=False).sum())
+        done_count = int((s.str.upper().isin(done_values) | s.str.contains("完成", na=False)).sum())
 
     active = max(total - done_count, 0)
-
     c1, c2, c3 = st.columns(3)
     c1.metric("總筆數", total)
     c2.metric("進行中", active)
@@ -213,8 +196,6 @@ def show_metrics(orders: pd.DataFrame, wip_col: Optional[str]) -> None:
         vc = vc[vc != ""].value_counts().head(15)
         if not vc.empty:
             st.bar_chart(vc)
-        else:
-            st.info("目前沒有 WIP 分布資料。")
 
 
 def call_report_function(candidate_names: List[str], **kwargs) -> Optional[bool]:
@@ -222,10 +203,6 @@ def call_report_function(candidate_names: List[str], **kwargs) -> Optional[bool]
     依序呼叫 reports 模組中的函數
     成功呼叫回傳 True
     都找不到回傳 False
-
-    加強版：
-    - 支援 df / orders / data 自動別名補齊
-    - 避免 reports.py 參數命名不同造成 missing positional argument
     """
     alias_map = {
         "df": ["orders", "data", "dataset"],
@@ -241,12 +218,10 @@ def call_report_function(candidate_names: List[str], **kwargs) -> Optional[bool]
                 sig = inspect.signature(fn)
                 accepted = {}
 
-                # 先收直接同名參數
                 for k, v in kwargs.items():
                     if k in sig.parameters:
                         accepted[k] = v
 
-                # 再補 alias
                 for param_name in sig.parameters:
                     if param_name in accepted:
                         continue
@@ -256,16 +231,18 @@ def call_report_function(candidate_names: List[str], **kwargs) -> Optional[bool]
                                 accepted[param_name] = kwargs[source_name]
                                 break
 
-                fn(**accepted)
+                result = fn(**accepted)
+
+                if result is False:
+                    return False
                 return True
             except Exception as e:
                 st.error(f"{name} 執行失敗：{e}")
-                return True
+                return False
     return False
 
 
 def _detect_factory_name(filename: str) -> str:
-    """從檔案名識別工廠"""
     name_lower = filename.lower()
     if "全興" in filename or "quanxing" in name_lower or "203-" in name_lower:
         return "全興電子"
@@ -285,7 +262,6 @@ def _detect_factory_name(filename: str) -> str:
 
 
 def _display_update_results(results: Dict[str, Any]) -> None:
-    """顯示更新結果"""
     c1, c2, c3 = st.columns(3)
     c1.metric("✅ 成功", results.get("success_count", 0))
     c2.metric("❌ 失敗", results.get("failed_count", 0))
@@ -304,12 +280,10 @@ def _display_update_results(results: Dict[str, Any]) -> None:
                 po_text = item.get("po") or "-"
                 part_text = item.get("part") or "-"
                 st.error(f"行 {item.get('row')}: PO={po_text} / PART={part_text} - {item.get('error')}")
-        if len(failed) > 20:
-            st.caption(f"... 還有 {len(failed) - 20} 筆失敗記錄")
 
     success = [d for d in results.get("details", []) if d.get("status") == "更新成功"]
     if success:
-        with st.expander("✅ 成功明細 (點擊展開)"):
+        with st.expander("✅ 成功明細"):
             for item in success[:30]:
                 po_text = item.get("po") or "-"
                 part_text = item.get("part") or "-"
@@ -317,8 +291,93 @@ def _display_update_results(results: Dict[str, Any]) -> None:
                 st.success(f"✓ PO: {po_text} / PART: {part_text} → WIP: {item.get('wip')} 〔match: {matched_by}〕")
 
 
+def show_orders_page(orders: pd.DataFrame) -> None:
+    st.subheader("📋 Orders")
+
+    if orders is None or orders.empty:
+        st.info("目前沒有資料。")
+        return
+
+    df = orders.copy()
+
+    filter_cols = st.columns(4)
+
+    if customer_col and customer_col in df.columns:
+        customer_options = ["全部"] + sorted([x for x in df[customer_col].dropna().astype(str).unique() if x.strip()])
+        sel_customer = filter_cols[0].selectbox("Customer", customer_options, index=0)
+        if sel_customer != "全部":
+            df = df[df[customer_col].astype(str) == sel_customer]
+
+    if factory_col and factory_col in df.columns:
+        factory_options = ["全部"] + sorted([x for x in df[factory_col].dropna().astype(str).unique() if x.strip()])
+        sel_factory = filter_cols[1].selectbox("Factory", factory_options, index=0)
+        if sel_factory != "全部":
+            df = df[df[factory_col].astype(str) == sel_factory]
+
+    if wip_col and wip_col in df.columns:
+        wip_options = ["全部"] + sorted([x for x in df[wip_col].dropna().astype(str).unique() if x.strip()])
+        sel_wip = filter_cols[2].selectbox("WIP", wip_options, index=0)
+        if sel_wip != "全部":
+            df = df[df[wip_col].astype(str) == sel_wip]
+
+    keyword = filter_cols[3].text_input("搜尋 PO / Part / Remark")
+
+    if keyword:
+        mask = pd.Series(False, index=df.index)
+        for c in [po_col, part_col, remark_col]:
+            if c and c in df.columns:
+                mask = mask | df[c].astype(str).str.contains(keyword, case=False, na=False)
+        df = df[mask]
+
+    st.caption(f"共 {len(df)} 筆")
+
+    display_cols = []
+    for c in [customer_col, po_col, part_col, qty_col, factory_col, wip_col, factory_due_col, ship_date_col, remark_col]:
+        if c and c in df.columns and c not in display_cols:
+            display_cols.append(c)
+
+    if not display_cols:
+        display_cols = list(df.columns)
+
+    st.dataframe(df[display_cols], use_container_width=True, height=560)
+
+
+def show_customer_preview_page(orders: pd.DataFrame) -> None:
+    st.subheader("👀 Customer Preview")
+
+    if orders is None or orders.empty:
+        st.info("目前沒有資料。")
+        return
+
+    df = orders.copy()
+
+    customer_from_query = st.query_params.get("customer", "")
+    customer_from_query = customer_from_query[0] if isinstance(customer_from_query, list) and customer_from_query else customer_from_query
+
+    if customer_col and customer_col in df.columns:
+        customer_options = sorted([x for x in df[customer_col].dropna().astype(str).unique() if x.strip()])
+        if customer_from_query and customer_from_query in customer_options:
+            default_ix = customer_options.index(customer_from_query)
+        else:
+            default_ix = 0 if customer_options else None
+
+        if customer_options:
+            selected_customer = st.selectbox("Customer", customer_options, index=default_ix)
+            df = df[df[customer_col].astype(str) == selected_customer]
+
+    display_cols = []
+    for c in [po_col, part_col, qty_col, wip_col, ship_date_col, customer_tag_col, remark_col]:
+        if c and c in df.columns and c not in display_cols:
+            display_cols.append(c)
+
+    if not display_cols:
+        display_cols = list(df.columns)
+
+    st.caption(f"顯示 {len(df)} 筆")
+    st.dataframe(df[display_cols], use_container_width=True, height=560)
+
+
 def fallback_import_update(orders: pd.DataFrame) -> None:
-    """後備導入/更新功能 - 支援批量更新到 Teable"""
     st.subheader("📤 Import / Update")
     st.caption("工廠進度輸入工具：檔案上傳、圖片截圖、貼上文字、手工輸入 + 批量同步到 Teable")
 
@@ -332,8 +391,7 @@ def fallback_import_update(orders: pd.DataFrame) -> None:
         )
 
         if uploaded is not None:
-            name = uploaded.name
-            factory_name = _detect_factory_name(name)
+            factory_name = _detect_factory_name(uploaded.name)
             st.caption(f"🏭 識別工廠: **{factory_name}**")
 
             try:
@@ -341,7 +399,7 @@ def fallback_import_update(orders: pd.DataFrame) -> None:
 
                 if df_up is None or df_up.empty:
                     st.warning("⚠️ 解析後沒有有效資料")
-                    st.stop()
+                    return
 
                 st.success(f"✅ 已解析 **{len(df_up)}** 筆記錄 | 模式: **{parse_mode}**")
                 st.dataframe(df_up.head(20), use_container_width=True, height=320)
@@ -359,28 +417,18 @@ def fallback_import_update(orders: pd.DataFrame) -> None:
                     if process_cols:
                         st.write(f"**製程列檢測**: {len(process_cols)} 個 → {process_cols[:8]}")
 
-                    if not po_match and not part_match:
-                        st.warning("這份檔案目前沒有找到 PO 或料號欄，更新時可能失敗。")
+                if st.button("📤 更新到 Teable", type="primary", key="update_teable_btn"):
+                    with st.spinner("🔄 正在批量更新到 Teable..."):
+                        results = teable_api.batch_update_wip_from_excel(
+                            current_df=orders,
+                            uploaded_df=df_up,
+                            factory_name=factory_name,
+                        )
+                        _display_update_results(results)
 
-                col1, col2 = st.columns([1, 4])
-
-                with col1:
-                    if st.button("📤 更新到 Teable", type="primary", key="update_teable_btn"):
-                        with st.spinner("🔄 正在批量更新到 Teable..."):
-                            results = teable_api.batch_update_wip_from_excel(
-                                current_df=orders,
-                                uploaded_df=df_up,
-                                factory_name=factory_name,
-                            )
-                            _display_update_results(results)
-
-                            if results.get("success_count", 0) > 0:
-                                st.balloons()
-                                st.success("✨ 更新完成！頁面將自動刷新...")
-                                refresh_after_update()
-
-                with col2:
-                    st.caption("支援 PO / 訂單編號 / 料號 匹配；若無 WIP 欄會嘗試從製程欄推算。")
+                        if results.get("success_count", 0) > 0:
+                            st.success("✨ 更新完成，頁面刷新中...")
+                            refresh_after_update()
 
             except Exception as e:
                 st.error(f"❌ 讀取失敗：{e}")
@@ -409,11 +457,11 @@ def fallback_import_update(orders: pd.DataFrame) -> None:
     with tab3:
         pasted = st.text_area("請貼上工廠進度文字", height=260, key="factory_text_input")
         if pasted:
-            st.caption("已接收貼上文字，可先複製成 .txt 上傳，或之後再串接 text parser 即時更新。")
             st.text_area("文字預覽", value=pasted, height=220, key="factory_text_preview_2")
+            st.info("這一版先保留貼上與預覽；之後可再接文字直解析更新 Teable。")
 
     with tab4:
-        st.info("手工輸入模式保留。若你要，我下一版可以直接把手工輸入也接成可更新 Teable。")
+        st.info("手工輸入模式保留。下一版可再接成直接寫入 Teable。")
 
 
 # ==================================
@@ -494,8 +542,8 @@ changed_due_date_col = get_first_matching_column(
     getattr(cfg, "CHANGED_DUE_DATE_CANDIDATES", ["Changed Due Date", "更改交期", "新交期"]),
 )
 
-# Debug 區
 with st.expander("🔧 Debug / System Info", expanded=False):
+    st.write("API status:", api_status)
     st.write("Orders loaded:", 0 if orders is None else len(orders))
     st.write("Orders columns:", list(orders.columns) if isinstance(orders, pd.DataFrame) and not orders.empty else [])
     st.write("Detected PO col:", po_col)
@@ -505,7 +553,7 @@ with st.expander("🔧 Debug / System Info", expanded=False):
     if sales_error_text:
         st.error(f"銷貨底 Excel 載入失敗: {sales_error_text}")
     if isinstance(api_text, str):
-        st.text(api_text[:800])
+        st.text(api_text[:1200])
 
 if orders is None or orders.empty:
     show_no_data_layout()
@@ -547,12 +595,10 @@ st.sidebar.caption("📁 另建 Completed View：WIP = 完成")
 # COMMON KWARGS
 # ==================================
 common_kwargs = dict(
-    # 核心資料別名一起給，避免 reports.py 參數命名不同
     orders=orders,
     df=orders,
     data=orders,
     dataset=orders,
-
     sales_df=sales_df,
     sales_shipment_df=sales_shipment_df,
     po_col=po_col,
@@ -599,14 +645,10 @@ elif menu == "Shipment Forecast":
         st.info("Shipment Forecast fallback not enabled.")
 
 elif menu == "Orders":
-    ok = call_report_function(["show_orders_report"], **common_kwargs)
-    if ok is False:
-        st.dataframe(orders, use_container_width=True)
+    show_orders_page(orders)
 
 elif menu == "Customer Preview":
-    ok = call_report_function(["show_customer_preview_report"], **common_kwargs)
-    if ok is False:
-        st.info("Customer Preview fallback not enabled.")
+    show_customer_preview_page(orders)
 
 elif menu == "Sandy 內部 WIP":
     ok = call_report_function(["show_sandy_internal_wip_report"], **common_kwargs)
@@ -630,8 +672,6 @@ elif menu == "業績明細表":
         st.error(f"業績明細表載入失敗：{e}")
 
 elif menu == "📤 Import / Update":
-    ok = call_report_function(["show_import_update_page", "show_import_update_report"], **common_kwargs)
-    if ok is False:
-        fallback_import_update(orders)
+    fallback_import_update(orders)
 
 st.caption("🔄 Auto refresh cache: 60 seconds | 📊 Last updated: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"))
