@@ -1,478 +1,449 @@
 # -*- coding: utf-8 -*-
+"""
+Teable API helpers for GLOCOM Control Tower
+- 載入 Orders 主資料
+- 從 Excel/CSV 更新 WIP 回 Teable
+"""
+
 from __future__ import annotations
 
-import json
-import re
-from typing import Any, Dict, List, Optional, Tuple
+import math
+from typing import Any, Dict, List, Tuple, Optional
 
 import pandas as pd
 import requests
 import streamlit as st
 
-
-# ==================================
-# CONFIG
-# ==================================
-DEFAULT_TABLE_URL = "https://app.teable.ai/api/table/tbl6c05EPXYtJcZfeir/record"
-
-try:
-    TEABLE_TOKEN = st.secrets.get("TEABLE_TOKEN", "")
-except Exception:
-    TEABLE_TOKEN = ""
-
-try:
-    TABLE_URL = st.secrets.get("TEABLE_TABLE_URL", DEFAULT_TABLE_URL)
-except Exception:
-    TABLE_URL = DEFAULT_TABLE_URL
-
-try:
-    TEABLE_VIEW_ID = st.secrets.get("TEABLE_VIEW_ID", "")
-except Exception:
-    TEABLE_VIEW_ID = ""
+import config as cfg
 
 
-# ==================================
-# CANDIDATES
-# ==================================
-PO_CANDIDATES = [
-    "PO", "PO#", "P/O", "訂單", "訂單號", "Order No", "Order", "PO No", "PO Number"
-]
-PART_CANDIDATES = [
-    "Part", "Part No", "Part Number", "P/N", "料號", "品名", "Item", "Item No", "PN"
-]
-WIP_CANDIDATES = [
-    "WIP", "進度", "Status", "Current WIP", "目前進度", "生產進度"
-]
-FACTORY_CANDIDATES = [
-    "Factory", "工廠", "Vendor", "供應商"
-]
-CUSTOMER_CANDIDATES = [
-    "Customer", "客戶", "Client"
-]
-QTY_CANDIDATES = [
-    "Qty", "QTY", "Quantity", "數量"
-]
-SHIP_DATE_CANDIDATES = [
-    "Ship Date", "Shipment Date", "交期", "出貨日", "出貨日期", "ETD"
-]
-FACTORY_DUE_CANDIDATES = [
-    "Factory Due", "工廠交期", "Factory Due Date", "工廠預交"
-]
-REMARK_CANDIDATES = [
-    "Remark", "Remarks", "備註", "說明", "Note", "Notes"
-]
-CUSTOMER_TAG_CANDIDATES = [
-    "Customer Tag", "Customer Tags", "客戶標籤", "客戶備註標籤", "Tag", "Tags"
-]
-
-PROCESS_CANDIDATE_KEYWORDS = [
-    "開料", "壓合", "鑽孔", "電鍍", "線路", "綠漆", "文字", "成型", "測試", "包裝", "出貨",
-    "cut", "lam", "drill", "plating", "aoi", "mask", "silk", "routing", "test", "packing", "ship"
-]
+# ==============================
+# 基本設定
+# ==============================
+def _get_teable_token() -> str:
+    token = ""
+    if "TEABLE_TOKEN" in st.secrets:
+        token = st.secrets["TEABLE_TOKEN"]
+    elif hasattr(cfg, "TEABLE_TOKEN"):
+        token = cfg.TEABLE_TOKEN
+    return str(token).strip()
 
 
-# ==================================
-# BASIC HELPERS
-# ==================================
-def _safe_text(value: Any) -> str:
-    try:
-        if pd.isna(value):
-            return ""
-    except Exception:
-        pass
-    return str(value).strip()
+def _parse_table_view_from_url(url: str) -> Tuple[str, Optional[str]]:
+    """
+    解析 /table/{tableId}/view/{viewId} 或 /table/{tableId} 格式
+    回傳 (table_id, view_id or None)
+    """
+    if not url:
+        return "", None
+
+    # 去掉 query string
+    base = url.split("?", 1)[0].strip("/")
+
+    parts = base.split("/")
+    # 找到 'table' 的 index
+    if "table" in parts:
+        idx = parts.index("table")
+        if idx + 1 < len(parts):
+            table_id = parts[idx + 1]
+        else:
+            table_id = ""
+    else:
+        table_id = ""
+
+    view_id = None
+    if "view" in parts:
+        vidx = parts.index("view")
+        if vidx + 1 < len(parts):
+            view_id = parts[vidx + 1]
+
+    return table_id, view_id
 
 
-def _normalize_key(text: str) -> str:
-    return re.sub(r"[\s_\-#/]+", "", _safe_text(text)).lower()
+def _build_record_api_url(table_id: str) -> str:
+    """
+    組 Teable record API URL
+    官方格式: https://app.teable.io/api/table/{tableId}/record
+    """
+    base = getattr(cfg, "TEABLE_API_BASE", "https://app.teable.io/api")
+    base = base.rstrip("/")
+    return f"{base}/table/{table_id}/record"
 
 
-def _find_first_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
-    if df is None or df.empty:
-        return None
-
-    normalized = {_normalize_key(c): c for c in df.columns}
-    for cand in candidates:
-        key = _normalize_key(cand)
-        if key in normalized:
-            return normalized[key]
-
-    for cand in candidates:
-        key = _normalize_key(cand)
-        for col in df.columns:
-            if key and key in _normalize_key(col):
-                return col
-    return None
-
-
-def _detect_process_columns(df: pd.DataFrame) -> List[str]:
-    cols = []
-    for c in df.columns:
-        t = _safe_text(c).lower()
-        if any(k in t for k in PROCESS_CANDIDATE_KEYWORDS):
-            cols.append(c)
-    return cols
-
-
-def _extract_table_id(table_url: str) -> Optional[str]:
-    if not table_url:
-        return None
-
-    patterns = [
-        r"/table/(tbl[a-zA-Z0-9]+)/record",
-        r"/table/(tbl[a-zA-Z0-9]+)",
-        r"(tbl[a-zA-Z0-9]+)",
-    ]
-    for p in patterns:
-        m = re.search(p, table_url)
-        if m:
-            return m.group(1)
-    return None
-
-
-def _headers() -> Dict[str, str]:
+def _teable_headers() -> Dict[str, str]:
+    token = _get_teable_token()
     return {
-        "Authorization": f"Bearer {TEABLE_TOKEN}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
 
 
-def _candidate_record_api_urls() -> List[str]:
-    urls: List[str] = []
-
-    raw = _safe_text(TABLE_URL)
-
-    if raw and "/api/table/" in raw and raw.rstrip("/").endswith("/record"):
-        urls.append(raw.rstrip("/"))
-
-        if "app.teable.ai" in raw:
-            urls.append(raw.replace("app.teable.ai", "app.teable.io").rstrip("/"))
-        elif "app.teable.io" in raw:
-            urls.append(raw.replace("app.teable.io", "app.teable.ai").rstrip("/"))
-
-    table_id = _extract_table_id(raw or DEFAULT_TABLE_URL)
-    if not table_id:
-        table_id = _extract_table_id(DEFAULT_TABLE_URL)
-
-    if table_id:
-        urls.extend([
-            f"https://app.teable.io/api/table/{table_id}/record",
-            f"https://app.teable.ai/api/table/{table_id}/record",
-        ])
-
-    # 去重但保留順序
-    seen = set()
-    deduped = []
-    for u in urls:
-        if u and u not in seen:
-            seen.add(u)
-            deduped.append(u)
-
-    return deduped
-
-
-def _normalize_records_to_df(records: List[Dict[str, Any]]) -> pd.DataFrame:
-    rows: List[Dict[str, Any]] = []
-
-    for rec in records:
-        row = {}
-        fields = rec.get("fields", {}) or {}
-        if isinstance(fields, dict):
-            row.update(fields)
-
-        row["record_id"] = rec.get("id", "")
-        row["_record_id"] = rec.get("id", "")
-        row["_createdTime"] = rec.get("createdTime", "")
-        row["_lastModifiedTime"] = rec.get("lastModifiedTime", "")
-        rows.append(row)
-
-    if not rows:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(rows)
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
-
-
-def _try_parse_json(resp: requests.Response) -> Tuple[Optional[dict], str]:
-    try:
-        return resp.json(), ""
-    except Exception as e:
-        text = resp.text[:2000] if hasattr(resp, "text") else ""
-        return None, f"JSON parse failed: {e}\nResponse text: {text}"
-
-
-# ==================================
-# LOAD ORDERS
-# ==================================
+# ==============================
+# 載入 Orders 主資料
+# ==============================
 def load_orders() -> Tuple[pd.DataFrame, str, str]:
     """
-    回傳: (df, api_status, api_text)
+    從 Teable via /table/{tableId}/record 分頁載入全部訂單
+    回傳 (df, status, text)
+    status: "ok" / "error"
+    text: debug / error 訊息
     """
-    if not TEABLE_TOKEN:
-        return pd.DataFrame(), "error", "Missing TEABLE_TOKEN in Streamlit secrets."
+    token = _get_teable_token()
+    if not token:
+        return pd.DataFrame(), "error", "TEABLE_TOKEN 未設定（st.secrets 或 config.py）"
 
-    api_urls = _candidate_record_api_urls()
-    if not api_urls:
-        return pd.DataFrame(), "error", f"Cannot build record API URL from TABLE_URL={TABLE_URL}"
+    table_url = ""
+    if "TEABLE_TABLE_URL" in st.secrets:
+        table_url = st.secrets["TEABLE_TABLE_URL"]
+    elif hasattr(cfg, "TEABLE_TABLE_URL"):
+        table_url = cfg.TEABLE_TABLE_URL
 
-    debug_msgs: List[str] = [
-        f"TABLE_URL={TABLE_URL}",
-        f"TEABLE_VIEW_ID={TEABLE_VIEW_ID or '(none)'}",
-        f"candidate_urls={json.dumps(api_urls, ensure_ascii=False)}",
-    ]
+    if not table_url:
+        return pd.DataFrame(), "error", "TEABLE_TABLE_URL 未設定"
 
-    for api_url in api_urls:
-        all_records: List[Dict[str, Any]] = []
-        take = 1000
-        skip = 0
+    table_id, view_id_from_url = _parse_table_view_from_url(table_url)
+    if not table_id:
+        return pd.DataFrame(), "error", f"無法從 TEABLE_TABLE_URL 解析 tableId: {table_url}"
 
-        try:
-            debug_msgs.append(f"Trying api_url={api_url}")
+    record_url = _build_record_api_url(table_id)
 
-            while True:
-                params = {
-                    "take": take,
-                    "skip": skip,
-                    "fieldKeyType": "name",
-                    "cellFormat": "text",
-                }
-                if TEABLE_VIEW_ID:
-                    params["viewId"] = TEABLE_VIEW_ID
+    # 分頁抓資料
+    all_records: List[Dict[str, Any]] = []
+    take = 200
+    skip = 0
+    page = 1
+    debug_msgs: List[str] = []
 
-                resp = requests.get(api_url, headers=_headers(), params=params, timeout=30)
-                debug_msgs.append(f"GET {resp.url} -> {resp.status_code}")
-
-                if resp.status_code != 200:
-                    debug_msgs.append(resp.text[:1200])
-                    break
-
-                data, json_err = _try_parse_json(resp)
-                if data is None:
-                    debug_msgs.append(json_err)
-                    break
-
-                records = data.get("records", [])
-                if not isinstance(records, list):
-                    debug_msgs.append(f"Unexpected JSON shape: {str(data)[:1500]}")
-                    break
-
-                all_records.extend(records)
-
-                if len(records) < take:
-                    df = _normalize_records_to_df(all_records)
-                    if df.empty:
-                        debug_msgs.append("Connected successfully, but 0 records returned.")
-                        break
-
-                    debug_msgs.append(f"Loaded records: {len(df)}")
-                    debug_msgs.append(f"Columns: {list(df.columns)}")
-                    return df, "ok", "\n".join(debug_msgs)
-
-                skip += take
-
-        except Exception as e:
-            debug_msgs.append(f"Exception on {api_url}: {e}")
-
-    return pd.DataFrame(), "error", "\n".join(debug_msgs)
-
-
-# ==================================
-# MATCH / UPDATE HELPERS
-# ==================================
-def _normalize_match_value(value: Any) -> str:
-    text = _safe_text(value)
-    text = text.replace(" ", "").replace("-", "").replace("_", "").upper()
-    return text
-
-
-def _build_lookup_maps(current_df: pd.DataFrame) -> Dict[str, Dict[str, str]]:
-    result = {"po": {}, "part": {}}
-
-    if current_df is None or current_df.empty:
-        return result
-
-    po_col = _find_first_col(current_df, PO_CANDIDATES)
-    part_col = _find_first_col(current_df, PART_CANDIDATES)
-    rec_col = "record_id" if "record_id" in current_df.columns else "_record_id"
-
-    if rec_col not in current_df.columns:
-        return result
-
-    for _, row in current_df.iterrows():
-        rec_id = _safe_text(row.get(rec_col))
-        if not rec_id:
-            continue
-
-        if po_col and po_col in current_df.columns:
-            po_val = _normalize_match_value(row.get(po_col))
-            if po_val:
-                result["po"][po_val] = rec_id
-
-        if part_col and part_col in current_df.columns:
-            part_val = _normalize_match_value(row.get(part_col))
-            if part_val:
-                result["part"][part_val] = rec_id
-
-    return result
-
-
-def _infer_wip_from_row(row: pd.Series, uploaded_df: pd.DataFrame, direct_wip_col: Optional[str]) -> str:
-    if direct_wip_col and direct_wip_col in uploaded_df.columns:
-        direct_val = _safe_text(row.get(direct_wip_col))
-        if direct_val:
-            return direct_val
-
-    process_cols = _detect_process_columns(uploaded_df)
-    last_done = ""
-
-    for c in process_cols:
-        v = _safe_text(row.get(c)).lower()
-        if v in {"y", "yes", "ok", "done", "完成", "已完成", "v", "✓", "✔"}:
-            last_done = c
-        elif v and v not in {"", "n", "no", "x", "-", "未"}:
-            last_done = c
-
-    return last_done or ""
-
-
-def _patch_record(record_id: str, fields: Dict[str, Any]) -> Tuple[bool, str]:
-    api_urls = _candidate_record_api_urls()
-    if not api_urls:
-        return False, "Cannot build API URL."
-
-    body = {
-        "record": {
-            "fields": fields
+    while True:
+        params: Dict[str, Any] = {
+            "take": take,
+            "skip": skip,
         }
-    }
+        # 優先使用 secrets/cfg 中的 View Id，如果沒有則用 URL 裡解析到的 viewId
+        view_id = ""
+        if "TEABLE_VIEW_ID" in st.secrets:
+            view_id = st.secrets["TEABLE_VIEW_ID"]
+        elif hasattr(cfg, "TEABLE_VIEW_ID"):
+            view_id = cfg.TEABLE_VIEW_ID
+        if view_id:
+            params["viewId"] = view_id
+        elif view_id_from_url:
+            params["viewId"] = view_id_from_url
 
-    errors = []
-    for base_api in api_urls:
-        api_url = f"{base_api}/{record_id}"
         try:
-            resp = requests.patch(api_url, headers=_headers(), json=body, timeout=30)
-            if resp.status_code == 200:
-                return True, "ok"
-            errors.append(f"{api_url} -> HTTP {resp.status_code}: {resp.text[:800]}")
+            resp = requests.get(record_url, headers=_teable_headers(), params=params, timeout=20)
+            if resp.status_code != 200:
+                return (
+                    pd.DataFrame(),
+                    "error",
+                    f"Teable API 回應錯誤 ({resp.status_code}): {resp.text[:500]}",
+                )
+
+            data = resp.json()
+            items = data.get("records", [])
+            if not items:
+                break
+
+            all_records.extend(items)
+            debug_msgs.append(f"page {page}: {len(items)} records")
+
+            # 判斷是否還有下一頁
+            total = data.get("total", None)
+            if total is not None:
+                if skip + take >= total:
+                    break
+            else:
+                # 如果沒給 total，就用「這頁小於 take」當終止條件
+                if len(items) < take:
+                    break
+
+            # 下一頁
+            page += 1
+            skip += take
+
+            # 安全上限，避免無限 loop
+            if page > 50:
+                debug_msgs.append("達到 page>50，強制停止")
+                break
+
         except Exception as e:
-            errors.append(f"{api_url} -> Exception: {e}")
+            return pd.DataFrame(), "error", f"Teable API 呼叫例外: {e}"
 
-    return False, "\n".join(errors)
+    if not all_records:
+        return pd.DataFrame(), "ok", "Teable API 沒有回傳任何 record"
+
+    # 轉 DataFrame：取每筆 record 的 fields
+    rows: List[Dict[str, Any]] = []
+    for rec in all_records:
+        fields = rec.get("fields", {}) or {}
+        # 保留 record_id 方便之後 PATCH 更新
+        fields["_record_id"] = rec.get("id")
+        rows.append(fields)
+
+    df = pd.DataFrame(rows)
+    debug_text = " | ".join(debug_msgs) or f"Loaded {len(df)} records from Teable"
+
+    return df, "ok", debug_text
 
 
-# ==================================
-# BATCH UPDATE
-# ==================================
+# ==============================
+# 工廠進度 / WIP 更新
+# ==============================
+def _build_lookup_maps(current_df: pd.DataFrame) -> Dict[str, Dict[str, str]]:
+    """
+    建立 PO / PartNo → record_id 的查詢 map
+    """
+    if current_df is None or current_df.empty:
+        return {"by_po": {}, "by_part": {}}
+
+    by_po: Dict[str, str] = {}
+    by_part: Dict[str, str] = {}
+
+    po_candidates = getattr(cfg, "PO_CANDIDATES", ["PO", "PO No", "PO#", "訂單編號"])
+    part_candidates = getattr(cfg, "PART_CANDIDATES", ["Part", "Part No", "Part#", "料號"])
+    record_id_cols = ["_record_id", "record_id", "Record Id"]
+
+    def _first_col(cols: List[str]) -> Optional[str]:
+        for c in cols:
+            if c in current_df.columns:
+                return c
+        return None
+
+    po_col = _first_col(po_candidates)
+    part_col = _first_col(part_candidates)
+    rec_col = _first_col(record_id_cols)
+
+    if not rec_col:
+        # 若沒有 record id，後面也沒辦法 PATCH
+        return {"by_po": {}, "by_part": {}}
+
+    if po_col:
+        for _, row in current_df[[po_col, rec_col]].dropna().iterrows():
+            key = str(row[po_col]).strip()
+            if key:
+                by_po[key] = str(row[rec_col])
+
+    if part_col:
+        for _, row in current_df[[part_col, rec_col]].dropna().iterrows():
+            key = str(row[part_col]).strip()
+            if key:
+                by_part[key] = str(row[rec_col])
+
+    return {"by_po": by_po, "by_part": by_part}
+
+
+def _detect_process_columns(df_up: pd.DataFrame) -> List[str]:
+    """
+    偵測可能為製程 / WIP 相關欄位（給 fallback_import_update 預覽用）
+    """
+    if df_up is None or df_up.empty:
+        return []
+    cols = []
+    for c in df_up.columns:
+        cl = str(c).lower()
+        if any(k in cl for k in ["wip", "process", "製程", "stage", "status", "狀態"]):
+            cols.append(c)
+    return cols
+
+
+def _patch_record(table_id: str, record_id: str, fields: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    呼叫 Teable PATCH /table/{tableId}/record/{recordId}
+    回傳 (success, error_message)
+    """
+    base = getattr(cfg, "TEABLE_API_BASE", "https://app.teable.io/api").rstrip("/")
+    url = f"{base}/table/{table_id}/record/{record_id}"
+
+    payload = {"fields": fields}
+
+    try:
+        resp = requests.patch(url, headers=_teable_headers(), json=payload, timeout=20)
+        if resp.status_code not in (200, 201):
+            return False, f"PATCH {resp.status_code}: {resp.text[:300]}"
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
 def batch_update_wip_from_excel(
     current_df: pd.DataFrame,
     uploaded_df: pd.DataFrame,
     factory_name: str = "",
 ) -> Dict[str, Any]:
-    results = {
-        "success_count": 0,
-        "failed_count": 0,
-        "warnings": [],
-        "details": [],
-    }
+    """
+    從上傳的 Excel/CSV DataFrame 解析 WIP，對照 current_df 的 PO / Part，把對應 record PATCH 回 Teable
+    回傳結果 dict，給前端顯示
+    """
+    token = _get_teable_token()
+    if not token:
+        return {"success_count": 0, "failed_count": 0, "warnings": ["TEABLE_TOKEN 未設定"], "details": []}
 
-    if uploaded_df is None or uploaded_df.empty:
-        results["warnings"].append("uploaded_df is empty.")
-        return results
+    table_url = ""
+    if "TEABLE_TABLE_URL" in st.secrets:
+        table_url = st.secrets["TEABLE_TABLE_URL"]
+    elif hasattr(cfg, "TEABLE_TABLE_URL"):
+        table_url = cfg.TEABLE_TABLE_URL
 
-    if current_df is None or current_df.empty:
-        results["warnings"].append("current_df is empty, cannot match Teable records.")
-        return results
-
-    if not TEABLE_TOKEN:
-        results["warnings"].append("Missing TEABLE_TOKEN in Streamlit secrets.")
-        return results
-
-    up_po_col = _find_first_col(uploaded_df, PO_CANDIDATES)
-    up_part_col = _find_first_col(uploaded_df, PART_CANDIDATES)
-    up_wip_col = _find_first_col(uploaded_df, WIP_CANDIDATES)
-
-    cur_wip_col = _find_first_col(current_df, WIP_CANDIDATES)
-    cur_factory_col = _find_first_col(current_df, FACTORY_CANDIDATES)
-
-    if not up_po_col and not up_part_col:
-        results["warnings"].append("Uploaded file cannot find PO or Part column.")
-        return results
-
-    if not cur_wip_col:
-        results["warnings"].append("Teable current table cannot find WIP column.")
-        return results
-
-    lookup = _build_lookup_maps(current_df)
-
-    for i, row in uploaded_df.iterrows():
-        row_no = i + 2
-
-        po_val_raw = row.get(up_po_col) if up_po_col else ""
-        part_val_raw = row.get(up_part_col) if up_part_col else ""
-
-        po_key = _normalize_match_value(po_val_raw)
-        part_key = _normalize_match_value(part_val_raw)
-
-        record_id = ""
-        matched_by = ""
-
-        if po_key and po_key in lookup["po"]:
-            record_id = lookup["po"][po_key]
-            matched_by = "PO"
-        elif part_key and part_key in lookup["part"]:
-            record_id = lookup["part"][part_key]
-            matched_by = "PART"
-
-        wip_value = _infer_wip_from_row(row, uploaded_df, up_wip_col)
-
-        if not record_id:
-            results["failed_count"] += 1
-            results["details"].append({
-                "row": row_no,
-                "po": _safe_text(po_val_raw),
-                "part": _safe_text(part_val_raw),
-                "wip": wip_value,
-                "error": "No matching Teable record.",
-            })
-            continue
-
-        if not wip_value:
-            results["failed_count"] += 1
-            results["details"].append({
-                "row": row_no,
-                "po": _safe_text(po_val_raw),
-                "part": _safe_text(part_val_raw),
-                "error": "Cannot infer WIP from uploaded row.",
-            })
-            continue
-
-        fields_to_update = {
-            cur_wip_col: wip_value
+    table_id, _ = _parse_table_view_from_url(table_url)
+    if not table_id:
+        return {
+            "success_count": 0,
+            "failed_count": 0,
+            "warnings": ["無法從 TEABLE_TABLE_URL 解析 tableId"],
+            "details": [],
         }
 
-        if cur_factory_col and factory_name:
-            fields_to_update[cur_factory_col] = factory_name
+    if current_df is None or current_df.empty:
+        return {
+            "success_count": 0,
+            "failed_count": 0,
+            "warnings": ["目前主資料 orders 為空，無法比對"],
+            "details": [],
+        }
 
-        ok, msg = _patch_record(record_id, fields_to_update)
-        if ok:
-            results["success_count"] += 1
-            results["details"].append({
-                "row": row_no,
-                "po": _safe_text(po_val_raw),
-                "part": _safe_text(part_val_raw),
-                "wip": wip_value,
-                "matched_by": matched_by,
-                "status": "更新成功",
-            })
+    if uploaded_df is None or uploaded_df.empty:
+        return {
+            "success_count": 0,
+            "failed_count": 0,
+            "warnings": ["上傳檔案解析後沒有有效資料"],
+            "details": [],
+        }
+
+    lookup = _build_lookup_maps(current_df)
+    by_po = lookup["by_po"]
+    by_part = lookup["by_part"]
+
+    po_col = _first_match(uploaded_df, getattr(cfg, "PO_CANDIDATES", ["PO", "PO No", "PO#", "訂單編號"]))
+    part_col = _first_match(
+        uploaded_df, getattr(cfg, "PART_CANDIDATES", ["Part", "Part No", "Part#", "料號"])
+    )
+    wip_col = _first_match(uploaded_df, getattr(cfg, "WIP_CANDIDATES", ["WIP", "Status", "製程", "狀態"]))
+
+    details: List[Dict[str, Any]] = []
+    success_count = 0
+    failed_count = 0
+    warnings: List[str] = []
+
+    if not po_col and not part_col:
+        warnings.append("上傳檔案中未偵測到 PO 或 Part 欄，無法進行匹配。")
+        return {
+            "success_count": 0,
+            "failed_count": 0,
+            "warnings": warnings,
+            "details": [],
+        }
+
+    if not wip_col:
+        warnings.append("上傳檔案中未偵測到 WIP / Status 欄，暫不進行更新。")
+        return {
+            "success_count": 0,
+            "failed_count": 0,
+            "warnings": warnings,
+            "details": [],
+        }
+
+    for idx, row in uploaded_df.iterrows():
+        po_val = str(row[po_col]).strip() if po_col in uploaded_df.columns else ""
+        part_val = str(row[part_col]).strip() if part_col in uploaded_df.columns else ""
+        wip_val = str(row[wip_col]).strip() if wip_col in uploaded_df.columns else ""
+
+        if not wip_val:
+            continue
+
+        record_id = None
+        matched_by = None
+
+        if po_val and po_val in by_po:
+            record_id = by_po[po_val]
+            matched_by = "PO"
+        elif part_val and part_val in by_part:
+            record_id = by_part[part_val]
+            matched_by = "PART"
+
+        if not record_id:
+            details.append(
+                {
+                    "row": idx + 1,
+                    "po": po_val,
+                    "part": part_val,
+                    "wip": wip_val,
+                    "matched_by": None,
+                    "status": "未匹配",
+                    "error": "找不到對應的 Teable record",
+                }
+            )
+            failed_count += 1
+            continue
+
+        # 組 PATCH 欄位
+        fields_to_update: Dict[str, Any] = {}
+        wip_field_name = getattr(cfg, "WIP_FIELD_NAME", None) or _guess_wip_field_name(current_df)
+        if not wip_field_name:
+            details.append(
+                {
+                    "row": idx + 1,
+                    "po": po_val,
+                    "part": part_val,
+                    "wip": wip_val,
+                    "matched_by": matched_by,
+                    "status": "未更新",
+                    "error": "無法推斷 Teable WIP 欄位名稱 (請在 config 設定 WIP_FIELD_NAME)",
+                }
+            )
+            failed_count += 1
+            continue
+
+        fields_to_update[wip_field_name] = wip_val
+
+        success, err = _patch_record(table_id, record_id, fields_to_update)
+        if success:
+            success_count += 1
+            details.append(
+                {
+                    "row": idx + 1,
+                    "po": po_val,
+                    "part": part_val,
+                    "wip": wip_val,
+                    "matched_by": matched_by,
+                    "status": "更新成功",
+                    "error": "",
+                }
+            )
         else:
-            results["failed_count"] += 1
-            results["details"].append({
-                "row": row_no,
-                "po": _safe_text(po_val_raw),
-                "part": _safe_text(part_val_raw),
-                "wip": wip_value,
-                "error": msg,
-            })
+            failed_count += 1
+            details.append(
+                {
+                    "row": idx + 1,
+                    "po": po_val,
+                    "part": part_val,
+                    "wip": wip_val,
+                    "matched_by": matched_by,
+                    "status": "更新失敗",
+                    "error": err,
+                }
+            )
 
-    return results
+    return {
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "warnings": warnings,
+        "details": details,
+    }
+
+
+def _first_match(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+
+def _guess_wip_field_name(df: pd.DataFrame) -> Optional[str]:
+    """
+    從 current_df 欄位中推測 WIP 欄位名稱
+    """
+    candidates = getattr(cfg, "WIP_FIELD_CANDIDATES", ["WIP", "Status", "製程", "狀態"])
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
