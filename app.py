@@ -222,16 +222,40 @@ def call_report_function(candidate_names: List[str], **kwargs) -> Optional[bool]
     依序呼叫 reports 模組中的函數
     成功呼叫回傳 True
     都找不到回傳 False
+
+    加強版：
+    - 支援 df / orders / data 自動別名補齊
+    - 避免 reports.py 參數命名不同造成 missing positional argument
     """
+    alias_map = {
+        "df": ["orders", "data", "dataset"],
+        "orders": ["df", "data", "dataset"],
+        "data": ["df", "orders", "dataset"],
+        "dataset": ["df", "orders", "data"],
+    }
+
     for name in candidate_names:
         fn = getattr(reports, name, None)
         if callable(fn):
             try:
                 sig = inspect.signature(fn)
                 accepted = {}
+
+                # 先收直接同名參數
                 for k, v in kwargs.items():
                     if k in sig.parameters:
                         accepted[k] = v
+
+                # 再補 alias
+                for param_name in sig.parameters:
+                    if param_name in accepted:
+                        continue
+                    if param_name in alias_map:
+                        for source_name in alias_map[param_name]:
+                            if source_name in kwargs:
+                                accepted[param_name] = kwargs[source_name]
+                                break
+
                 fn(**accepted)
                 return True
             except Exception as e:
@@ -243,19 +267,19 @@ def call_report_function(candidate_names: List[str], **kwargs) -> Optional[bool]
 def _detect_factory_name(filename: str) -> str:
     """從檔案名識別工廠"""
     name_lower = filename.lower()
-    if "全興" in name_lower or "quanxing" in name_lower or "203-" in name_lower:
+    if "全興" in filename or "quanxing" in name_lower or "203-" in name_lower:
         return "全興電子"
     elif "profit" in name_lower or "pg" in name_lower or "glocom-pg" in name_lower:
         return "Profit Grand"
-    elif "祥竑" in name_lower or "xianghong" in name_lower:
+    elif "祥竑" in filename or "xianghong" in name_lower:
         return "祥竑電子"
-    elif "西拓" in name_lower or "xituo" in name_lower:
+    elif "西拓" in filename or "xituo" in name_lower:
         return "西拓電子"
-    elif "star" in name_lower or "星辰" in name_lower or "115" in name_lower:
+    elif "star" in name_lower or "星辰" in filename or "115" in name_lower:
         return "星晨電路"
-    elif "優技" in name_lower or "yoji" in name_lower:
+    elif "優技" in filename or "yoji" in name_lower:
         return "優技"
-    elif "宏棋" in name_lower or "hongqi" in name_lower:
+    elif "宏棋" in filename or "hongqi" in name_lower:
         return "宏棋"
     return "未知工廠"
 
@@ -308,7 +332,7 @@ def fallback_import_update(orders: pd.DataFrame) -> None:
         )
 
         if uploaded is not None:
-            name = uploaded.name.lower()
+            name = uploaded.name
             factory_name = _detect_factory_name(name)
             st.caption(f"🏭 識別工廠: **{factory_name}**")
 
@@ -407,7 +431,6 @@ def cached_load_sales_data():
     sales_error_text = ""
     sales_base_path = getattr(cfg, "SALES_BASE_PATH", "")
 
-    # 優先從 reports 模組找 loader
     candidate_loaders = [
         "load_sales_data",
         "get_sales_data",
@@ -443,7 +466,6 @@ def cached_load_sales_data():
 orders, api_status, api_text = cached_load_orders()
 sales_df, sales_shipment_df, sales_error_text, SALES_BASE_PATH = cached_load_sales_data()
 
-# 主表欄位偵測
 po_col = get_first_matching_column(orders, _cfg_list("PO_CANDIDATES"))
 customer_col = get_first_matching_column(orders, _cfg_list("CUSTOMER_CANDIDATES"))
 part_col = get_first_matching_column(orders, _cfg_list("PART_CANDIDATES"))
@@ -525,7 +547,12 @@ st.sidebar.caption("📁 另建 Completed View：WIP = 完成")
 # COMMON KWARGS
 # ==================================
 common_kwargs = dict(
+    # 核心資料別名一起給，避免 reports.py 參數命名不同
     orders=orders,
+    df=orders,
+    data=orders,
+    dataset=orders,
+
     sales_df=sales_df,
     sales_shipment_df=sales_shipment_df,
     po_col=po_col,
