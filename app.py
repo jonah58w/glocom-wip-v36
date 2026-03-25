@@ -1863,17 +1863,17 @@ AMOUNT_SHIP_CANDIDATES = [
 def parse_numeric_series(series: pd.Series) -> pd.Series:
     if series is None:
         return pd.Series(dtype=float)
-    s = series.astype(str)
-    s = s.str.replace(",", "", regex=False)
-    s = s.str.replace("US$", "", regex=False)
-    s = s.str.replace("USD$", "", regex=False)
-    s = s.str.replace("NT$", "", regex=False)
-    s = s.str.replace("$", "", regex=False)
-    s = s.str.replace("USD", "", regex=False)
-    s = s.str.replace("US", "", regex=False)
-    s = s.str.replace("NTD", "", regex=False)
-    s = s.str.replace("nan", "", regex=False)
-    s = s.str.replace("None", "", regex=False)
+
+    s = series.astype(str).fillna("").str.strip()
+
+    replacements = [
+        ("US$", ""), ("USD$", ""), ("NT$", ""), ("HK$", ""),
+        ("USD", ""), ("US", ""), ("NTD", ""), ("TWD", ""), ("RMB", ""),
+        ("$", ""), (",", ""), ("nan", ""), ("None", ""),
+    ]
+    for old, new in replacements:
+        s = s.str.replace(old, new, regex=False)
+
     s = s.str.extract(r"([-+]?\d*\.?\d+)", expand=False)
     return pd.to_numeric(s, errors="coerce").fillna(0.0)
 
@@ -1884,14 +1884,40 @@ def parse_mixed_date_series(series: pd.Series) -> pd.Series:
 
     s = series.astype(str).str.strip()
     s = s.replace({"": pd.NA, "nan": pd.NA, "None": pd.NA})
-    direct = pd.to_datetime(s, errors="coerce")
 
-    cleaned = s.str.replace(".", "", regex=False)
-    mask = direct.isna()
+    out = pd.to_datetime(s, errors="coerce")
+
+    mask = out.isna()
     if mask.any():
-        direct.loc[mask] = pd.to_datetime(cleaned[mask], errors="coerce")
+        s2 = s[mask].str.replace(".", "", regex=False)
+        out.loc[mask] = pd.to_datetime(s2, errors="coerce")
 
-    return direct
+    mask = out.isna()
+    if mask.any():
+        def _parse_one(v):
+            txt = str(v).strip()
+            if not txt or txt.lower() in {"nan", "none"}:
+                return pd.NaT
+            txt = txt.replace(".", "").replace("  ", " ")
+            patterns = [
+                "%Y-%m-%d", "%Y/%m/%d",
+                "%b %d,%y", "%b %d, %y",
+                "%B %d,%y", "%B %d, %y",
+                "%m/%d/%y", "%m/%d/%Y",
+            ]
+            for fmt in patterns:
+                try:
+                    return pd.Timestamp(datetime.strptime(txt, fmt))
+                except Exception:
+                    pass
+            try:
+                return pd.to_datetime(txt, errors="coerce")
+            except Exception:
+                return pd.NaT
+
+        out.loc[mask] = s[mask].apply(_parse_one)
+
+    return out
 
 
 def build_month_amount_series(date_series: pd.Series, amount_series: pd.Series, year_month: str) -> pd.Series:
@@ -1942,12 +1968,12 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     st.caption("資料來源：Teable 主表即時欄位（全客戶）")
 
     customer_col = first_existing_column(source_df, CUSTOMER_CANDIDATES + ["Customer"])
-    factory_col = first_existing_column(source_df, FACTORY_CANDIDATES)
-    po_col = first_existing_column(source_df, PO_CANDIDATES)
-    pn_col = first_existing_column(source_df, PART_CANDIDATES)
-    qty_col = first_existing_column(source_df, QTY_CANDIDATES + ["Order QTY (PCS)"])
+    factory_col_local = first_existing_column(source_df, FACTORY_CANDIDATES)
+    po_col_local = first_existing_column(source_df, PO_CANDIDATES)
+    pn_col_local = first_existing_column(source_df, PART_CANDIDATES)
+    qty_col_local = first_existing_column(source_df, QTY_CANDIDATES + ["Order QTY (PCS)"])
     order_date_col = first_existing_column(source_df, ORDER_DATE_CANDIDATES)
-    ship_date_col = first_existing_column(source_df, SHIP_DATE_CANDIDATES + ["出貨日期"])
+    ship_date_col_local = first_existing_column(source_df, SHIP_DATE_CANDIDATES + ["出貨日期"])
     wip_col_local = first_existing_column(source_df, WIP_CANDIDATES)
     order_amount_col = find_amount_column(source_df, AMOUNT_ORDER_CANDIDATES)
     ship_amount_col = find_amount_column(source_df, AMOUNT_SHIP_CANDIDATES)
@@ -1955,64 +1981,61 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
 
     working_df = pd.DataFrame(index=source_df.index)
     working_df["客戶"] = get_series_by_col(source_df, customer_col) if customer_col else ""
-    if factory_col:
-        working_df["工廠"] = get_series_by_col(source_df, factory_col)
-    if po_col:
-        working_df["PO#"] = get_series_by_col(source_df, po_col)
-    if pn_col:
-        working_df["P/N"] = get_series_by_col(source_df, pn_col)
-    if qty_col:
-        working_df["Order Q'TY (PCS)"] = pd.to_numeric(get_series_by_col(source_df, qty_col), errors="coerce").fillna(0)
+    working_df["工廠"] = get_series_by_col(source_df, factory_col_local) if factory_col_local else ""
+    working_df["PO#"] = get_series_by_col(source_df, po_col_local) if po_col_local else ""
+    working_df["P/N"] = get_series_by_col(source_df, pn_col_local) if pn_col_local else ""
+    if qty_col_local:
+        working_df["Order Q'TY (PCS)"] = pd.to_numeric(get_series_by_col(source_df, qty_col_local), errors="coerce").fillna(0)
     else:
         working_df["Order Q'TY (PCS)"] = 0
-    if order_date_col:
-        working_df["客戶下單日期"] = get_series_by_col(source_df, order_date_col)
-    if ship_date_col:
-        working_df["Ship date"] = get_series_by_col(source_df, ship_date_col)
-    if wip_col_local:
-        working_df["WIP"] = get_series_by_col(source_df, wip_col_local)
+    working_df["客戶下單日期"] = get_series_by_col(source_df, order_date_col) if order_date_col else ""
+    working_df["Ship date"] = get_series_by_col(source_df, ship_date_col_local) if ship_date_col_local else ""
+    working_df["WIP"] = get_series_by_col(source_df, wip_col_local) if wip_col_local else ""
 
-    invoice_for_order = parse_numeric_series(get_series_by_col(source_df, order_amount_col)) if order_amount_col else pd.Series(0.0, index=source_df.index)
-    invoice_for_ship = parse_numeric_series(get_series_by_col(source_df, ship_amount_col)) if ship_amount_col else pd.Series(0.0, index=source_df.index)
-    tooling_amount = parse_numeric_series(get_series_by_col(source_df, tooling_col)) if tooling_col else pd.Series(0.0, index=source_df.index)
+    order_invoice_series = parse_numeric_series(get_series_by_col(source_df, order_amount_col)) if order_amount_col else pd.Series(0.0, index=source_df.index)
+    ship_invoice_series = parse_numeric_series(get_series_by_col(source_df, ship_amount_col)) if ship_amount_col else pd.Series(0.0, index=source_df.index)
+    tooling_series = parse_numeric_series(get_series_by_col(source_df, tooling_col)) if tooling_col else pd.Series(0.0, index=source_df.index)
 
-    base_order_amount = invoice_for_order.add(tooling_amount, fill_value=0.0)
-    base_ship_amount = invoice_for_ship.add(tooling_amount, fill_value=0.0)
+    order_total_series = order_invoice_series.add(tooling_series, fill_value=0.0)
+    ship_total_series = ship_invoice_series.add(tooling_series, fill_value=0.0)
 
     order_dates = parse_mixed_date_series(get_series_by_col(source_df, order_date_col)) if order_date_col else pd.Series(pd.NaT, index=source_df.index)
-    ship_dates = parse_mixed_date_series(get_series_by_col(source_df, ship_date_col)) if ship_date_col else pd.Series(pd.NaT, index=source_df.index)
+    ship_dates = parse_mixed_date_series(get_series_by_col(source_df, ship_date_col_local)) if ship_date_col_local else pd.Series(pd.NaT, index=source_df.index)
 
-    current_month = pd.Timestamp.today().strftime("%Y-%m")
     month_options = []
     if not order_dates.empty:
-        month_options.extend([x for x in order_dates.dt.strftime("%Y-%m").dropna().unique().tolist() if x])
+        month_options.extend([x for x in order_dates.dt.strftime("%Y-%m").dropna().tolist() if x])
     if not ship_dates.empty:
-        month_options.extend([x for x in ship_dates.dt.strftime("%Y-%m").dropna().unique().tolist() if x])
+        month_options.extend([x for x in ship_dates.dt.strftime("%Y-%m").dropna().tolist() if x])
     month_options = sorted(set(month_options))
+    current_month = pd.Timestamp.today().strftime("%Y-%m")
     default_month = current_month if current_month in month_options else (month_options[-1] if month_options else current_month)
 
     c1, c2, c3 = st.columns(3)
     customer_values = sorted([str(x).strip() for x in working_df["客戶"].dropna().unique().tolist() if str(x).strip()])
     selected_customer = c1.selectbox("客戶", ["全部"] + customer_values, index=0, key="sales_detail_customer_teable")
 
-    if "工廠" in working_df.columns:
-        factory_values = sorted([str(x).strip() for x in working_df["工廠"].dropna().unique().tolist() if str(x).strip()])
-        selected_factory = c2.selectbox("工廠", ["全部"] + factory_values, index=0, key="sales_detail_factory_teable")
-    else:
-        selected_factory = "全部"
-    selected_month = c3.selectbox("統計月份", month_options if month_options else [default_month], index=(month_options.index(default_month) if default_month in month_options else 0), key="sales_detail_month_teable")
+    factory_values = sorted([str(x).strip() for x in working_df["工廠"].dropna().unique().tolist() if str(x).strip()])
+    selected_factory = c2.selectbox("工廠", ["全部"] + factory_values, index=0, key="sales_detail_factory_teable")
+
+    selected_month = c3.selectbox(
+        "統計月份",
+        month_options if month_options else [default_month],
+        index=(month_options.index(default_month) if default_month in month_options else 0),
+        key="sales_detail_month_teable",
+    )
 
     filter_mask = pd.Series(True, index=working_df.index)
     if selected_customer != "全部":
         filter_mask &= working_df["客戶"].astype(str).str.strip().str.lower() == selected_customer.strip().lower()
-    if selected_factory != "全部" and "工廠" in working_df.columns:
+    if selected_factory != "全部":
         filter_mask &= working_df["工廠"].astype(str).str.strip().str.lower() == selected_factory.strip().lower()
 
     order_month_mask = order_dates.dt.strftime("%Y-%m") == selected_month
     ship_month_mask = ship_dates.dt.strftime("%Y-%m") == selected_month
 
-    working_df["當月接單金額"] = base_order_amount.where(order_month_mask.fillna(False), 0.0)
-    working_df["當月出貨金額"] = base_ship_amount.where(ship_month_mask.fillna(False), 0.0)
+    working_df["當月接單金額"] = order_total_series.where(order_month_mask.fillna(False), 0.0)
+    working_df["當月出貨金額"] = ship_total_series.where(ship_month_mask.fillna(False), 0.0)
     working_df["本月接單筆數"] = order_month_mask.fillna(False).astype(int)
     working_df["本月出貨筆數"] = ship_month_mask.fillna(False).astype(int)
 
@@ -2031,8 +2054,8 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     found_cols = []
     if order_date_col:
         found_cols.append(f"接單日期欄位：{order_date_col}")
-    if ship_date_col:
-        found_cols.append(f"出貨日期欄位：{ship_date_col}")
+    if ship_date_col_local:
+        found_cols.append(f"出貨日期欄位：{ship_date_col_local}")
     if order_amount_col:
         found_cols.append(f"接單金額欄位：{order_amount_col}")
     if ship_amount_col:
@@ -2041,6 +2064,10 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
         found_cols.append(f"附加金額欄位：{tooling_col}")
     if found_cols:
         st.caption("；".join(found_cols))
+
+    if month_df.empty:
+        st.info("此篩選條件下，本月沒有接單或出貨資料。")
+        return
 
     group_spec = {
         "筆數": ("客戶", "size"),
@@ -2052,15 +2079,11 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     if "Order Q'TY (PCS)" in month_df.columns:
         group_spec["總數量"] = ("Order Q'TY (PCS)", "sum")
 
-    if month_df.empty:
-        st.info("此篩選條件下，本月沒有接單或出貨資料。")
-        return
-
     summary = month_df.groupby("客戶", dropna=False).agg(**group_spec).reset_index()
     summary = summary[(summary["筆數"] > 0) | (summary["當月接單金額"] != 0) | (summary["當月出貨金額"] != 0)].copy()
+
     st.markdown("**各客戶彙總**")
     st.dataframe(summary, use_container_width=True, height=320)
-
     st.download_button(
         "下載 各客戶業績彙總 CSV",
         data=summary.to_csv(index=False).encode("utf-8-sig"),
@@ -2080,6 +2103,7 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
         mime="text/csv",
         key="download_sales_detail_csv_teable"
     )
+
 
 
 # ================================
