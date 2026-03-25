@@ -1731,21 +1731,47 @@ SANDY_SALES_BASE_SPECS = [
 ]
 
 
+def normalize_col_key(col_name):
+    s = str(col_name or "")
+    s = s.replace("\n", "")
+    s = re.sub(r"\s+", "", s)
+    return s.strip().lower()
+
+
 def first_existing_column(df: pd.DataFrame, candidates):
+    # exact match first
     for c in candidates:
         if c in df.columns:
             return c
+    # normalized/fuzzy match to survive newline/space variants
+    normalized_map = {}
+    for col in df.columns:
+        key = normalize_col_key(col)
+        if key not in normalized_map:
+            normalized_map[key] = col
+    for c in candidates:
+        key = normalize_col_key(c)
+        if key in normalized_map:
+            return normalized_map[key]
     return None
+
+
+def first_existing_series(df: pd.DataFrame, candidates):
+    src = first_existing_column(df, candidates)
+    if not src:
+        return None, None
+    series = get_series_by_col(df, src)
+    return src, series
 
 
 def build_teable_view_df(source_df: pd.DataFrame, specs):
     view_df = pd.DataFrame(index=source_df.index)
     mapping = {}
     for out_name, candidates in specs:
-        src = first_existing_column(source_df, candidates)
+        src, series = first_existing_series(source_df, candidates)
         mapping[out_name] = src
-        if src:
-            view_df[out_name] = source_df[src]
+        if series is not None:
+            view_df[out_name] = series
         else:
             view_df[out_name] = ""
     view_df.columns = make_unique_columns(view_df.columns)
@@ -1816,46 +1842,170 @@ def render_teable_subset_table(
     )
 
 
+
+AMOUNT_ORDER_CANDIDATES = [
+    "接單金額", "接單總金額", "Order Amount", "Order amount", "Order Total",
+    "客戶金額", "銷售金額", "Sales Amount", "Quote Total", "Total Amount", "Amount"
+]
+
+AMOUNT_SHIP_CANDIDATES = [
+    "出貨金額", "出貨總金額", "Shipment Amount", "Ship Amount", "Shipping Amount",
+    "Invoice Amount", "Invoice Total", "出貨發票金額", "Invoice"
+]
+
+
+def parse_numeric_series(series: pd.Series) -> pd.Series:
+    if series is None:
+        return pd.Series(dtype=float)
+    s = series.astype(str)
+    s = s.str.replace(",", "", regex=False)
+    s = s.str.replace("$", "", regex=False)
+    s = s.str.replace("NTD", "", regex=False, case=False)
+    s = s.str.replace("USD", "", regex=False, case=False)
+    s = s.str.replace("nan", "", regex=False, case=False)
+    s = s.str.strip()
+    return pd.to_numeric(s, errors="coerce").fillna(0.0)
+
+
+def find_amount_column(df: pd.DataFrame, candidates):
+    src = first_existing_column(df, candidates)
+    if src:
+        return src
+
+    normalized_cols = {normalize_col_key(c): c for c in df.columns}
+    candidate_keys = [normalize_col_key(c) for c in candidates]
+
+    for key, col in normalized_cols.items():
+        for ck in candidate_keys:
+            if ck and ck in key:
+                return col
+
+    for col in df.columns:
+        key = normalize_col_key(col)
+        if any(token in key for token in ["金額", "amount"]):
+            return col
+    return None
+
+
+def safe_display_subset(df: pd.DataFrame, columns):
+    out = pd.DataFrame(index=df.index)
+    for col in columns:
+        if col in df.columns:
+            out[col] = get_series_by_col(df, col)
+    out.columns = make_unique_columns(out.columns)
+    return out
+
+
 def render_sales_detail_from_teable(source_df: pd.DataFrame):
     st.subheader("📈 業績明細表")
     if source_df is None or source_df.empty:
         st.warning("Teable 主表目前沒有資料。")
         return
 
-    display_df, mapping = build_teable_view_df(source_df.copy(), SANDY_SALES_BASE_SPECS)
-    st.caption("資料來源：Teable 主表即時欄位")
+    st.caption("資料來源：Teable 主表即時欄位（全客戶）")
+
+    customer_col = first_existing_column(source_df, CUSTOMER_CANDIDATES + ["Customer"])
+    factory_col = first_existing_column(source_df, FACTORY_CANDIDATES)
+    po_col = first_existing_column(source_df, PO_CANDIDATES)
+    pn_col = first_existing_column(source_df, PART_CANDIDATES)
+    qty_col = first_existing_column(source_df, QTY_CANDIDATES + ["Order QTY (PCS)"])
+    order_date_col = first_existing_column(source_df, ORDER_DATE_CANDIDATES)
+    ship_date_col = first_existing_column(source_df, SHIP_DATE_CANDIDATES + ["出貨日期"])
+    wip_col_local = first_existing_column(source_df, WIP_CANDIDATES)
+    order_amount_col = find_amount_column(source_df, AMOUNT_ORDER_CANDIDATES)
+    ship_amount_col = find_amount_column(source_df, AMOUNT_SHIP_CANDIDATES)
+
+    working_df = pd.DataFrame(index=source_df.index)
+    if customer_col:
+        working_df["客戶"] = get_series_by_col(source_df, customer_col)
+    else:
+        working_df["客戶"] = ""
+    if factory_col:
+        working_df["工廠"] = get_series_by_col(source_df, factory_col)
+    if po_col:
+        working_df["PO#"] = get_series_by_col(source_df, po_col)
+    if pn_col:
+        working_df["P/N"] = get_series_by_col(source_df, pn_col)
+    if qty_col:
+        working_df["Order Q'TY (PCS)"] = get_series_by_col(source_df, qty_col)
+    if order_date_col:
+        working_df["客戶下單日期"] = get_series_by_col(source_df, order_date_col)
+    if ship_date_col:
+        working_df["Ship date"] = get_series_by_col(source_df, ship_date_col)
+    if wip_col_local:
+        working_df["WIP"] = get_series_by_col(source_df, wip_col_local)
+
+    if order_amount_col:
+        working_df["接單金額"] = parse_numeric_series(get_series_by_col(source_df, order_amount_col))
+    else:
+        working_df["接單金額"] = 0.0
+    if ship_amount_col:
+        working_df["出貨金額"] = parse_numeric_series(get_series_by_col(source_df, ship_amount_col))
+    else:
+        working_df["出貨金額"] = 0.0
+
+    if "Order Q'TY (PCS)" in working_df.columns:
+        working_df["Order Q'TY (PCS)"] = pd.to_numeric(working_df["Order Q'TY (PCS)"], errors="coerce")
 
     c1, c2 = st.columns(2)
-    if "客戶" in display_df.columns:
-        customer_values = sorted([str(x).strip() for x in display_df["客戶"].dropna().unique().tolist() if str(x).strip()])
-        default_index = customer_values.index("WESCO") + 1 if "WESCO" in customer_values else 0
-        selected_customer = c1.selectbox("客戶", ["全部"] + customer_values, index=default_index, key="sales_detail_customer_teable")
-        if selected_customer != "全部":
-            display_df = display_df[
-                display_df["客戶"].astype(str).str.strip().str.lower() == selected_customer.strip().lower()
-            ].copy()
+    customer_values = sorted([str(x).strip() for x in working_df["客戶"].dropna().unique().tolist() if str(x).strip()])
+    selected_customer = c1.selectbox("客戶", ["全部"] + customer_values, index=0, key="sales_detail_customer_teable")
+    if selected_customer != "全部":
+        working_df = working_df[
+            working_df["客戶"].astype(str).str.strip().str.lower() == selected_customer.strip().lower()
+        ].copy()
 
-    if "工廠" in display_df.columns:
-        factory_values = sorted([str(x).strip() for x in display_df["工廠"].dropna().unique().tolist() if str(x).strip()])
-        selected_factory = c2.selectbox("工廠", ["全部"] + factory_values, key="sales_detail_factory_teable")
+    if "工廠" in working_df.columns:
+        factory_values = sorted([str(x).strip() for x in working_df["工廠"].dropna().unique().tolist() if str(x).strip()])
+        selected_factory = c2.selectbox("工廠", ["全部"] + factory_values, index=0, key="sales_detail_factory_teable")
         if selected_factory != "全部":
-            display_df = display_df[
-                display_df["工廠"].astype(str).str.strip().str.lower() == selected_factory.strip().lower()
+            working_df = working_df[
+                working_df["工廠"].astype(str).str.strip().str.lower() == selected_factory.strip().lower()
             ].copy()
 
-    m1, m2 = st.columns(2)
-    m1.metric("筆數", len(display_df))
-    qty_col_name = "Order Q'TY (PCS)" if "Order Q'TY (PCS)" in display_df.columns else ("Q'TY (PCS)" if "Q'TY (PCS)" in display_df.columns else None)
-    if qty_col_name:
-        qty_series = pd.to_numeric(display_df[qty_col_name], errors="coerce")
-        m2.metric("總數量", f"{int(qty_series.fillna(0).sum()):,}")
-    else:
-        m2.metric("總數量", "-")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("筆數", len(working_df))
+    qty_total = int(pd.to_numeric(working_df["Order Q'TY (PCS)"], errors="coerce").fillna(0).sum()) if "Order Q'TY (PCS)" in working_df.columns else 0
+    m2.metric("總數量", f"{qty_total:,}")
+    m3.metric("接單金額", f"{working_df['接單金額'].sum():,.2f}")
+    m4.metric("出貨金額", f"{working_df['出貨金額'].sum():,.2f}")
 
-    st.dataframe(display_df, use_container_width=True, height=520)
+    if not order_amount_col and not ship_amount_col:
+        st.warning("Teable 主表目前未找到『接單金額』或『出貨金額』欄位，因此金額合計會顯示為 0。若主表已有這兩欄，請確認欄名。")
+    else:
+        found_cols = []
+        if order_amount_col:
+            found_cols.append(f"接單金額欄位：{order_amount_col}")
+        if ship_amount_col:
+            found_cols.append(f"出貨金額欄位：{ship_amount_col}")
+        st.caption("；".join(found_cols))
+
+    group_spec = {
+        "筆數": ("客戶", "size"),
+        "接單金額": ("接單金額", "sum"),
+        "出貨金額": ("出貨金額", "sum"),
+    }
+    if "Order Q'TY (PCS)" in working_df.columns:
+        group_spec["總數量"] = ("Order Q'TY (PCS)", "sum")
+    summary = working_df.groupby("客戶", dropna=False).agg(**group_spec).reset_index()
+    st.markdown("**各客戶彙總**")
+    st.dataframe(summary, use_container_width=True, height=320)
+
+    st.download_button(
+        "下載 各客戶業績彙總 CSV",
+        data=summary.to_csv(index=False).encode("utf-8-sig"),
+        file_name="業績明細表_各客戶彙總.csv",
+        mime="text/csv",
+        key="download_sales_summary_csv_teable"
+    )
+
+    detail_cols = [c for c in ["客戶", "PO#", "P/N", "Order Q'TY (PCS)", "客戶下單日期", "Ship date", "工廠", "WIP", "接單金額", "出貨金額"] if c in working_df.columns]
+    detail_df = safe_display_subset(working_df, detail_cols)
+    st.markdown("**明細資料**")
+    st.dataframe(detail_df, use_container_width=True, height=520)
     st.download_button(
         "下載 業績明細表 CSV",
-        data=display_df.to_csv(index=False).encode("utf-8-sig"),
+        data=detail_df.to_csv(index=False).encode("utf-8-sig"),
         file_name="業績明細表.csv",
         mime="text/csv",
         key="download_sales_detail_csv_teable"
@@ -1912,7 +2062,7 @@ elif menu == "新訂單WIP":
         title="📄 新訂單WIP",
         source_df=orders,
         specs=SANDY_NEW_ORDER_SPECS,
-        default_customer="WESCO",
+        default_customer=None,
         csv_name="新訂單WIP.csv",
     )
 
@@ -1921,7 +2071,7 @@ elif menu == "Sandy 內部WIP":
         title="📄 Sandy 內部WIP",
         source_df=orders,
         specs=SANDY_INTERNAL_WIP_SPECS,
-        default_customer="WESCO",
+        default_customer=None,
         csv_name="Sandy內部WIP.csv",
     )
 
@@ -1930,7 +2080,7 @@ elif menu == "Sandy 銷貨底":
         title="📄 Sandy 銷貨底",
         source_df=orders,
         specs=SANDY_SALES_BASE_SPECS,
-        default_customer="WESCO",
+        default_customer=None,
         csv_name="Sandy銷貨底.csv",
     )
 
