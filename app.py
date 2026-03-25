@@ -1850,25 +1850,33 @@ ORDER_DATE_CANDIDATES = [
 
 AMOUNT_ORDER_CANDIDATES = [
     "接單金額", "接單總金額", "Order Amount", "Order amount", "Order Total",
-    "客戶金額", "銷售金額", "Sales Amount", "Quote Total", "Total Amount", "Amount"
+    "客戶金額", "銷售金額", "Sales Amount", "Quote Total", "Total Amount", "Amount",
+    "INVOICE", "Invoice", "Invoice Amount", "Invoice Total"
 ]
 
 AMOUNT_SHIP_CANDIDATES = [
     "出貨金額", "出貨總金額", "Shipment Amount", "Ship Amount", "Shipping Amount",
-    "Invoice Amount", "Invoice Total", "出貨發票金額", "Invoice"
+    "Invoice Amount", "Invoice Total", "出貨發票金額", "Invoice", "INVOICE"
 ]
 
 
 def parse_numeric_series(series: pd.Series) -> pd.Series:
     if series is None:
         return pd.Series(dtype=float)
+
     s = series.astype(str)
     s = s.str.replace(",", "", regex=False)
+    s = s.str.replace("US$", "", regex=False)
+    s = s.str.replace("USD$", "", regex=False)
+    s = s.str.replace("NT$", "", regex=False)
     s = s.str.replace("$", "", regex=False)
-    s = s.str.replace("NTD", "", regex=False, case=False)
-    s = s.str.replace("USD", "", regex=False, case=False)
-    s = s.str.replace("nan", "", regex=False, case=False)
-    s = s.str.strip()
+    s = s.str.replace("USD", "", regex=False)
+    s = s.str.replace("US", "", regex=False)
+    s = s.str.replace("NTD", "", regex=False)
+    s = s.str.replace("nan", "", regex=False)
+    s = s.str.replace("None", "", regex=False)
+    s = s.str.extract(r"([-+]?\d*\.?\d+)", expand=False)
+
     return pd.to_numeric(s, errors="coerce").fillna(0.0)
 
 
@@ -1890,6 +1898,19 @@ def find_amount_column(df: pd.DataFrame, candidates):
         if any(token in key for token in ["金額", "amount"]):
             return col
     return None
+
+
+def find_invoice_status_column(df: pd.DataFrame):
+    candidates = ["發票", "invoice status", "invoice_status", "已出貨+C:C
+Ｖ", "已出貨"]
+    return first_existing_column(df, candidates)
+
+
+def build_sales_amount_series(df: pd.DataFrame, amount_col: str | None, tooling_col: str | None = None) -> pd.Series:
+    base = parse_numeric_series(get_series_by_col(df, amount_col)) if amount_col else pd.Series(0.0, index=df.index)
+    if tooling_col:
+        base = base.add(parse_numeric_series(get_series_by_col(df, tooling_col)), fill_value=0.0)
+    return base.fillna(0.0)
 
 
 def safe_display_subset(df: pd.DataFrame, columns):
@@ -1919,6 +1940,8 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     wip_col_local = first_existing_column(source_df, WIP_CANDIDATES)
     order_amount_col = find_amount_column(source_df, AMOUNT_ORDER_CANDIDATES)
     ship_amount_col = find_amount_column(source_df, AMOUNT_SHIP_CANDIDATES)
+    tooling_col = find_amount_column(source_df, ["TOOLING", "Tooling", "模具費", "NRE", "工程費"])
+    invoice_status_col = find_invoice_status_column(source_df)
 
     working_df = pd.DataFrame(index=source_df.index)
     if customer_col:
@@ -1940,14 +1963,22 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     if wip_col_local:
         working_df["WIP"] = get_series_by_col(source_df, wip_col_local)
 
-    if order_amount_col:
-        working_df["接單金額"] = parse_numeric_series(get_series_by_col(source_df, order_amount_col))
-    else:
-        working_df["接單金額"] = 0.0
-    if ship_amount_col:
-        working_df["出貨金額"] = parse_numeric_series(get_series_by_col(source_df, ship_amount_col))
-    else:
-        working_df["出貨金額"] = 0.0
+    working_df["接單金額"] = build_sales_amount_series(source_df, order_amount_col, tooling_col)
+
+    ship_amount_series = build_sales_amount_series(source_df, ship_amount_col, tooling_col)
+    ship_mask = pd.Series(False, index=source_df.index)
+
+    if invoice_status_col:
+        status_series = get_series_by_col(source_df, invoice_status_col).astype(str).str.strip().str.upper()
+        ship_mask = ship_mask | status_series.isin(["V", "已出貨", "YES", "Y", "TRUE"])
+
+    if ship_date_col:
+        ship_mask = ship_mask | get_series_by_col(source_df, ship_date_col).astype(str).str.strip().ne("")
+
+    if wip_col_local:
+        ship_mask = ship_mask | get_series_by_col(source_df, wip_col_local).astype(str).str.upper().str.contains("SHIP", na=False)
+
+    working_df["出貨金額"] = ship_amount_series.where(ship_mask, 0.0)
 
     if "Order Q'TY (PCS)" in working_df.columns:
         working_df["Order Q'TY (PCS)"] = pd.to_numeric(working_df["Order Q'TY (PCS)"], errors="coerce")
@@ -1975,15 +2006,20 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     m3.metric("接單金額", f"{working_df['接單金額'].sum():,.2f}")
     m4.metric("出貨金額", f"{working_df['出貨金額'].sum():,.2f}")
 
-    if not order_amount_col and not ship_amount_col:
-        st.warning("Teable 主表目前未找到『接單金額』或『出貨金額』欄位，因此金額合計會顯示為 0。若主表已有這兩欄，請確認欄名。")
-    else:
-        found_cols = []
-        if order_amount_col:
-            found_cols.append(f"接單金額欄位：{order_amount_col}")
-        if ship_amount_col:
-            found_cols.append(f"出貨金額欄位：{ship_amount_col}")
+    found_cols = []
+    if order_amount_col:
+        found_cols.append(f"接單金額欄位：{order_amount_col}")
+    if ship_amount_col:
+        found_cols.append(f"出貨金額欄位：{ship_amount_col}")
+    if tooling_col:
+        found_cols.append(f"附加金額欄位：{tooling_col}")
+    if invoice_status_col:
+        found_cols.append(f"出貨判定欄位：{invoice_status_col}")
+
+    if found_cols:
         st.caption("；".join(found_cols))
+    else:
+        st.warning("Teable 主表目前未找到可用的金額欄位，因此金額合計會顯示為 0。")
 
     group_spec = {
         "筆數": ("客戶", "size"),
