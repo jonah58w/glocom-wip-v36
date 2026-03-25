@@ -16,8 +16,12 @@ import pytesseract
 
 try:
     from excel_exporter import generate_quote_excel_v2
+    EXCEL_EXPORTER_AVAILABLE = True
 except Exception:
-    generate_quote_excel_v2 = None
+    EXCEL_EXPORTER_AVAILABLE = False
+
+    def generate_quote_excel_v2(*args, **kwargs):
+        raise ModuleNotFoundError("excel_exporter.py not found")
 from factory_progress_updater import (
     dedupe_import_df_by_key,
     classify_and_update_factory_row,
@@ -1138,10 +1142,6 @@ def build_quote_data_from_existing_app():
 def show_excel_quote_export():
     st.subheader("Excel Quote Export")
 
-    if generate_quote_excel_v2 is None:
-        st.warning("Excel Quote Export 已停用。")
-        return
-
     template_path = "template.xlsx"
     if not Path(template_path).exists():
         st.error("找不到 template.xlsx，請先放到 app.py 同一層資料夾。")
@@ -1595,11 +1595,27 @@ def show_shipment_forecast(df: pd.DataFrame):
         st.info("No ship date column")
 
 
+def make_unique_columns(columns):
+    seen = {}
+    new_cols = []
+    for col in columns:
+        col = str(col)
+        if col not in seen:
+            seen[col] = 0
+            new_cols.append(col)
+        else:
+            seen[col] += 1
+            new_cols.append(f"{col}_{seen[col]}")
+    return new_cols
+
+
 def show_orders_table(df: pd.DataFrame):
     st.subheader("📋 Orders")
-    st.dataframe(df, use_container_width=True, height=520)
+    display_df = df.copy()
+    display_df.columns = make_unique_columns(display_df.columns)
+    st.dataframe(display_df, use_container_width=True, height=520)
 
-    csv_data = df.to_csv(index=False).encode("utf-8-sig")
+    csv_data = display_df.to_csv(index=False).encode("utf-8-sig")
     st.download_button(
         "Download Orders CSV",
         data=csv_data,
@@ -1669,8 +1685,9 @@ elif menu == "Customer Preview":
             if not customers:
                 st.warning("No customers found")
             else:
-                default_idx = customers.index("WESCO") if "WESCO" in customers else 0
-                selected_customer = st.selectbox("Select customer to preview", customers, index=default_idx)
+                default_customer = "WESCO"
+                default_index = customers.index(default_customer) if default_customer in customers else 0
+                selected_customer = st.selectbox("Select customer to preview", customers, index=default_index)
 
                 preview_df = orders[
                     customer_series.astype(str).str.strip().str.lower() == selected_customer.strip().lower()
@@ -2218,4 +2235,5 @@ elif menu == "Import / Update":
                 st.error(f"Image OCR failed: {e}")
 
 
-st.caption("Auto refresh cache: 60 seconds")
+
+# Excel Quote Export removed from menu.
