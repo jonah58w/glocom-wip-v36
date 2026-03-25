@@ -787,7 +787,6 @@ def load_orders():
 
     try:
         all_rows = []
-        seen_tokens = set()
         page_token = None
         last_status = 200
         last_text = ""
@@ -796,7 +795,7 @@ def load_orders():
             params = {
                 "fieldKeyType": "name",
                 "cellFormat": "text",
-                "take": 5000,
+                "take": 1000,
             }
             if page_token:
                 params["pageToken"] = page_token
@@ -816,24 +815,22 @@ def load_orders():
 
             data = response.json()
             records = data.get("records", []) or []
+
             for rec in records:
                 fields = rec.get("fields", {}) or {}
                 fields["_record_id"] = rec.get("id", "")
                 all_rows.append(fields)
 
-            next_token = (
+            page_token = (
                 data.get("pageToken")
                 or data.get("nextPageToken")
                 or data.get("next_page_token")
-                or data.get("pagination", {}).get("nextPageToken")
                 or None
             )
 
-            if not next_token or next_token in seen_tokens or len(records) < 5000:
+            # Stop when this page is smaller than take or no next token exists
+            if not page_token or len(records) < 1000:
                 break
-
-            seen_tokens.add(next_token)
-            page_token = next_token
 
         df = pd.DataFrame(all_rows)
         df = normalize_columns(df)
@@ -1842,41 +1839,24 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str | None = None) -
     wip_series = get_series_by_col(source_df, wip_col) if 'wip_col' in globals() and wip_col else None
     wip_norm = normalize_status_text(wip_series) if wip_series is not None else pd.Series("", index=source_df.index)
 
-    shipment_status_col = first_existing_column(
-        source_df,
-        [
-            "出貨狀況 (限內部使用)",
-            "出貨狀況(限內部使用)",
-            "出貨狀況",
-            "Shipment Status",
-        ]
-    )
-    shipment_status_series = get_series_by_col(source_df, shipment_status_col) if shipment_status_col else None
-    shipment_status_norm = normalize_status_text(shipment_status_series) if shipment_status_series is not None else pd.Series("", index=source_df.index)
-
-    cancel_mask = (
-        wip_norm.str.contains(r"cancel|cancell|取消", na=False)
-        | shipment_status_norm.str.contains(r"cancel|cancell|取消", na=False)
-    )
-
-    shipped_by_wip = wip_norm.str.contains(r"shipment|已出貨|出貨完成", na=False)
-    shipped_by_status = shipment_status_norm.str.contains(r"shipped|shipment|已出貨|出貨完成", na=False)
-    shipped_mask = shipped_by_wip | shipped_by_status
+    # Main rule from Teable master view:
+    # - 新訂單WIP / Sandy 內部WIP: 未出貨 = 排除 SHIPMENT 與 Cancell
+    # - Sandy 銷貨底: 只顯示 SHIPMENT
+    cancel_mask = wip_norm.str.contains(r"cancel|cancell|取消", na=False)
+    shipment_mask = wip_norm.str.contains(r"shipment|已出貨|出貨完成", na=False)
 
     if subset_mode == "unshipped":
-        mask = (~shipped_mask) & (~cancel_mask)
-
-    elif subset_mode == "shipment_only_current_month":
-        local_ship_date_col = first_existing_column(source_df, ["出貨日期"] + SHIP_DATE_CANDIDATES)
-        ship_series = get_series_by_col(source_df, local_ship_date_col) if local_ship_date_col else None
-        ship_dt = safe_to_datetime(ship_series) if ship_series is not None else pd.Series(pd.NaT, index=source_df.index)
-
-        now = pd.Timestamp.today()
-        month_mask = ship_dt.notna() & (ship_dt.dt.year == now.year) & (ship_dt.dt.month == now.month)
-        mask = shipped_mask & (~cancel_mask) & month_mask
-
+        mask = (~shipment_mask) & (~cancel_mask)
     elif subset_mode == "shipment_only":
-        mask = shipped_mask & (~cancel_mask)
+        mask = shipment_mask & (~cancel_mask)
+
+        # 銷貨底只顯示當月出貨，避免抓到 2019 等舊資料
+        ship_series = get_series_by_col(source_df, ship_date_col) if 'ship_date_col' in globals() and ship_date_col else None
+        if ship_series is not None:
+            ship_dt = parse_mixed_date_series(ship_series)
+            current_month = pd.Timestamp.today().strftime("%Y-%m")
+            month_mask = ship_dt.dt.strftime("%Y-%m") == current_month
+            mask = mask & month_mask.fillna(False)
 
     return mask.fillna(False)
 
@@ -1910,10 +1890,8 @@ def render_teable_subset_table(
     else:
         if subset_mode == "unshipped":
             st.caption("資料來源：Teable 主表即時欄位（未出貨，已排除 SHIPMENT 及 Cancell）")
-        elif subset_mode == "shipment_only_current_month":
-            st.caption("資料來源：Teable 主表即時欄位（只顯示當月出貨 SHIPMENT，已排除 Cancell）")
         elif subset_mode == "shipment_only":
-            st.caption("資料來源：Teable 主表即時欄位（只顯示 SHIPMENT，已排除 Cancell）")
+            st.caption(f"資料來源：Teable 主表即時欄位（只顯示當月 SHIPMENT，已排除 Cancell）")
         else:
             st.caption("資料來源：Teable 主表即時欄位")
 
@@ -2264,7 +2242,7 @@ elif menu == "Sandy 銷貨底":
         specs=SANDY_SALES_BASE_SPECS,
         default_customer=None,
         csv_name="Sandy銷貨底.csv",
-        subset_mode="shipment_only_current_month",
+        subset_mode="shipment_only",
     )
 
 elif menu == "業績明細表":
