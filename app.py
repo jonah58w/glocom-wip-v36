@@ -14,7 +14,15 @@ import streamlit as st
 from PIL import Image
 import pytesseract
 
-from excel_exporter import generate_quote_excel_v2
+try:
+    from excel_exporter import generate_quote_excel_v2
+    EXCEL_EXPORTER_AVAILABLE = True
+except Exception:
+    EXCEL_EXPORTER_AVAILABLE = False
+
+    def generate_quote_excel_v2(*args, **kwargs):
+        raise ModuleNotFoundError("excel_exporter.py not found. Please upload/deploy excel_exporter.py in the same folder as app.py.")
+
 from factory_progress_updater import (
     dedupe_import_df_by_key,
     classify_and_update_factory_row,
@@ -1350,6 +1358,9 @@ def show_excel_quote_export():
     clear_factory = c1.checkbox("先清空工廠報價區", value=False, key="clear_factory_v2")
     clear_customer = c2.checkbox("先清空客戶報價區", value=False, key="clear_customer_v2")
     clear_notes = c3.checkbox("先清空 Notes 區", value=False, key="clear_notes_v2")
+
+    if not EXCEL_EXPORTER_AVAILABLE:
+        st.warning("找不到 excel_exporter.py，Excel 報價匯出功能暫時不可用；其他功能可正常使用。")
 
     if st.button("產生 Excel 報價檔", key="generate_excel_quote_v2"):
         try:
