@@ -1628,178 +1628,229 @@ def show_orders_table(df: pd.DataFrame):
     )
 
 
-LOCAL_PANEL_FILE_ALIASES = {
-    "新訂單WIP.xlsx": ["新訂單WIP.xlsx"],
-    "Sandy需要的內部WIP.xlsx": ["Sandy需要的內部WIP.xlsx", "Sandy內部WIP.xlsx", "內部WIP.xlsx"],
-    "Sandy需要的銷貨底.xlsx": ["Sandy需要的銷貨底.xlsx", "Sandy銷貨底.xlsx", "銷貨底.xlsx"],
-}
+
+def col_candidates(*names):
+    return [str(x).strip() for x in names if str(x).strip()]
 
 
-def render_panel_file_uploader(file_name: str, label: str):
-    st.info(f"尚未找到 {file_name}。請在此上傳後即可使用。")
-    uploaded = st.file_uploader(
-        f"上傳 {label}",
-        type=["xlsx", "xls"],
-        key=f"panel_upload::{file_name}",
-    )
-    if uploaded is not None:
-        st.success(f"已載入：{uploaded.name}")
-    return uploaded
+SANDY_NEW_ORDER_SPECS = [
+    ("客戶下單日期", col_candidates("客戶下單日期", "客戶下\n 單日期", "客戶下\n單日期")),
+    ("工廠下單日期", col_candidates("工廠下單日期", "工廠下\n 單日期", "工廠下\n單日期")),
+    ("客戶", CUSTOMER_CANDIDATES + ["Customer"]),
+    ("PO#", PO_CANDIDATES),
+    ("P/N", PART_CANDIDATES),
+    ("Order Q'TY (PCS)", QTY_CANDIDATES + ["Order Q'TY(PCS)", "Order QTY (PCS)"]),
+    ("Dock", col_candidates("Dock")),
+    ("Ship date", SHIP_DATE_CANDIDATES),
+    ("WIP", WIP_CANDIDATES),
+    ("工廠交期", FACTORY_DUE_CANDIDATES),
+    ("交期 (更改)", col_candidates("交期 (更改)", "交期(更改)", "交期\n (更改)", "交期\n(更改)")),
+    ("出貨日期", col_candidates("出貨日期")),
+    ("工廠", FACTORY_CANDIDATES),
+    ("工廠提醒事項", col_candidates("工廠提醒事項")),
+    ("併貨日期 (限內部使用)", col_candidates("併貨日期 (限內部使用)", "併貨日期\n (限內部使用)", "併貨日期\n(限內部使用)")),
+    ("情況", REMARK_CANDIDATES),
+    ("客戶要求注意事項", col_candidates("客戶要求注意事項")),
+    ("Ship to", col_candidates("Ship to")),
+    ("Ship via", col_candidates("Ship via", " Ship via")),
+    ("箱數", col_candidates("箱數", "CTNS", "CTN")),
+    ("重量", col_candidates("重量", "Weight", "KGs")),
+    ("重貨優惠", col_candidates("重貨優惠", "重貨\n優惠", "重貨\n 優惠")),
+    ("Working Gerber Approval", col_candidates("Working Gerber Approval", "Working\nGerber\nApproval", "Working\n Gerber\n Approval")),
+    ("Engineering Question", col_candidates("Engineering Question", "Engineering\nQuestion", "Engineering\n Question")),
+    ("Pricing & Qty issue", col_candidates("Pricing & Qty issue", "Pricing\n&\nQty issue", "Pricing\n &\n Qty issue")),
+    ("T/T", col_candidates("T/T")),
+    ("工廠出貨事項", col_candidates("工廠出貨事項", "工廠出貨注意事項")),
+    ("文件", col_candidates("文件")),
+    ("新/舊料號", col_candidates("新/舊料號", "新/舊\n料號")),
+    ("板層", col_candidates("板層", "板\n層")),
+    ("西拓訂單編號", col_candidates("西拓訂單編號", "西拓訂\n單編號")),
+]
+
+SANDY_INTERNAL_WIP_SPECS = [
+    ("Customer", CUSTOMER_CANDIDATES + ["Customer"]),
+    ("PO#", PO_CANDIDATES),
+    ("P/N", PART_CANDIDATES),
+    ("Q'TY (PCS)", QTY_CANDIDATES + ["Order QTY (PCS)"]),
+    ("Dock", col_candidates("Dock")),
+    ("Ship date", SHIP_DATE_CANDIDATES),
+    ("WIP", WIP_CANDIDATES),
+    ("出貨狀況 (限內部使用)", col_candidates("出貨狀況 (限內部使用)", "出貨狀況\n(限內部使用)")),
+    ("進度狀況", col_candidates("進度狀況", "進度\n狀況")),
+    ("工廠交期", FACTORY_DUE_CANDIDATES),
+    ("交期 (更改)", col_candidates("交期 (更改)", "交期(更改)", "交期\n (更改)", "交期\n(更改)")),
+    ("出貨日期", col_candidates("出貨日期")),
+    ("工廠", FACTORY_CANDIDATES),
+    ("工廠提醒事項", col_candidates("工廠提醒事項")),
+    ("併貨日期 (限內部使用)", col_candidates("併貨日期 (限內部使用)", "併貨日期\n (限內部使用)", "併貨日期\n(限內部使用)")),
+    ("客戶要求注意事項", col_candidates("客戶要求注意事項", "客戶要求\n注意事項")),
+    ("Ship to", col_candidates("Ship to")),
+    ("Ship via", col_candidates("Ship via", " Ship via")),
+    ("CTN", col_candidates("CTN", "CTNS", "箱數")),
+    ("KGs", col_candidates("KGs", "Weight", "重量")),
+    ("重貨優惠", col_candidates("重貨優惠", "重貨\n優惠", "重貨\n 優惠")),
+    ("物流 Booking", col_candidates("物流 Booking", "物流\nBooking", "物流 Booking")),
+    ("更改 Booking", col_candidates("更改 Booking", "更改\nBooking")),
+    ("工廠入倉單", col_candidates("工廠入倉單", "工廠\n入倉單")),
+    ("Working Gerber Approval", col_candidates("Working Gerber Approval", "Working\nGerber\nApproval", "Working\n Gerber\n Approval")),
+    ("Engineering Question", col_candidates("Engineering Question", "Engineering\nQuestion", "Engineering\n Question")),
+    ("Pricing & Qty issue", col_candidates("Pricing & Qty issue", "Pricing\n&\nQty issue", "Pricing\n &\n Qty issue")),
+    ("Ocean Handling Charge (FOB TW)", col_candidates("Ocean Handling Charge (FOB TW)", "Ocean\nHandling\nCharge (FOB TW)")),
+    ("T/T", col_candidates("T/T")),
+    ("Note", col_candidates("Note", "情況", "Remark", "備註")),
+    ("新/舊料號", col_candidates("新/舊料號", "新/舊\n料號")),
+    ("板層", col_candidates("板層", "板\n層")),
+    ("工廠出貨注意事項", col_candidates("工廠出貨注意事項", "工廠出貨事項", "工廠出貨\n注意事項")),
+    ("快遞出貨注意事項", col_candidates("快遞出貨注意事項", "快遞出貨\n注意事項")),
+    ("西拓訂單編號", col_candidates("西拓訂單編號", "西拓訂\n單編號")),
+    ("出貨報告", col_candidates("出貨報告", "出貨\n報告")),
+    ("MADE IN USA", col_candidates("MADE IN USA", "MADE\nIN USA", "MADE\nIN\nUSA")),
+    ("工廠重量", col_candidates("工廠重量", "工廠\n重量")),
+    ("文件", col_candidates("文件")),
+    ("包裝明細", col_candidates("包裝明細", "包裝\n明細")),
+    ("樣板需求", col_candidates("樣板需求", "樣板\n需求")),
+    ("發票", col_candidates("發票")),
+]
+
+SANDY_SALES_BASE_SPECS = [
+    ("客戶", CUSTOMER_CANDIDATES + ["Customer"]),
+    ("PO#", PO_CANDIDATES),
+    ("P/N", PART_CANDIDATES),
+    ("Order Q'TY (PCS)", QTY_CANDIDATES + ["Order QTY (PCS)"]),
+    ("Dock", col_candidates("Dock")),
+    ("Ship date", SHIP_DATE_CANDIDATES),
+    ("WIP", WIP_CANDIDATES),
+    ("工廠交期", FACTORY_DUE_CANDIDATES),
+    ("交期 (更改)", col_candidates("交期 (更改)", "交期(更改)", "交期\n (更改)", "交期\n(更改)")),
+    ("併貨日期 (限內部使用)", col_candidates("併貨日期 (限內部使用)", "併貨日期\n (限內部使用)", "併貨日期\n(限內部使用)")),
+    ("工廠", FACTORY_CANDIDATES),
+    ("Ship to", col_candidates("Ship to")),
+    ("Ship via", col_candidates("Ship via", " Ship via")),
+    ("Tracking No.", col_candidates("Tracking No.", "Tracking No")),
+    ("Note", col_candidates("Note", "情況", "Remark", "備註")),
+]
 
 
-def find_local_excel_path(file_name: str):
-    candidate_names = LOCAL_PANEL_FILE_ALIASES.get(file_name, [file_name])
-    base_dirs = [Path.cwd(), Path(__file__).resolve().parent, Path('/mnt/data')]
-    for base in base_dirs:
-        for candidate in candidate_names:
-            p = base / candidate
-            if p.exists():
-                return p
+def first_existing_column(df: pd.DataFrame, candidates):
+    for c in candidates:
+        if c in df.columns:
+            return c
     return None
 
 
-@st.cache_data(show_spinner=False)
-def load_local_excel_sheet_from_bytes(file_bytes: bytes, sheet_name: str, source_name: str):
-    import io
-    df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
-    df = normalize_columns(df)
-    df.columns = make_unique_columns(df.columns)
-    return df, source_name
+def build_teable_view_df(source_df: pd.DataFrame, specs):
+    view_df = pd.DataFrame(index=source_df.index)
+    mapping = {}
+    for out_name, candidates in specs:
+        src = first_existing_column(source_df, candidates)
+        mapping[out_name] = src
+        if src:
+            view_df[out_name] = source_df[src]
+        else:
+            view_df[out_name] = ""
+    view_df.columns = make_unique_columns(view_df.columns)
+    return view_df, mapping
 
 
-@st.cache_data(show_spinner=False)
-def load_local_excel_sheet(file_name: str, sheet_name: str):
-    target = find_local_excel_path(file_name)
-    if target is None:
-        raise FileNotFoundError(file_name)
+def apply_customer_filter(display_df: pd.DataFrame, customer_col_name: str, default_customer: str | None, key_prefix: str):
+    if customer_col_name not in display_df.columns:
+        return display_df
 
-    df = pd.read_excel(target, sheet_name=sheet_name)
-    df = normalize_columns(df)
-    df.columns = make_unique_columns(df.columns)
-    return df, str(target)
+    customer_values = sorted(
+        [str(x).strip() for x in display_df[customer_col_name].dropna().unique().tolist() if str(x).strip()]
+    )
+    if not customer_values:
+        return display_df
+
+    if default_customer and default_customer in customer_values:
+        default_index = customer_values.index(default_customer) + 1
+    else:
+        default_index = 0
+
+    selected_customer = st.selectbox(
+        "客戶篩選",
+        ["全部"] + customer_values,
+        index=default_index,
+        key=f"{key_prefix}_customer_filter",
+    )
+    if selected_customer != "全部":
+        display_df = display_df[
+            display_df[customer_col_name].astype(str).str.strip().str.lower()
+            == selected_customer.strip().lower()
+        ].copy()
+    return display_df
 
 
-def render_local_excel_table(
+def render_teable_subset_table(
     title: str,
-    file_name: str,
-    sheet_name: str,
-    default_customer: str | None = None,
+    source_df: pd.DataFrame,
+    specs,
+    default_customer: str | None = "WESCO",
     csv_name: str | None = None,
-    enable_filters: bool = True,
+    caption: str | None = None,
 ):
     st.subheader(title)
-    try:
-        df, source_path = load_local_excel_sheet(file_name, sheet_name)
-    except Exception:
-        uploaded = render_panel_file_uploader(file_name, title.replace("📄 ", ""))
-        if uploaded is None:
-            st.error(f"找不到 {file_name}。請將檔案放到 app.py 同層資料夾，或直接在此頁上傳。")
-            return
-        try:
-            df, source_path = load_local_excel_sheet_from_bytes(uploaded.getvalue(), sheet_name, uploaded.name)
-        except Exception as e:
-            st.error(f"無法讀取 {uploaded.name} / {sheet_name}：{e}")
-            return
+    if source_df is None or source_df.empty:
+        st.warning("Teable 主表目前沒有資料。")
+        return
 
-    st.caption(f"來源：{Path(source_path).name} / 工作表：{sheet_name}")
+    display_df, mapping = build_teable_view_df(source_df.copy(), specs)
+    if default_customer:
+        customer_display_col = "客戶" if "客戶" in display_df.columns else ("Customer" if "Customer" in display_df.columns else None)
+        if customer_display_col:
+            display_df = apply_customer_filter(display_df, customer_display_col, default_customer, title)
 
-    display_df = df.copy()
-
-    customer_candidates = ["客戶", "Customer"]
-    customer_sheet_col = None
-    for cc in customer_candidates:
-        if cc in display_df.columns:
-            customer_sheet_col = cc
-            break
-
-    if enable_filters and customer_sheet_col:
-        customer_values = sorted(
-            [str(x).strip() for x in display_df[customer_sheet_col].dropna().unique().tolist() if str(x).strip()]
-        )
-        if customer_values:
-            if default_customer and default_customer in customer_values:
-                default_index = customer_values.index(default_customer)
-            else:
-                default_index = 0
-            selected_customer = st.selectbox(
-                "客戶篩選",
-                ["全部"] + customer_values,
-                index=default_index + 1 if default_customer and default_customer in customer_values else 0,
-                key=f"{title}_customer_filter"
-            )
-            if selected_customer != "全部":
-                display_df = display_df[
-                    display_df[customer_sheet_col].astype(str).str.strip().str.lower()
-                    == selected_customer.strip().lower()
-                ].copy()
+    if caption:
+        st.caption(caption)
+    else:
+        st.caption("資料來源：Teable 主表即時欄位")
 
     st.dataframe(display_df, use_container_width=True, height=520)
-
-    download_name = csv_name or f"{sheet_name}.csv"
+    out_name = csv_name or f"{title}.csv"
     st.download_button(
-        f"下載 {sheet_name} CSV",
+        f"下載 {out_name}",
         data=display_df.to_csv(index=False).encode("utf-8-sig"),
-        file_name=download_name,
+        file_name=out_name,
         mime="text/csv",
-        key=f"download_{sheet_name}"
+        key=f"download_{title}"
     )
 
 
-def render_sales_detail_table():
+def render_sales_detail_from_teable(source_df: pd.DataFrame):
     st.subheader("📈 業績明細表")
-    try:
-        df, source_path = load_local_excel_sheet("Sandy需要的銷貨底.xlsx", "銷貨底")
-    except Exception:
-        uploaded = render_panel_file_uploader("Sandy需要的銷貨底.xlsx", "Sandy 銷貨底 / 業績明細表來源")
-        if uploaded is None:
-            st.error("找不到 Sandy需要的銷貨底.xlsx。請將檔案放到 app.py 同層資料夾，或直接在此頁上傳。")
-            return
-        try:
-            df, source_path = load_local_excel_sheet_from_bytes(uploaded.getvalue(), "銷貨底", uploaded.name)
-        except Exception as e:
-            st.error(f"無法讀取 {uploaded.name} / 銷貨底：{e}")
-            return
+    if source_df is None or source_df.empty:
+        st.warning("Teable 主表目前沒有資料。")
+        return
 
-    st.caption(f"來源：{Path(source_path).name} / 工作表：銷貨底")
-
-    display_df = df.copy()
-
-    customer_sheet_col = "客戶" if "客戶" in display_df.columns else ("Customer" if "Customer" in display_df.columns else None)
-    factory_sheet_col = "工廠" if "工廠" in display_df.columns else None
+    display_df, mapping = build_teable_view_df(source_df.copy(), SANDY_SALES_BASE_SPECS)
+    st.caption("資料來源：Teable 主表即時欄位")
 
     c1, c2 = st.columns(2)
-    if customer_sheet_col:
-        customer_values = sorted(
-            [str(x).strip() for x in display_df[customer_sheet_col].dropna().unique().tolist() if str(x).strip()]
-        )
-        selected_customer = c1.selectbox("客戶", ["全部"] + customer_values, key="sales_detail_customer")
+    if "客戶" in display_df.columns:
+        customer_values = sorted([str(x).strip() for x in display_df["客戶"].dropna().unique().tolist() if str(x).strip()])
+        default_index = customer_values.index("WESCO") + 1 if "WESCO" in customer_values else 0
+        selected_customer = c1.selectbox("客戶", ["全部"] + customer_values, index=default_index, key="sales_detail_customer_teable")
         if selected_customer != "全部":
             display_df = display_df[
-                display_df[customer_sheet_col].astype(str).str.strip().str.lower()
-                == selected_customer.strip().lower()
+                display_df["客戶"].astype(str).str.strip().str.lower() == selected_customer.strip().lower()
             ].copy()
 
-    if factory_sheet_col:
-        factory_values = sorted(
-            [str(x).strip() for x in display_df[factory_sheet_col].dropna().unique().tolist() if str(x).strip()]
-        )
-        selected_factory = c2.selectbox("工廠", ["全部"] + factory_values, key="sales_detail_factory")
+    if "工廠" in display_df.columns:
+        factory_values = sorted([str(x).strip() for x in display_df["工廠"].dropna().unique().tolist() if str(x).strip()])
+        selected_factory = c2.selectbox("工廠", ["全部"] + factory_values, key="sales_detail_factory_teable")
         if selected_factory != "全部":
             display_df = display_df[
-                display_df[factory_sheet_col].astype(str).str.strip().str.lower()
-                == selected_factory.strip().lower()
+                display_df["工廠"].astype(str).str.strip().str.lower() == selected_factory.strip().lower()
             ].copy()
 
     m1, m2 = st.columns(2)
     m1.metric("筆數", len(display_df))
-    qty_detail_col = None
-    for candidate in ["Order Q'TY (PCS)", "Order Q'TY\\n (PCS)", "Q'TY (PCS)", "QTY", "Qty"]:
-        if candidate in display_df.columns:
-            qty_detail_col = candidate
-            break
-    if qty_detail_col:
-        qty_series = pd.to_numeric(display_df[qty_detail_col], errors="coerce")
+    qty_col_name = "Order Q'TY (PCS)" if "Order Q'TY (PCS)" in display_df.columns else ("Q'TY (PCS)" if "Q'TY (PCS)" in display_df.columns else None)
+    if qty_col_name:
+        qty_series = pd.to_numeric(display_df[qty_col_name], errors="coerce")
         m2.metric("總數量", f"{int(qty_series.fillna(0).sum()):,}")
+    else:
+        m2.metric("總數量", "-")
 
     st.dataframe(display_df, use_container_width=True, height=520)
     st.download_button(
@@ -1807,8 +1858,9 @@ def render_sales_detail_table():
         data=display_df.to_csv(index=False).encode("utf-8-sig"),
         file_name="業績明細表.csv",
         mime="text/csv",
-        key="download_sales_detail_csv"
+        key="download_sales_detail_csv_teable"
     )
+
 
 # ================================
 # INTERNAL VIEWS
@@ -1856,37 +1908,34 @@ elif menu == "Orders":
     show_orders_table(filtered)
 
 elif menu == "新訂單WIP":
-    render_local_excel_table(
+    render_teable_subset_table(
         title="📄 新訂單WIP",
-        file_name="新訂單WIP.xlsx",
-        sheet_name="新訂單WIP",
+        source_df=orders,
+        specs=SANDY_NEW_ORDER_SPECS,
         default_customer="WESCO",
         csv_name="新訂單WIP.csv",
-        enable_filters=True,
     )
 
 elif menu == "Sandy 內部WIP":
-    render_local_excel_table(
+    render_teable_subset_table(
         title="📄 Sandy 內部WIP",
-        file_name="Sandy需要的內部WIP.xlsx",
-        sheet_name="內部WIP",
+        source_df=orders,
+        specs=SANDY_INTERNAL_WIP_SPECS,
         default_customer="WESCO",
         csv_name="Sandy內部WIP.csv",
-        enable_filters=True,
     )
 
 elif menu == "Sandy 銷貨底":
-    render_local_excel_table(
+    render_teable_subset_table(
         title="📄 Sandy 銷貨底",
-        file_name="Sandy需要的銷貨底.xlsx",
-        sheet_name="銷貨底",
+        source_df=orders,
+        specs=SANDY_SALES_BASE_SPECS,
         default_customer="WESCO",
         csv_name="Sandy銷貨底.csv",
-        enable_filters=True,
     )
 
 elif menu == "業績明細表":
-    render_sales_detail_table()
+    render_sales_detail_from_teable(orders)
 
 elif menu == "Customer Preview":
     st.subheader("Customer Preview")
