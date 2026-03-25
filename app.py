@@ -1901,8 +1901,7 @@ def find_amount_column(df: pd.DataFrame, candidates):
 
 
 def find_invoice_status_column(df: pd.DataFrame):
-    candidates = ["發票", "invoice status", "invoice_status", "已出貨+C:C
-Ｖ", "已出貨"]
+    candidates = ["發票", "invoice status", "invoice_status", "已出貨+C:CＶ", "已出貨"]
     return first_existing_column(df, candidates)
 
 
