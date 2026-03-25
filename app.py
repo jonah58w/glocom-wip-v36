@@ -786,50 +786,35 @@ def load_orders():
         return pd.DataFrame(), "NO_TOKEN", "TEABLE_TOKEN is empty"
 
     try:
-        all_rows = []
-        skip = 0
-        take = 1000
-        last_status = 200
-        last_text = ""
+        response = requests.get(
+            TABLE_URL,
+            headers=HEADERS,
+            params={
+                "fieldKeyType": "name",
+                "cellFormat": "text",
+                "take": 1000
+            },
+            timeout=30
+        )
 
-        while True:
-            response = requests.get(
-                TABLE_URL,
-                headers=HEADERS,
-                params={
-                    "fieldKeyType": "name",
-                    "cellFormat": "text",
-                    "take": take,
-                    "skip": skip,
-                },
-                timeout=30
-            )
+        status = response.status_code
+        text = response.text
 
-            last_status = response.status_code
-            last_text = response.text
+        if status != 200:
+            return pd.DataFrame(), status, text
 
-            if last_status != 200:
-                return pd.DataFrame(), last_status, last_text
+        data = response.json()
+        records = data.get("records", [])
 
-            data = response.json()
-            records = data.get("records", []) or []
+        rows = []
+        for rec in records:
+            fields = rec.get("fields", {})
+            fields["_record_id"] = rec.get("id", "")
+            rows.append(fields)
 
-            for rec in records:
-                fields = rec.get("fields", {}) or {}
-                fields["_record_id"] = rec.get("id", "")
-                all_rows.append(fields)
-
-            if len(records) < take:
-                break
-
-            skip += take
-
-            if skip > 20000:
-                break
-
-        df = pd.DataFrame(all_rows)
+        df = pd.DataFrame(rows)
         df = normalize_columns(df)
-        return df, last_status, last_text
+        return df, status, text
 
     except Exception as e:
         return pd.DataFrame(), "EXCEPTION", str(e)
@@ -1822,6 +1807,30 @@ def apply_customer_filter(display_df: pd.DataFrame, customer_col_name: str, defa
     return display_df
 
 
+def filter_subset_source_df(source_df: pd.DataFrame, mode: str = "all") -> pd.DataFrame:
+    df = source_df.copy()
+    if df.empty:
+        return df
+
+    local_wip_col = get_first_matching_column(df, WIP_CANDIDATES)
+    if not local_wip_col:
+        return df
+
+    wip_series = get_series_by_col(df, local_wip_col)
+    if wip_series is None:
+        return df
+
+    wip_norm = wip_series.fillna("").astype(str).str.strip().str.upper()
+
+    if mode == "exclude_shipment":
+        return df[~wip_norm.eq("SHIPMENT")].copy()
+
+    if mode == "only_shipment":
+        return df[wip_norm.eq("SHIPMENT")].copy()
+
+    return df
+
+
 def render_teable_subset_table(
     title: str,
     source_df: pd.DataFrame,
@@ -1829,13 +1838,19 @@ def render_teable_subset_table(
     default_customer: str | None = "WESCO",
     csv_name: str | None = None,
     caption: str | None = None,
+    source_filter_mode: str = "all",
 ):
     st.subheader(title)
     if source_df is None or source_df.empty:
         st.warning("Teable 主表目前沒有資料。")
         return
 
-    display_df, mapping = build_teable_view_df(source_df.copy(), specs)
+    filtered_source_df = filter_subset_source_df(source_df, mode=source_filter_mode)
+    if filtered_source_df.empty:
+        st.info("目前沒有符合條件的資料。")
+        return
+
+    display_df, mapping = build_teable_view_df(filtered_source_df.copy(), specs)
     if default_customer:
         customer_display_col = "客戶" if "客戶" in display_df.columns else ("Customer" if "Customer" in display_df.columns else None)
         if customer_display_col:
@@ -1844,7 +1859,12 @@ def render_teable_subset_table(
     if caption:
         st.caption(caption)
     else:
-        st.caption("資料來源：Teable 主表即時欄位")
+        if source_filter_mode == "exclude_shipment":
+            st.caption("資料來源：Teable 主表即時欄位（未出貨，已排除 SHIPMENT）")
+        elif source_filter_mode == "only_shipment":
+            st.caption("資料來源：Teable 主表即時欄位（僅顯示 SHIPMENT / 已出貨底表）")
+        else:
+            st.caption("資料來源：Teable 主表即時欄位")
 
     st.dataframe(display_df, use_container_width=True, height=520)
     out_name = csv_name or f"{title}.csv"
@@ -2149,6 +2169,7 @@ elif menu == "新訂單WIP":
         specs=SANDY_NEW_ORDER_SPECS,
         default_customer=None,
         csv_name="新訂單WIP.csv",
+        source_filter_mode="exclude_shipment",
     )
 
 elif menu == "Sandy 內部WIP":
@@ -2158,6 +2179,7 @@ elif menu == "Sandy 內部WIP":
         specs=SANDY_INTERNAL_WIP_SPECS,
         default_customer=None,
         csv_name="Sandy內部WIP.csv",
+        source_filter_mode="exclude_shipment",
     )
 
 elif menu == "Sandy 銷貨底":
@@ -2167,6 +2189,7 @@ elif menu == "Sandy 銷貨底":
         specs=SANDY_SALES_BASE_SPECS,
         default_customer=None,
         csv_name="Sandy銷貨底.csv",
+        source_filter_mode="only_shipment",
     )
 
 elif menu == "業績明細表":
