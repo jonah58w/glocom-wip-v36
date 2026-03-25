@@ -786,35 +786,55 @@ def load_orders():
         return pd.DataFrame(), "NO_TOKEN", "TEABLE_TOKEN is empty"
 
     try:
-        response = requests.get(
-            TABLE_URL,
-            headers=HEADERS,
-            params={
+        all_rows = []
+        page_token = None
+        last_status = 200
+        last_text = ""
+
+        while True:
+            params = {
                 "fieldKeyType": "name",
                 "cellFormat": "text",
-                "take": 1000
-            },
-            timeout=30
-        )
+                "take": 1000,
+            }
+            if page_token:
+                params["pageToken"] = page_token
 
-        status = response.status_code
-        text = response.text
+            response = requests.get(
+                TABLE_URL,
+                headers=HEADERS,
+                params=params,
+                timeout=30
+            )
 
-        if status != 200:
-            return pd.DataFrame(), status, text
+            last_status = response.status_code
+            last_text = response.text
 
-        data = response.json()
-        records = data.get("records", [])
+            if response.status_code != 200:
+                return pd.DataFrame(), response.status_code, response.text
 
-        rows = []
-        for rec in records:
-            fields = rec.get("fields", {})
-            fields["_record_id"] = rec.get("id", "")
-            rows.append(fields)
+            data = response.json()
+            records = data.get("records", []) or []
 
-        df = pd.DataFrame(rows)
+            for rec in records:
+                fields = rec.get("fields", {}) or {}
+                fields["_record_id"] = rec.get("id", "")
+                all_rows.append(fields)
+
+            page_token = (
+                data.get("pageToken")
+                or data.get("nextPageToken")
+                or data.get("next_page_token")
+                or None
+            )
+
+            # Stop when this page is smaller than take or no next token exists
+            if not page_token or len(records) < 1000:
+                break
+
+        df = pd.DataFrame(all_rows)
         df = normalize_columns(df)
-        return df, status, text
+        return df, last_status, last_text
 
     except Exception as e:
         return pd.DataFrame(), "EXCEPTION", str(e)
@@ -1816,16 +1836,41 @@ def normalize_status_text(series: pd.Series) -> pd.Series:
 def build_subset_mask(source_df: pd.DataFrame, subset_mode: str | None = None) -> pd.Series:
     mask = pd.Series(True, index=source_df.index)
 
-    wip_series = get_series_by_col(source_df, wip_col) if 'wip_col' in globals() else None
+    wip_series = get_series_by_col(source_df, wip_col) if 'wip_col' in globals() and wip_col else None
     wip_norm = normalize_status_text(wip_series) if wip_series is not None else pd.Series("", index=source_df.index)
 
-    cancel_mask = wip_norm.str.contains("cancel|cancell|取消", na=False)
-    shipment_mask = wip_norm.str.contains(r"shipment|出貨", na=False)
+    ship_date_series = get_series_by_col(source_df, ship_date_col) if 'ship_date_col' in globals() and ship_date_col else None
+    ship_date_text = normalize_status_text(ship_date_series) if ship_date_series is not None else pd.Series("", index=source_df.index)
+
+    shipment_status_col = first_existing_column(
+        source_df,
+        [
+            "出貨狀況 (限內部使用)",
+            "出貨狀況(限內部使用)",
+            "出貨狀況",
+            "出貨
+狀況",
+            "Shipment Status",
+        ]
+    )
+    shipment_status_series = get_series_by_col(source_df, shipment_status_col) if shipment_status_col else None
+    shipment_status_norm = normalize_status_text(shipment_status_series) if shipment_status_series is not None else pd.Series("", index=source_df.index)
+
+    cancel_mask = (
+        wip_norm.str.contains("cancel|cancell|取消", na=False)
+        | shipment_status_norm.str.contains("cancel|cancell|取消", na=False)
+    )
+
+    shipped_by_wip = wip_norm.str.contains(r"shipment|已出貨|出貨完成", na=False)
+    shipped_by_status = shipment_status_norm.str.contains(r"ship|shipped|已出貨|出貨完成", na=False)
+    shipped_by_date = ship_date_text.ne("") & ~ship_date_text.isin(["none", "nat", "nan"])
+
+    shipped_mask = shipped_by_wip | shipped_by_status | shipped_by_date
 
     if subset_mode == "unshipped":
-        mask = (~shipment_mask) & (~cancel_mask)
+        mask = (~shipped_mask) & (~cancel_mask)
     elif subset_mode == "shipment_only":
-        mask = shipment_mask & (~cancel_mask)
+        mask = shipped_mask & (~cancel_mask)
 
     return mask.fillna(False)
 
