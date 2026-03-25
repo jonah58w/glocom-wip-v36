@@ -14,7 +14,21 @@ import streamlit as st
 from PIL import Image
 import pytesseract
 
-from excel_exporter import generate_quote_excel_v2
+try:
+    from excel_exporter import generate_quote_excel_v2
+    EXCEL_EXPORTER_AVAILABLE = True
+except Exception:
+    EXCEL_EXPORTER_AVAILABLE = False
+
+    def generate_quote_excel_v2(*args, **kwargs):
+        raise ModuleNotFoundError("excel_exporter.py not found")
+from factory_progress_updater import (
+    dedupe_import_df_by_key,
+    classify_and_update_factory_row,
+    build_manual_review_item,
+    update_working_orders_local,
+    normalize_wip_value,
+)
 
 # ================================
 # PAGE CONFIG
@@ -401,219 +415,37 @@ def parse_factory_text_report(text: str) -> pd.DataFrame:
 # ================================
 # MATCH / NORMALIZE HELPERS
 # ================================
-def normalize_match_text(v):
-    s = safe_text(v).upper()
-    s = s.replace("－", "-").replace("—", "-")
-    s = re.sub(r"\s+", "", s)
-    return s
+# moved to factory_progress_updater.py: normalize_match_text
 
 
-def normalize_match_qty(v):
-    s = safe_text(v).replace(",", "")
-    if not s:
-        return None
-    try:
-        return int(float(s))
-    except Exception:
-        return None
+# moved to factory_progress_updater.py: normalize_match_qty
 
 
-def parse_mmdd_range_to_date(text: str):
-    s = safe_text(text)
-    m = re.search(r"(\d{2})(\d{2})\s*(?:=>|->|~|-|至)\s*(\d{2})(\d{2})", s)
-    if not m:
-        return None
-    try:
-        year = pd.Timestamp.today().year
-        mm = int(m.group(3))
-        dd = int(m.group(4))
-        return pd.Timestamp(year=year, month=mm, day=dd).strftime("%Y-%m-%d")
-    except Exception:
-        return None
+# moved to factory_progress_updater.py: parse_mmdd_range_to_date
 
 
-def normalize_match_date(v):
-    text = safe_text(v)
-    if not text:
-        return None
-
-    special = parse_mmdd_range_to_date(text)
-    if special:
-        return special
-
-    for candidate in [text.replace(".", "/"), text]:
-        try:
-            dt = pd.to_datetime(candidate, errors="coerce")
-            if not pd.isna(dt):
-                return dt.strftime("%Y-%m-%d")
-        except Exception:
-            pass
-
-    m = re.search(r"\b(\d{1,2})/(\d{1,2})\b", text)
-    if m:
-        try:
-            year = pd.Timestamp.today().year
-            mm = int(m.group(1))
-            dd = int(m.group(2))
-            return pd.Timestamp(year=year, month=mm, day=dd).strftime("%Y-%m-%d")
-        except Exception:
-            pass
-
-    return None
+# moved to factory_progress_updater.py: normalize_match_date
 
 
-def normalize_part_no(v):
-    s = safe_text(v)
-    s = re.sub(r"\s*\([^)]*\)\s*$", "", s).strip()
-    return normalize_match_text(s)
+# moved to factory_progress_updater.py: normalize_part_no
 
 
-def normalize_wip_value(value: str) -> str:
-    text = safe_text(value)
-    if not text:
-        return ""
-    if text.upper() in DONE_WIP_VALUES or text in DONE_WIP_VALUES:
-        return "完成"
-    return text
+# moved to factory_progress_updater.py: normalize_wip_value
 
 
-def build_record_for_match(po_value="", part_value="", qty_value="", due_value="", record_id="", source_row=None):
-    return {
-        "_record_id": record_id,
-        "po": normalize_match_text(po_value),
-        "part_no": normalize_part_no(part_value),
-        "qty": normalize_match_qty(qty_value),
-        "factory_due_date": normalize_match_date(due_value),
-        "_source_row": source_row,
-    }
+# moved to factory_progress_updater.py: build_record_for_match
 
 
-def match_score(imported_rec, existing_rec):
-    score = 0
-    matched_fields = []
-
-    if imported_rec["po"] and existing_rec["po"] and imported_rec["po"] == existing_rec["po"]:
-        score += 1
-        matched_fields.append("PO#")
-
-    if imported_rec["part_no"] and existing_rec["part_no"] and imported_rec["part_no"] == existing_rec["part_no"]:
-        score += 1
-        matched_fields.append("Part No")
-
-    if imported_rec["qty"] is not None and existing_rec["qty"] is not None and imported_rec["qty"] == existing_rec["qty"]:
-        score += 1
-        matched_fields.append("Qty")
-
-    if imported_rec["factory_due_date"] and existing_rec["factory_due_date"] and imported_rec["factory_due_date"] == existing_rec["factory_due_date"]:
-        score += 1
-        matched_fields.append("Factory Due Date")
-
-    return score, matched_fields
+# moved to factory_progress_updater.py: match_score
 
 
-def build_teable_match_records(current_df, teable_po_col, teable_part_col, teable_qty_col, teable_factory_due_col):
-    results = []
-
-    if current_df.empty:
-        return results
-
-    for _, row in current_df.iterrows():
-        rec = build_record_for_match(
-            po_value=row.get(teable_po_col, "") if teable_po_col else "",
-            part_value=row.get(teable_part_col, "") if teable_part_col else "",
-            qty_value=row.get(teable_qty_col, "") if teable_qty_col else "",
-            due_value=row.get(teable_factory_due_col, "") if teable_factory_due_col else "",
-            record_id=row.get("_record_id", ""),
-            source_row=row
-        )
-        results.append(rec)
-
-    return results
+# moved to factory_progress_updater.py: build_teable_match_records
 
 
-def find_best_match_by_4fields(imported_rec, teable_match_records):
-    scored = []
-
-    for rec in teable_match_records:
-        score, matched_fields = match_score(imported_rec, rec)
-        if score > 0:
-            scored.append({
-                "record": rec,
-                "score": score,
-                "matched_fields": matched_fields
-            })
-
-    if not scored:
-        return {
-            "status": "manual_review",
-            "target": None,
-            "score": 0,
-            "matched_fields": [],
-            "candidates": []
-        }
-
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    best_score = scored[0]["score"]
-    best_list = [x for x in scored if x["score"] == best_score]
-
-    if best_score >= 3 and len(best_list) == 1:
-        return {
-            "status": "matched",
-            "target": best_list[0]["record"],
-            "score": best_score,
-            "matched_fields": best_list[0]["matched_fields"],
-            "candidates": best_list
-        }
-
-    return {
-        "status": "manual_review",
-        "target": None,
-        "score": best_score,
-        "matched_fields": best_list[0]["matched_fields"] if best_list else [],
-        "candidates": best_list
-    }
+# moved to factory_progress_updater.py: find_best_match_by_4fields
 
 
-def dedupe_import_df_by_key(import_df: pd.DataFrame, import_po_col: str | None, import_part_col: str | None, import_qty_col: str | None, import_factory_due_col: str | None):
-    if import_df.empty:
-        return import_df.copy(), []
-
-    deduped_rows = []
-    duplicate_keys = []
-    seen = set()
-
-    for _, row in import_df.iterrows():
-        key = (
-            normalize_match_text(row.get(import_po_col, "") if import_po_col else ""),
-            normalize_part_no(row.get(import_part_col, "") if import_part_col else ""),
-            normalize_match_qty(row.get(import_qty_col, "") if import_qty_col else ""),
-            normalize_match_date(row.get(import_factory_due_col, "") if import_factory_due_col else "")
-        )
-
-        usable_fields = sum([
-            bool(key[0]),
-            bool(key[1]),
-            key[2] is not None,
-            bool(key[3]),
-        ])
-
-        if usable_fields < 3:
-            deduped_rows.append(row)
-            continue
-
-        if key in seen:
-            duplicate_keys.append(key)
-            continue
-
-        seen.add(key)
-        deduped_rows.append(row)
-
-    if deduped_rows:
-        deduped_df = pd.DataFrame(deduped_rows).reset_index(drop=True)
-    else:
-        deduped_df = import_df.iloc[0:0].copy()
-
-    return deduped_df, duplicate_keys
+# moved to factory_progress_updater.py: dedupe_import_df_by_key
 
 # ================================
 # OCR HELPERS
@@ -955,6 +787,7 @@ def load_orders():
 
     try:
         all_rows = []
+        seen_tokens = set()
         page_token = None
         last_status = 200
         last_text = ""
@@ -963,7 +796,7 @@ def load_orders():
             params = {
                 "fieldKeyType": "name",
                 "cellFormat": "text",
-                "take": 1000,
+                "take": 5000,
             }
             if page_token:
                 params["pageToken"] = page_token
@@ -992,12 +825,14 @@ def load_orders():
                 data.get("pageToken")
                 or data.get("nextPageToken")
                 or data.get("next_page_token")
+                or data.get("pagination", {}).get("nextPageToken")
                 or None
             )
 
-            if not next_token or len(records) < 1000:
+            if not next_token or next_token in seen_tokens or len(records) < 5000:
                 break
 
+            seen_tokens.add(next_token)
             page_token = next_token
 
         df = pd.DataFrame(all_rows)
@@ -1059,213 +894,16 @@ def upsert_to_teable(current_df: pd.DataFrame, po_col_name: str, po_value: str, 
         return False, str(e)
 
 
-def patch_record_by_id(record_id: str, payload_fields: dict):
-    try:
-        r = requests.patch(
-            f"{TABLE_URL}/{record_id}",
-            headers=HEADERS,
-            json={"record": {"fields": payload_fields}},
-            timeout=30
-        )
-        if r.status_code in (200, 201):
-            return True, r.text
-        return False, f"{r.status_code} | {r.text}"
-    except Exception as e:
-        return False, str(e)
+# moved to factory_progress_updater.py: patch_record_by_id
 
 
-def update_working_orders_local(working_orders: pd.DataFrame, record_id: str, payload_fields: dict):
-    if working_orders.empty or "_record_id" not in working_orders.columns:
-        return working_orders
-
-    mask = working_orders["_record_id"].astype(str) == str(record_id)
-    if not mask.any():
-        return working_orders
-
-    for field_name, field_value in payload_fields.items():
-        if field_name not in working_orders.columns:
-            working_orders[field_name] = ""
-        working_orders.loc[mask, field_name] = field_value
-
-    return working_orders
+# moved to factory_progress_updater.py: update_working_orders_local
 
 
-def classify_and_update_factory_row(
-    current_df: pd.DataFrame,
-    teable_po_col: str | None,
-    teable_part_col: str | None,
-    teable_qty_col: str | None,
-    teable_wip_col: str | None,
-    teable_customer_col: str | None,
-    teable_ship_date_col: str | None,
-    teable_factory_due_col: str | None,
-    teable_remark_col: str | None,
-    teable_tag_col: str | None,
-    import_row,
-    import_po_col: str | None,
-    import_part_col: str | None,
-    import_qty_col: str | None,
-    import_wip_col: str | None,
-    import_customer_col: str | None,
-    import_ship_col: str | None,
-    import_factory_due_col: str | None,
-    import_remark_col: str | None,
-    import_tag_col: str | None,
-):
-    po_value = safe_text(import_row.get(import_po_col, "")) if import_po_col else ""
-    part_value = safe_text(import_row.get(import_part_col, "")) if import_part_col else ""
-    qty_value = safe_text(import_row.get(import_qty_col, "")) if import_qty_col else ""
-    due_value = safe_text(import_row.get(import_factory_due_col, "")) if import_factory_due_col else ""
-    wip_value = normalize_wip_value(safe_text(import_row.get(import_wip_col, ""))) if import_wip_col else ""
-
-    customer_value = safe_text(import_row.get(import_customer_col, "")) if import_customer_col else ""
-    ship_value = safe_text(import_row.get(import_ship_col, "")) if import_ship_col else ""
-    remark_value = safe_text(import_row.get(import_remark_col, "")) if import_remark_col else ""
-    raw_tags = import_row.get(import_tag_col, "") if import_tag_col else ""
-    tags_value = raw_tags if isinstance(raw_tags, list) else parse_tags_from_text(raw_tags)
-
-    imported_rec = build_record_for_match(
-        po_value=po_value,
-        part_value=part_value,
-        qty_value=qty_value,
-        due_value=due_value,
-    )
-
-    present_count = sum([
-        bool(imported_rec["po"]),
-        bool(imported_rec["part_no"]),
-        imported_rec["qty"] is not None,
-        bool(imported_rec["factory_due_date"]),
-    ])
-
-    if present_count < 3:
-        return {
-            "success": False,
-            "action": "MANUAL_REVIEW",
-            "message": "匯入資料可用比對欄位不足 3 項",
-            "payload_fields": {},
-            "match_info": {
-                "score": present_count,
-                "matched_fields": [],
-                "candidates": []
-            }
-        }
-
-    teable_match_records = build_teable_match_records(
-        current_df=current_df,
-        teable_po_col=teable_po_col,
-        teable_part_col=teable_part_col,
-        teable_qty_col=teable_qty_col,
-        teable_factory_due_col=teable_factory_due_col,
-    )
-
-    match_result = find_best_match_by_4fields(imported_rec, teable_match_records)
-
-    if match_result["status"] != "matched":
-        return {
-            "success": False,
-            "action": "MANUAL_REVIEW",
-            "message": "比對不足 3 項相同，或有多筆候選",
-            "payload_fields": {},
-            "match_info": match_result
-        }
-
-    target = match_result["target"]
-    record_id = target.get("_record_id", "")
-    if not record_id:
-        return {
-            "success": False,
-            "action": "MANUAL_REVIEW",
-            "message": "找到候選但 record_id 缺失",
-            "payload_fields": {},
-            "match_info": match_result
-        }
-
-    payload_fields = {}
-    if teable_wip_col and wip_value:
-        payload_fields[teable_wip_col] = wip_value
-    if teable_customer_col and customer_value:
-        payload_fields[teable_customer_col] = customer_value
-    if teable_ship_date_col and ship_value:
-        payload_fields[teable_ship_date_col] = ship_value
-    if teable_factory_due_col and due_value:
-        payload_fields[teable_factory_due_col] = due_value
-    if teable_remark_col and remark_value:
-        payload_fields[teable_remark_col] = remark_value
-    if teable_tag_col and tags_value:
-        payload_fields[teable_tag_col] = build_tags_value(tags_value)
-
-    if not payload_fields:
-        return {
-            "success": False,
-            "action": "SKIP",
-            "message": "沒有可更新欄位",
-            "payload_fields": {},
-            "match_info": match_result
-        }
-
-    success, msg = patch_record_by_id(record_id, payload_fields)
-
-    return {
-        "success": success,
-        "action": "UPDATED" if success else "FAILED",
-        "message": msg if success else f"更新失敗: {msg}",
-        "payload_fields": payload_fields,
-        "match_info": match_result,
-        "record_id": record_id
-    }
+# moved to factory_progress_updater.py: classify_and_update_factory_row
 
 
-def build_manual_review_item(
-    import_row,
-    import_po_col,
-    import_part_col,
-    import_qty_col,
-    import_factory_due_col,
-    import_wip_col,
-    import_remark_col,
-    match_info,
-    reason,
-    teable_po_col,
-    teable_part_col,
-    teable_qty_col,
-    teable_factory_due_col,
-    teable_wip_col,
-):
-    po_value = safe_text(import_row.get(import_po_col, "")) if import_po_col else ""
-    part_value = safe_text(import_row.get(import_part_col, "")) if import_part_col else ""
-    qty_value = safe_text(import_row.get(import_qty_col, "")) if import_qty_col else ""
-    due_value = safe_text(import_row.get(import_factory_due_col, "")) if import_factory_due_col else ""
-    wip_value = safe_text(import_row.get(import_wip_col, "")) if import_wip_col else ""
-    remark_value = safe_text(import_row.get(import_remark_col, "")) if import_remark_col else ""
-
-    candidate_desc = []
-    for c in match_info.get("candidates", [])[:5]:
-        rec = c.get("record", {})
-        src_row = rec.get("_source_row")
-        candidate_desc.append({
-            "record_id": rec.get("_record_id", ""),
-            "score": c.get("score", 0),
-            "matched_fields": ", ".join(c.get("matched_fields", [])),
-            "PO#": safe_text(src_row.get(teable_po_col, "")) if src_row is not None and teable_po_col else "",
-            "Part No": safe_text(src_row.get(teable_part_col, "")) if src_row is not None and teable_part_col else "",
-            "Qty": safe_text(src_row.get(teable_qty_col, "")) if src_row is not None and teable_qty_col else "",
-            "Factory Due Date": safe_text(src_row.get(teable_factory_due_col, "")) if src_row is not None and teable_factory_due_col else "",
-            "WIP": safe_text(src_row.get(teable_wip_col, "")) if src_row is not None and teable_wip_col else "",
-        })
-
-    return {
-        "PO#": po_value,
-        "Part No": part_value,
-        "Qty": qty_value,
-        "Factory Due Date": due_value,
-        "New WIP": wip_value,
-        "Remark": remark_value,
-        "Reason": reason,
-        "Best Score": match_info.get("score", 0),
-        "Matched Fields": ", ".join(match_info.get("matched_fields", [])),
-        "Candidates": candidate_desc,
-    }
+# moved to factory_progress_updater.py: build_manual_review_item
 
 # ================================
 # EXCEL EXPORT HELPERS
@@ -1885,9 +1523,12 @@ menu = st.sidebar.radio(
         "Delayed Orders",
         "Shipment Forecast",
         "Orders",
+        "新訂單WIP",
+        "Sandy 內部WIP",
+        "Sandy 銷貨底",
+        "業績明細表",
         "Customer Preview",
         "Import / Update",
-        "Excel Quote Export",
     ]
 )
 
@@ -1981,17 +1622,575 @@ def show_shipment_forecast(df: pd.DataFrame):
         st.info("No ship date column")
 
 
+def make_unique_columns(columns):
+    seen = {}
+    new_cols = []
+    for col in columns:
+        col = str(col)
+        if col not in seen:
+            seen[col] = 0
+            new_cols.append(col)
+        else:
+            seen[col] += 1
+            new_cols.append(f"{col}_{seen[col]}")
+    return new_cols
+
+
 def show_orders_table(df: pd.DataFrame):
     st.subheader("📋 Orders")
-    st.dataframe(df, use_container_width=True, height=520)
+    display_df = df.copy()
+    display_df.columns = make_unique_columns(display_df.columns)
+    st.dataframe(display_df, use_container_width=True, height=520)
 
-    csv_data = df.to_csv(index=False).encode("utf-8-sig")
+    csv_data = display_df.to_csv(index=False).encode("utf-8-sig")
     st.download_button(
         "Download Orders CSV",
         data=csv_data,
         file_name="glocom_orders.csv",
         mime="text/csv"
     )
+
+
+
+def col_candidates(*names):
+    return [str(x).strip() for x in names if str(x).strip()]
+
+
+SANDY_NEW_ORDER_SPECS = [
+    ("客戶下單日期", col_candidates("客戶下單日期", "客戶下\n 單日期", "客戶下\n單日期")),
+    ("工廠下單日期", col_candidates("工廠下單日期", "工廠下\n 單日期", "工廠下\n單日期")),
+    ("客戶", CUSTOMER_CANDIDATES + ["Customer"]),
+    ("PO#", PO_CANDIDATES),
+    ("P/N", PART_CANDIDATES),
+    ("Order Q'TY (PCS)", QTY_CANDIDATES + ["Order Q'TY(PCS)", "Order QTY (PCS)"]),
+    ("Dock", col_candidates("Dock")),
+    ("Ship date", SHIP_DATE_CANDIDATES),
+    ("WIP", WIP_CANDIDATES),
+    ("工廠交期", FACTORY_DUE_CANDIDATES),
+    ("交期 (更改)", col_candidates("交期 (更改)", "交期(更改)", "交期\n (更改)", "交期\n(更改)")),
+    ("出貨日期", col_candidates("出貨日期")),
+    ("工廠", FACTORY_CANDIDATES),
+    ("工廠提醒事項", col_candidates("工廠提醒事項")),
+    ("併貨日期 (限內部使用)", col_candidates("併貨日期 (限內部使用)", "併貨日期\n (限內部使用)", "併貨日期\n(限內部使用)")),
+    ("情況", REMARK_CANDIDATES),
+    ("客戶要求注意事項", col_candidates("客戶要求注意事項")),
+    ("Ship to", col_candidates("Ship to")),
+    ("Ship via", col_candidates("Ship via", " Ship via")),
+    ("箱數", col_candidates("箱數", "CTNS", "CTN")),
+    ("重量", col_candidates("重量", "Weight", "KGs")),
+    ("重貨優惠", col_candidates("重貨優惠", "重貨\n優惠", "重貨\n 優惠")),
+    ("Working Gerber Approval", col_candidates("Working Gerber Approval", "Working\nGerber\nApproval", "Working\n Gerber\n Approval")),
+    ("Engineering Question", col_candidates("Engineering Question", "Engineering\nQuestion", "Engineering\n Question")),
+    ("Pricing & Qty issue", col_candidates("Pricing & Qty issue", "Pricing\n&\nQty issue", "Pricing\n &\n Qty issue")),
+    ("T/T", col_candidates("T/T")),
+    ("工廠出貨事項", col_candidates("工廠出貨事項", "工廠出貨注意事項")),
+    ("文件", col_candidates("文件")),
+    ("新/舊料號", col_candidates("新/舊料號", "新/舊\n料號")),
+    ("板層", col_candidates("板層", "板\n層")),
+    ("西拓訂單編號", col_candidates("西拓訂單編號", "西拓訂\n單編號")),
+]
+
+SANDY_INTERNAL_WIP_SPECS = [
+    ("Customer", CUSTOMER_CANDIDATES + ["Customer"]),
+    ("PO#", PO_CANDIDATES),
+    ("P/N", PART_CANDIDATES),
+    ("Q'TY (PCS)", QTY_CANDIDATES + ["Order QTY (PCS)"]),
+    ("Dock", col_candidates("Dock")),
+    ("Ship date", SHIP_DATE_CANDIDATES),
+    ("WIP", WIP_CANDIDATES),
+    ("出貨狀況 (限內部使用)", col_candidates("出貨狀況 (限內部使用)", "出貨狀況\n(限內部使用)")),
+    ("進度狀況", col_candidates("進度狀況", "進度\n狀況")),
+    ("工廠交期", FACTORY_DUE_CANDIDATES),
+    ("交期 (更改)", col_candidates("交期 (更改)", "交期(更改)", "交期\n (更改)", "交期\n(更改)")),
+    ("出貨日期", col_candidates("出貨日期")),
+    ("工廠", FACTORY_CANDIDATES),
+    ("工廠提醒事項", col_candidates("工廠提醒事項")),
+    ("併貨日期 (限內部使用)", col_candidates("併貨日期 (限內部使用)", "併貨日期\n (限內部使用)", "併貨日期\n(限內部使用)")),
+    ("客戶要求注意事項", col_candidates("客戶要求注意事項", "客戶要求\n注意事項")),
+    ("Ship to", col_candidates("Ship to")),
+    ("Ship via", col_candidates("Ship via", " Ship via")),
+    ("CTN", col_candidates("CTN", "CTNS", "箱數")),
+    ("KGs", col_candidates("KGs", "Weight", "重量")),
+    ("重貨優惠", col_candidates("重貨優惠", "重貨\n優惠", "重貨\n 優惠")),
+    ("物流 Booking", col_candidates("物流 Booking", "物流\nBooking", "物流 Booking")),
+    ("更改 Booking", col_candidates("更改 Booking", "更改\nBooking")),
+    ("工廠入倉單", col_candidates("工廠入倉單", "工廠\n入倉單")),
+    ("Working Gerber Approval", col_candidates("Working Gerber Approval", "Working\nGerber\nApproval", "Working\n Gerber\n Approval")),
+    ("Engineering Question", col_candidates("Engineering Question", "Engineering\nQuestion", "Engineering\n Question")),
+    ("Pricing & Qty issue", col_candidates("Pricing & Qty issue", "Pricing\n&\nQty issue", "Pricing\n &\n Qty issue")),
+    ("Ocean Handling Charge (FOB TW)", col_candidates("Ocean Handling Charge (FOB TW)", "Ocean\nHandling\nCharge (FOB TW)")),
+    ("T/T", col_candidates("T/T")),
+    ("Note", col_candidates("Note", "情況", "Remark", "備註")),
+    ("新/舊料號", col_candidates("新/舊料號", "新/舊\n料號")),
+    ("板層", col_candidates("板層", "板\n層")),
+    ("工廠出貨注意事項", col_candidates("工廠出貨注意事項", "工廠出貨事項", "工廠出貨\n注意事項")),
+    ("快遞出貨注意事項", col_candidates("快遞出貨注意事項", "快遞出貨\n注意事項")),
+    ("西拓訂單編號", col_candidates("西拓訂單編號", "西拓訂\n單編號")),
+    ("出貨報告", col_candidates("出貨報告", "出貨\n報告")),
+    ("MADE IN USA", col_candidates("MADE IN USA", "MADE\nIN USA", "MADE\nIN\nUSA")),
+    ("工廠重量", col_candidates("工廠重量", "工廠\n重量")),
+    ("文件", col_candidates("文件")),
+    ("包裝明細", col_candidates("包裝明細", "包裝\n明細")),
+    ("樣板需求", col_candidates("樣板需求", "樣板\n需求")),
+    ("發票", col_candidates("發票")),
+]
+
+SANDY_SALES_BASE_SPECS = [
+    ("客戶", CUSTOMER_CANDIDATES + ["Customer"]),
+    ("PO#", PO_CANDIDATES),
+    ("P/N", PART_CANDIDATES),
+    ("Order Q'TY (PCS)", QTY_CANDIDATES + ["Order QTY (PCS)"]),
+    ("Dock", col_candidates("Dock")),
+    ("Ship date", SHIP_DATE_CANDIDATES),
+    ("WIP", WIP_CANDIDATES),
+    ("工廠交期", FACTORY_DUE_CANDIDATES),
+    ("交期 (更改)", col_candidates("交期 (更改)", "交期(更改)", "交期\n (更改)", "交期\n(更改)")),
+    ("併貨日期 (限內部使用)", col_candidates("併貨日期 (限內部使用)", "併貨日期\n (限內部使用)", "併貨日期\n(限內部使用)")),
+    ("工廠", FACTORY_CANDIDATES),
+    ("Ship to", col_candidates("Ship to")),
+    ("Ship via", col_candidates("Ship via", " Ship via")),
+    ("Tracking No.", col_candidates("Tracking No.", "Tracking No")),
+    ("Note", col_candidates("Note", "情況", "Remark", "備註")),
+]
+
+
+def normalize_col_key(col_name):
+    s = str(col_name or "")
+    s = s.replace("\n", "")
+    s = re.sub(r"\s+", "", s)
+    return s.strip().lower()
+
+
+def first_existing_column(df: pd.DataFrame, candidates):
+    # exact match first
+    for c in candidates:
+        if c in df.columns:
+            return c
+    # normalized/fuzzy match to survive newline/space variants
+    normalized_map = {}
+    for col in df.columns:
+        key = normalize_col_key(col)
+        if key not in normalized_map:
+            normalized_map[key] = col
+    for c in candidates:
+        key = normalize_col_key(c)
+        if key in normalized_map:
+            return normalized_map[key]
+    return None
+
+
+def first_existing_series(df: pd.DataFrame, candidates):
+    src = first_existing_column(df, candidates)
+    if not src:
+        return None, None
+    series = get_series_by_col(df, src)
+    return src, series
+
+
+def build_teable_view_df(source_df: pd.DataFrame, specs):
+    view_df = pd.DataFrame(index=source_df.index)
+    mapping = {}
+    for out_name, candidates in specs:
+        src, series = first_existing_series(source_df, candidates)
+        mapping[out_name] = src
+        if series is not None:
+            view_df[out_name] = series
+        else:
+            view_df[out_name] = ""
+    view_df.columns = make_unique_columns(view_df.columns)
+    return view_df, mapping
+
+
+def apply_customer_filter(display_df: pd.DataFrame, customer_col_name: str, default_customer: str | None, key_prefix: str):
+    if customer_col_name not in display_df.columns:
+        return display_df
+
+    customer_values = sorted(
+        [str(x).strip() for x in display_df[customer_col_name].dropna().unique().tolist() if str(x).strip()]
+    )
+    if not customer_values:
+        return display_df
+
+    if default_customer and default_customer in customer_values:
+        default_index = customer_values.index(default_customer) + 1
+    else:
+        default_index = 0
+
+    selected_customer = st.selectbox(
+        "客戶篩選",
+        ["全部"] + customer_values,
+        index=default_index,
+        key=f"{key_prefix}_customer_filter",
+    )
+    if selected_customer != "全部":
+        display_df = display_df[
+            display_df[customer_col_name].astype(str).str.strip().str.lower()
+            == selected_customer.strip().lower()
+        ].copy()
+    return display_df
+
+
+def normalize_status_text(series: pd.Series) -> pd.Series:
+    if series is None:
+        return pd.Series("", index=pd.RangeIndex(0))
+    return series.fillna("").astype(str).str.strip().str.lower()
+
+
+def build_subset_mask(source_df: pd.DataFrame, subset_mode: str | None = None) -> pd.Series:
+    mask = pd.Series(True, index=source_df.index)
+
+    wip_series = get_series_by_col(source_df, wip_col) if 'wip_col' in globals() and wip_col else None
+    wip_norm = normalize_status_text(wip_series) if wip_series is not None else pd.Series("", index=source_df.index)
+
+    shipment_status_col = first_existing_column(
+        source_df,
+        [
+            "出貨狀況 (限內部使用)",
+            "出貨狀況(限內部使用)",
+            "出貨狀況",
+            "Shipment Status",
+        ]
+    )
+    shipment_status_series = get_series_by_col(source_df, shipment_status_col) if shipment_status_col else None
+    shipment_status_norm = normalize_status_text(shipment_status_series) if shipment_status_series is not None else pd.Series("", index=source_df.index)
+
+    cancel_mask = (
+        wip_norm.str.contains(r"cancel|cancell|取消", na=False)
+        | shipment_status_norm.str.contains(r"cancel|cancell|取消", na=False)
+    )
+
+    shipped_by_wip = wip_norm.str.contains(r"shipment|已出貨|出貨完成", na=False)
+    shipped_by_status = shipment_status_norm.str.contains(r"shipped|shipment|已出貨|出貨完成", na=False)
+    shipped_mask = shipped_by_wip | shipped_by_status
+
+    if subset_mode == "unshipped":
+        mask = (~shipped_mask) & (~cancel_mask)
+
+    elif subset_mode == "shipment_only_current_month":
+        local_ship_date_col = first_existing_column(source_df, ["出貨日期"] + SHIP_DATE_CANDIDATES)
+        ship_series = get_series_by_col(source_df, local_ship_date_col) if local_ship_date_col else None
+        ship_dt = safe_to_datetime(ship_series) if ship_series is not None else pd.Series(pd.NaT, index=source_df.index)
+
+        now = pd.Timestamp.today()
+        month_mask = ship_dt.notna() & (ship_dt.dt.year == now.year) & (ship_dt.dt.month == now.month)
+        mask = shipped_mask & (~cancel_mask) & month_mask
+
+    elif subset_mode == "shipment_only":
+        mask = shipped_mask & (~cancel_mask)
+
+    return mask.fillna(False)
+
+
+def render_teable_subset_table(
+    title: str,
+    source_df: pd.DataFrame,
+    specs,
+    default_customer: str | None = None,
+    csv_name: str | None = None,
+    caption: str | None = None,
+    subset_mode: str | None = None,
+):
+    st.subheader(title)
+    if source_df is None or source_df.empty:
+        st.warning("Teable 主表目前沒有資料。")
+        return
+
+    filtered_source = source_df.copy()
+    if subset_mode:
+        filtered_source = filtered_source[build_subset_mask(filtered_source, subset_mode)].copy()
+
+    display_df, mapping = build_teable_view_df(filtered_source, specs)
+    if default_customer:
+        customer_display_col = "客戶" if "客戶" in display_df.columns else ("Customer" if "Customer" in display_df.columns else None)
+        if customer_display_col:
+            display_df = apply_customer_filter(display_df, customer_display_col, default_customer, title)
+
+    if caption:
+        st.caption(caption)
+    else:
+        if subset_mode == "unshipped":
+            st.caption("資料來源：Teable 主表即時欄位（未出貨，已排除 SHIPMENT 及 Cancell）")
+        elif subset_mode == "shipment_only_current_month":
+            st.caption("資料來源：Teable 主表即時欄位（只顯示當月出貨 SHIPMENT，已排除 Cancell）")
+        elif subset_mode == "shipment_only":
+            st.caption("資料來源：Teable 主表即時欄位（只顯示 SHIPMENT，已排除 Cancell）")
+        else:
+            st.caption("資料來源：Teable 主表即時欄位")
+
+    st.dataframe(display_df, use_container_width=True, height=520)
+    out_name = csv_name or f"{title}.csv"
+    st.download_button(
+        f"下載 {out_name}",
+        data=display_df.to_csv(index=False).encode("utf-8-sig"),
+        file_name=out_name,
+        mime="text/csv",
+        key=f"download_{title}"
+    )
+
+
+ORDER_DATE_CANDIDATES = [
+    "客戶下單日期", "工廠下單日期", "下單日期", "Order Date", "PO Date", "Date",
+    "訂單日期", "接單日期"
+]
+
+
+AMOUNT_ORDER_CANDIDATES = [
+    "接單金額", "接單總金額", "Order Amount", "Order amount", "Order Total",
+    "客戶金額", "銷售金額", "Sales Amount", "Quote Total", "Total Amount", "Amount",
+    "INVOICE", "Invoice", "Invoice Amount", "Invoice Total"
+]
+
+AMOUNT_SHIP_CANDIDATES = [
+    "出貨金額", "出貨總金額", "Shipment Amount", "Ship Amount", "Shipping Amount",
+    "Invoice Amount", "Invoice Total", "出貨發票金額", "Invoice", "INVOICE"
+]
+
+
+def parse_numeric_series(series: pd.Series) -> pd.Series:
+    if series is None:
+        return pd.Series(dtype=float)
+
+    s = series.astype(str).fillna("").str.strip()
+
+    replacements = [
+        ("US$", ""), ("USD$", ""), ("NT$", ""), ("HK$", ""),
+        ("USD", ""), ("US", ""), ("NTD", ""), ("TWD", ""), ("RMB", ""),
+        ("$", ""), (",", ""), ("nan", ""), ("None", ""),
+    ]
+    for old, new in replacements:
+        s = s.str.replace(old, new, regex=False)
+
+    s = s.str.extract(r"([-+]?\d*\.?\d+)", expand=False)
+    return pd.to_numeric(s, errors="coerce").fillna(0.0)
+
+
+def parse_mixed_date_series(series: pd.Series) -> pd.Series:
+    if series is None:
+        return pd.Series(dtype="datetime64[ns]")
+
+    s = series.astype(str).str.strip()
+    s = s.replace({"": pd.NA, "nan": pd.NA, "None": pd.NA})
+
+    out = pd.to_datetime(s, errors="coerce")
+
+    mask = out.isna()
+    if mask.any():
+        s2 = s[mask].str.replace(".", "", regex=False)
+        out.loc[mask] = pd.to_datetime(s2, errors="coerce")
+
+    mask = out.isna()
+    if mask.any():
+        def _parse_one(v):
+            txt = str(v).strip()
+            if not txt or txt.lower() in {"nan", "none"}:
+                return pd.NaT
+            txt = txt.replace(".", "").replace("  ", " ")
+            patterns = [
+                "%Y-%m-%d", "%Y/%m/%d",
+                "%b %d,%y", "%b %d, %y",
+                "%B %d,%y", "%B %d, %y",
+                "%m/%d/%y", "%m/%d/%Y",
+            ]
+            for fmt in patterns:
+                try:
+                    return pd.Timestamp(datetime.strptime(txt, fmt))
+                except Exception:
+                    pass
+            try:
+                return pd.to_datetime(txt, errors="coerce")
+            except Exception:
+                return pd.NaT
+
+        out.loc[mask] = s[mask].apply(_parse_one)
+
+    return out
+
+
+def build_month_amount_series(date_series: pd.Series, amount_series: pd.Series, year_month: str) -> pd.Series:
+    if date_series is None or amount_series is None:
+        return pd.Series(0.0, index=amount_series.index if amount_series is not None else None)
+    dt = parse_mixed_date_series(date_series)
+    mask = dt.dt.strftime("%Y-%m") == year_month
+    out = amount_series.copy()
+    out.loc[~mask.fillna(False)] = 0.0
+    return out.fillna(0.0)
+
+
+def find_amount_column(df: pd.DataFrame, candidates):
+    src = first_existing_column(df, candidates)
+    if src:
+        return src
+
+    normalized_cols = {normalize_col_key(c): c for c in df.columns}
+    candidate_keys = [normalize_col_key(c) for c in candidates]
+
+    for key, col in normalized_cols.items():
+        for ck in candidate_keys:
+            if ck and ck in key:
+                return col
+
+    for col in df.columns:
+        key = normalize_col_key(col)
+        if any(token in key for token in ["金額", "amount"]):
+            return col
+    return None
+
+
+def safe_display_subset(df: pd.DataFrame, columns):
+    out = pd.DataFrame(index=df.index)
+    for col in columns:
+        if col in df.columns:
+            out[col] = get_series_by_col(df, col)
+    out.columns = make_unique_columns(out.columns)
+    return out
+
+
+def render_sales_detail_from_teable(source_df: pd.DataFrame):
+    st.subheader("📈 業績明細表")
+    if source_df is None or source_df.empty:
+        st.warning("Teable 主表目前沒有資料。")
+        return
+
+    st.caption("資料來源：Teable 主表即時欄位（全客戶）")
+
+    customer_col = first_existing_column(source_df, CUSTOMER_CANDIDATES + ["Customer"])
+    factory_col_local = first_existing_column(source_df, FACTORY_CANDIDATES)
+    po_col_local = first_existing_column(source_df, PO_CANDIDATES)
+    pn_col_local = first_existing_column(source_df, PART_CANDIDATES)
+    qty_col_local = first_existing_column(source_df, QTY_CANDIDATES + ["Order QTY (PCS)"])
+    order_date_col = first_existing_column(source_df, ORDER_DATE_CANDIDATES)
+    ship_date_col_local = first_existing_column(source_df, SHIP_DATE_CANDIDATES + ["出貨日期"])
+    wip_col_local = first_existing_column(source_df, WIP_CANDIDATES)
+    order_amount_col = find_amount_column(source_df, AMOUNT_ORDER_CANDIDATES)
+    ship_amount_col = find_amount_column(source_df, AMOUNT_SHIP_CANDIDATES)
+    tooling_col = first_existing_column(source_df, ["TOOLING", "Tooling", "模具費", "NRE", "工程費"])
+
+    working_df = pd.DataFrame(index=source_df.index)
+    working_df["客戶"] = get_series_by_col(source_df, customer_col) if customer_col else ""
+    working_df["工廠"] = get_series_by_col(source_df, factory_col_local) if factory_col_local else ""
+    working_df["PO#"] = get_series_by_col(source_df, po_col_local) if po_col_local else ""
+    working_df["P/N"] = get_series_by_col(source_df, pn_col_local) if pn_col_local else ""
+    if qty_col_local:
+        working_df["Order Q'TY (PCS)"] = pd.to_numeric(get_series_by_col(source_df, qty_col_local), errors="coerce").fillna(0)
+    else:
+        working_df["Order Q'TY (PCS)"] = 0
+    working_df["客戶下單日期"] = get_series_by_col(source_df, order_date_col) if order_date_col else ""
+    working_df["Ship date"] = get_series_by_col(source_df, ship_date_col_local) if ship_date_col_local else ""
+    working_df["WIP"] = get_series_by_col(source_df, wip_col_local) if wip_col_local else ""
+
+    order_invoice_series = parse_numeric_series(get_series_by_col(source_df, order_amount_col)) if order_amount_col else pd.Series(0.0, index=source_df.index)
+    ship_invoice_series = parse_numeric_series(get_series_by_col(source_df, ship_amount_col)) if ship_amount_col else pd.Series(0.0, index=source_df.index)
+    tooling_series = parse_numeric_series(get_series_by_col(source_df, tooling_col)) if tooling_col else pd.Series(0.0, index=source_df.index)
+
+    order_total_series = order_invoice_series.add(tooling_series, fill_value=0.0)
+    ship_total_series = ship_invoice_series.add(tooling_series, fill_value=0.0)
+
+    order_dates = parse_mixed_date_series(get_series_by_col(source_df, order_date_col)) if order_date_col else pd.Series(pd.NaT, index=source_df.index)
+    ship_dates = parse_mixed_date_series(get_series_by_col(source_df, ship_date_col_local)) if ship_date_col_local else pd.Series(pd.NaT, index=source_df.index)
+
+    month_options = []
+    if not order_dates.empty:
+        month_options.extend([x for x in order_dates.dt.strftime("%Y-%m").dropna().tolist() if x])
+    if not ship_dates.empty:
+        month_options.extend([x for x in ship_dates.dt.strftime("%Y-%m").dropna().tolist() if x])
+    month_options = sorted(set(month_options))
+    current_month = pd.Timestamp.today().strftime("%Y-%m")
+    default_month = current_month if current_month in month_options else (month_options[-1] if month_options else current_month)
+
+    c1, c2, c3 = st.columns(3)
+    customer_values = sorted([str(x).strip() for x in working_df["客戶"].dropna().unique().tolist() if str(x).strip()])
+    selected_customer = c1.selectbox("客戶", ["全部"] + customer_values, index=0, key="sales_detail_customer_teable")
+
+    factory_values = sorted([str(x).strip() for x in working_df["工廠"].dropna().unique().tolist() if str(x).strip()])
+    selected_factory = c2.selectbox("工廠", ["全部"] + factory_values, index=0, key="sales_detail_factory_teable")
+
+    selected_month = c3.selectbox(
+        "統計月份",
+        month_options if month_options else [default_month],
+        index=(month_options.index(default_month) if default_month in month_options else 0),
+        key="sales_detail_month_teable",
+    )
+
+    filter_mask = pd.Series(True, index=working_df.index)
+    if selected_customer != "全部":
+        filter_mask &= working_df["客戶"].astype(str).str.strip().str.lower() == selected_customer.strip().lower()
+    if selected_factory != "全部":
+        filter_mask &= working_df["工廠"].astype(str).str.strip().str.lower() == selected_factory.strip().lower()
+
+    order_month_mask = order_dates.dt.strftime("%Y-%m") == selected_month
+    ship_month_mask = ship_dates.dt.strftime("%Y-%m") == selected_month
+
+    working_df["當月接單金額"] = order_total_series.where(order_month_mask.fillna(False), 0.0)
+    working_df["當月出貨金額"] = ship_total_series.where(ship_month_mask.fillna(False), 0.0)
+    working_df["本月接單筆數"] = order_month_mask.fillna(False).astype(int)
+    working_df["本月出貨筆數"] = ship_month_mask.fillna(False).astype(int)
+
+    related_mask = filter_mask & (order_month_mask.fillna(False) | ship_month_mask.fillna(False))
+    month_df = working_df.loc[related_mask].copy()
+
+    st.caption(f"統計月份：{selected_month}（只統計當月下單 / 當月出貨；接單依下單日期；出貨依 Ship date）")
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("本月相關筆數", len(month_df))
+    qty_total = int(pd.to_numeric(month_df["Order Q'TY (PCS)"], errors="coerce").fillna(0).sum()) if "Order Q'TY (PCS)" in month_df.columns else 0
+    m2.metric("本月相關數量", f"{qty_total:,}")
+    m3.metric("當月接單金額", f"{month_df['當月接單金額'].sum():,.2f}")
+    m4.metric("當月出貨金額", f"{month_df['當月出貨金額'].sum():,.2f}")
+
+    found_cols = []
+    if order_date_col:
+        found_cols.append(f"接單日期欄位：{order_date_col}")
+    if ship_date_col_local:
+        found_cols.append(f"出貨日期欄位：{ship_date_col_local}")
+    if order_amount_col:
+        found_cols.append(f"接單金額欄位：{order_amount_col}")
+    if ship_amount_col:
+        found_cols.append(f"出貨金額欄位：{ship_amount_col}")
+    if tooling_col:
+        found_cols.append(f"附加金額欄位：{tooling_col}")
+    if found_cols:
+        st.caption("；".join(found_cols))
+
+    if month_df.empty:
+        st.info("此篩選條件下，本月沒有接單或出貨資料。")
+        return
+
+    group_spec = {
+        "筆數": ("客戶", "size"),
+        "當月接單金額": ("當月接單金額", "sum"),
+        "當月出貨金額": ("當月出貨金額", "sum"),
+        "本月接單筆數": ("本月接單筆數", "sum"),
+        "本月出貨筆數": ("本月出貨筆數", "sum"),
+    }
+    if "Order Q'TY (PCS)" in month_df.columns:
+        group_spec["總數量"] = ("Order Q'TY (PCS)", "sum")
+
+    summary = month_df.groupby("客戶", dropna=False).agg(**group_spec).reset_index()
+    summary = summary[(summary["筆數"] > 0) | (summary["當月接單金額"] != 0) | (summary["當月出貨金額"] != 0)].copy()
+
+    st.markdown("**各客戶彙總**")
+    st.dataframe(summary, use_container_width=True, height=320)
+    st.download_button(
+        "下載 各客戶業績彙總 CSV",
+        data=summary.to_csv(index=False).encode("utf-8-sig"),
+        file_name="業績明細表_各客戶彙總.csv",
+        mime="text/csv",
+        key="download_sales_summary_csv_teable"
+    )
+
+    detail_cols = [c for c in ["客戶", "PO#", "P/N", "Order Q'TY (PCS)", "客戶下單日期", "Ship date", "工廠", "WIP", "當月接單金額", "當月出貨金額"] if c in month_df.columns]
+    detail_df = safe_display_subset(month_df, detail_cols)
+    st.markdown("**明細資料**")
+    st.dataframe(detail_df, use_container_width=True, height=520)
+    st.download_button(
+        "下載 業績明細表 CSV",
+        data=detail_df.to_csv(index=False).encode("utf-8-sig"),
+        file_name="業績明細表.csv",
+        mime="text/csv",
+        key="download_sales_detail_csv_teable"
+    )
+
+
 
 # ================================
 # INTERNAL VIEWS
@@ -2038,6 +2237,39 @@ elif menu == "Orders":
 
     show_orders_table(filtered)
 
+elif menu == "新訂單WIP":
+    render_teable_subset_table(
+        title="📄 新訂單WIP",
+        source_df=orders,
+        specs=SANDY_NEW_ORDER_SPECS,
+        default_customer=None,
+        csv_name="新訂單WIP.csv",
+        subset_mode="unshipped",
+    )
+
+elif menu == "Sandy 內部WIP":
+    render_teable_subset_table(
+        title="📄 Sandy 內部WIP",
+        source_df=orders,
+        specs=SANDY_INTERNAL_WIP_SPECS,
+        default_customer=None,
+        csv_name="Sandy內部WIP.csv",
+        subset_mode="unshipped",
+    )
+
+elif menu == "Sandy 銷貨底":
+    render_teable_subset_table(
+        title="📄 Sandy 銷貨底",
+        source_df=orders,
+        specs=SANDY_SALES_BASE_SPECS,
+        default_customer=None,
+        csv_name="Sandy銷貨底.csv",
+        subset_mode="shipment_only_current_month",
+    )
+
+elif menu == "業績明細表":
+    render_sales_detail_from_teable(orders)
+
 elif menu == "Customer Preview":
     st.subheader("Customer Preview")
     st.caption("僅供內部預覽。客戶請直接使用 Teable View。")
@@ -2055,7 +2287,9 @@ elif menu == "Customer Preview":
             if not customers:
                 st.warning("No customers found")
             else:
-                selected_customer = st.selectbox("Select customer to preview", customers)
+                default_customer = "WESCO"
+                default_index = customers.index(default_customer) if default_customer in customers else 0
+                selected_customer = st.selectbox("Select customer to preview", customers, index=default_index)
 
                 preview_df = orders[
                     customer_series.astype(str).str.strip().str.lower() == selected_customer.strip().lower()
@@ -2180,6 +2414,10 @@ elif menu == "Import / Update":
                             import_factory_due_col=import_factory_due_col,
                             import_remark_col=import_remark_col,
                             import_tag_col=import_tag_col,
+                            table_url=TABLE_URL,
+                            headers=HEADERS,
+                            done_wip_values=DONE_WIP_VALUES,
+                            multi_select_mode=MULTI_SELECT_MODE,
                         )
 
                         po_value = safe_text(row.get(import_po_col, "")) if import_po_col else ""
@@ -2482,6 +2720,10 @@ elif menu == "Import / Update":
                         import_factory_due_col=import_factory_due_col,
                         import_remark_col=import_remark_col,
                         import_tag_col=import_tag_col,
+                        table_url=TABLE_URL,
+                        headers=HEADERS,
+                        done_wip_values=DONE_WIP_VALUES,
+                        multi_select_mode=MULTI_SELECT_MODE,
                     )
                     po_value = safe_text(row.get(import_po_col, "")) if import_po_col else ""
                     part_value = safe_text(row.get(import_part_col, "")) if import_part_col else ""
@@ -2594,76 +2836,6 @@ elif menu == "Import / Update":
             except Exception as e:
                 st.error(f"Image OCR failed: {e}")
 
-elif menu == "Excel Quote Export":
-    show_excel_quote_export()
-
-st.caption("Auto refresh cache: 60 seconds"
-def normalize_status_series(series: pd.Series | None) -> pd.Series:
-    if series is None:
-        return pd.Series(dtype=str)
-    return series.fillna("").astype(str).str.strip().str.lower()
 
 
-def to_datetime_series(series: pd.Series | None) -> pd.Series:
-    if series is None:
-        return pd.Series(pd.NaT, index=[])
-    raw = series.fillna("").astype(str).str.strip()
-    parsed = pd.to_datetime(raw, errors="coerce")
-    if parsed.notna().sum() > 0:
-        return parsed
-
-    # fallback for values like "Mar. 24, 26"
-    cleaned = (
-        raw.str.replace(".", "", regex=False)
-           .str.replace("，", ",", regex=False)
-    )
-    parsed2 = pd.to_datetime(cleaned, errors="coerce")
-    return parsed2
-
-
-def apply_wip_subset_filter(source_df: pd.DataFrame, subset_mode: str | None = None) -> pd.DataFrame:
-    if source_df is None or source_df.empty or not subset_mode:
-        return source_df
-
-    df = source_df.copy()
-
-    local_wip_col = first_existing_column(df, WIP_CANDIDATES)
-    wip_norm = normalize_status_series(get_series_by_col(df, local_wip_col) if local_wip_col else None)
-
-    shipment_status_col = first_existing_column(df, [
-        "出貨狀況 (限內部使用)",
-        "出貨狀況(限內部使用)",
-        "出貨狀況",
-        "Shipment Status",
-    ])
-    shipment_status_norm = normalize_status_series(get_series_by_col(df, shipment_status_col) if shipment_status_col else None)
-
-    cancel_mask = (
-        wip_norm.str.contains(r"cancel|cancell|取消", na=False)
-        | shipment_status_norm.str.contains(r"cancel|cancell|取消", na=False)
-    )
-
-    shipment_mask = (
-        wip_norm.str.contains(r"shipment|已出貨|出貨完成", na=False)
-        | shipment_status_norm.str.contains(r"shipment|shipped|已出貨|出貨完成", na=False)
-    )
-
-    if subset_mode == "unshipped":
-        keep_mask = (~shipment_mask) & (~cancel_mask)
-        return df.loc[keep_mask].copy()
-
-    if subset_mode == "shipment_only_current_month":
-        keep_mask = shipment_mask & (~cancel_mask)
-
-        local_ship_date_col = first_existing_column(df, ["出貨日期"] + SHIP_DATE_CANDIDATES)
-        ship_dt = to_datetime_series(get_series_by_col(df, local_ship_date_col) if local_ship_date_col else None)
-        if len(ship_dt) == len(df) and ship_dt.notna().any():
-            now = datetime.now()
-            month_mask = (ship_dt.dt.year == now.year) & (ship_dt.dt.month == now.month)
-            keep_mask = keep_mask & month_mask.fillna(False)
-        return df.loc[keep_mask].copy()
-
-    return df
-
-
-)
+# Excel Quote Export removed from menu.
