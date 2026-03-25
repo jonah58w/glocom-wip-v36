@@ -1628,18 +1628,48 @@ def show_orders_table(df: pd.DataFrame):
     )
 
 
+LOCAL_PANEL_FILE_ALIASES = {
+    "新訂單WIP.xlsx": ["新訂單WIP.xlsx"],
+    "Sandy需要的內部WIP.xlsx": ["Sandy需要的內部WIP.xlsx", "Sandy內部WIP.xlsx", "內部WIP.xlsx"],
+    "Sandy需要的銷貨底.xlsx": ["Sandy需要的銷貨底.xlsx", "Sandy銷貨底.xlsx", "銷貨底.xlsx"],
+}
+
+
+def render_panel_file_uploader(file_name: str, label: str):
+    st.info(f"尚未找到 {file_name}。請在此上傳後即可使用。")
+    uploaded = st.file_uploader(
+        f"上傳 {label}",
+        type=["xlsx", "xls"],
+        key=f"panel_upload::{file_name}",
+    )
+    if uploaded is not None:
+        st.success(f"已載入：{uploaded.name}")
+    return uploaded
+
+
+def find_local_excel_path(file_name: str):
+    candidate_names = LOCAL_PANEL_FILE_ALIASES.get(file_name, [file_name])
+    base_dirs = [Path.cwd(), Path(__file__).resolve().parent, Path('/mnt/data')]
+    for base in base_dirs:
+        for candidate in candidate_names:
+            p = base / candidate
+            if p.exists():
+                return p
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def load_local_excel_sheet_from_bytes(file_bytes: bytes, sheet_name: str, source_name: str):
+    import io
+    df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
+    df = normalize_columns(df)
+    df.columns = make_unique_columns(df.columns)
+    return df, source_name
+
+
 @st.cache_data(show_spinner=False)
 def load_local_excel_sheet(file_name: str, sheet_name: str):
-    search_paths = [
-        Path(file_name),
-        Path(__file__).resolve().parent / file_name,
-        Path("/mnt/data") / file_name,
-    ]
-    target = None
-    for sp in search_paths:
-        if sp.exists():
-            target = sp
-            break
+    target = find_local_excel_path(file_name)
     if target is None:
         raise FileNotFoundError(file_name)
 
@@ -1660,9 +1690,16 @@ def render_local_excel_table(
     st.subheader(title)
     try:
         df, source_path = load_local_excel_sheet(file_name, sheet_name)
-    except Exception as e:
-        st.error(f"找不到 {file_name} / {sheet_name}：{e}")
-        return
+    except Exception:
+        uploaded = render_panel_file_uploader(file_name, title.replace("📄 ", ""))
+        if uploaded is None:
+            st.error(f"找不到 {file_name}。請將檔案放到 app.py 同層資料夾，或直接在此頁上傳。")
+            return
+        try:
+            df, source_path = load_local_excel_sheet_from_bytes(uploaded.getvalue(), sheet_name, uploaded.name)
+        except Exception as e:
+            st.error(f"無法讀取 {uploaded.name} / {sheet_name}：{e}")
+            return
 
     st.caption(f"來源：{Path(source_path).name} / 工作表：{sheet_name}")
 
@@ -1712,9 +1749,16 @@ def render_sales_detail_table():
     st.subheader("📈 業績明細表")
     try:
         df, source_path = load_local_excel_sheet("Sandy需要的銷貨底.xlsx", "銷貨底")
-    except Exception as e:
-        st.error(f"找不到 Sandy需要的銷貨底.xlsx / 銷貨底：{e}")
-        return
+    except Exception:
+        uploaded = render_panel_file_uploader("Sandy需要的銷貨底.xlsx", "Sandy 銷貨底 / 業績明細表來源")
+        if uploaded is None:
+            st.error("找不到 Sandy需要的銷貨底.xlsx。請將檔案放到 app.py 同層資料夾，或直接在此頁上傳。")
+            return
+        try:
+            df, source_path = load_local_excel_sheet_from_bytes(uploaded.getvalue(), "銷貨底", uploaded.name)
+        except Exception as e:
+            st.error(f"無法讀取 {uploaded.name} / 銷貨底：{e}")
+            return
 
     st.caption(f"來源：{Path(source_path).name} / 工作表：銷貨底")
 
