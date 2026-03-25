@@ -1905,10 +1905,21 @@ def build_amount_series(df: pd.DataFrame, primary_col: str | None, tooling_col: 
     return base.fillna(0.0)
 
 
+def parse_flexible_date_series(series: pd.Series) -> pd.Series:
+    if series is None:
+        return pd.Series(dtype="datetime64[ns]")
+    s = series.astype(str).str.strip()
+    s = s.replace({"": None, "nan": None, "None": None})
+    # Normalize month formats like "Mar. 24, 26" -> "Mar 24, 26"
+    s = s.str.replace(r"\b([A-Za-z]{3})\.", r"\1", regex=True)
+    s = s.str.replace(r"\s+", " ", regex=True)
+    dt = pd.to_datetime(s, errors="coerce")
+    return dt
+
 def to_month_mask(series: pd.Series, target_period: pd.Period) -> pd.Series:
     if series is None:
         return pd.Series(False, index=[])
-    dt = pd.to_datetime(series, errors="coerce")
+    dt = parse_flexible_date_series(series)
     return dt.dt.to_period("M") == target_period
 
 
@@ -1943,6 +1954,16 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
 
     current_period = pd.Timestamp.today().to_period("M")
 
+    order_date_series = get_series_by_col(source_df, order_date_col) if order_date_col else None
+    ship_date_series = get_series_by_col(source_df, ship_date_col) if ship_date_col else None
+
+    order_mask = to_month_mask(order_date_series, current_period) if order_date_col else pd.Series(False, index=source_df.index)
+    ship_mask = to_month_mask(ship_date_series, current_period) if ship_date_col else pd.Series(False, index=source_df.index)
+    monthly_scope_mask = (order_mask | ship_mask).reindex(source_df.index, fill_value=False)
+
+    base_order_amount = build_amount_series(source_df, order_amount_col, tooling_col)
+    base_ship_amount = build_amount_series(source_df, ship_amount_col, tooling_col)
+
     working_df = pd.DataFrame(index=source_df.index)
     if customer_col:
         working_df["客戶"] = get_series_by_col(source_df, customer_col)
@@ -1957,13 +1978,15 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     if pn_col:
         working_df["P/N"] = get_series_by_col(source_df, pn_col)
     if qty_col:
-        working_df["Order Q'TY (PCS)"] = get_series_by_col(source_df, qty_col)
+        working_df["Order Q'TY (PCS)"] = pd.to_numeric(get_series_by_col(source_df, qty_col), errors="coerce").fillna(0)
+    else:
+        working_df["Order Q'TY (PCS)"] = 0
     if order_date_col:
-        working_df["客戶下單日期"] = get_series_by_col(source_df, order_date_col)
+        working_df["客戶下單日期"] = order_date_series
     else:
         working_df["客戶下單日期"] = ""
     if ship_date_col:
-        working_df["Ship date"] = get_series_by_col(source_df, ship_date_col)
+        working_df["Ship date"] = ship_date_series
     else:
         working_df["Ship date"] = ""
     if wip_col_local:
@@ -1971,41 +1994,37 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     else:
         working_df["WIP"] = ""
 
-    base_order_amount = build_amount_series(source_df, order_amount_col, tooling_col)
-    base_ship_amount = build_amount_series(source_df, ship_amount_col, tooling_col)
+    working_df["當月接單金額"] = base_order_amount.where(order_mask, 0.0)
+    working_df["當月出貨金額"] = base_ship_amount.where(ship_mask, 0.0)
+    working_df["_本月接單"] = order_mask.astype(bool)
+    working_df["_本月出貨"] = ship_mask.astype(bool)
 
-    order_mask = to_month_mask(get_series_by_col(source_df, order_date_col), current_period) if order_date_col else pd.Series(False, index=source_df.index)
-    ship_mask = to_month_mask(get_series_by_col(source_df, ship_date_col), current_period) if ship_date_col else pd.Series(False, index=source_df.index)
-
-    working_df["接單金額"] = base_order_amount.where(order_mask, 0.0)
-    working_df["出貨金額"] = base_ship_amount.where(ship_mask, 0.0)
-
-    if "Order Q'TY (PCS)" in working_df.columns:
-        working_df["Order Q'TY (PCS)"] = pd.to_numeric(working_df["Order Q'TY (PCS)"], errors="coerce").fillna(0)
+    # 只保留本月有接單或本月有出貨的資料，避免統計落到全期間全部客戶
+    working_df = working_df.loc[monthly_scope_mask].copy()
 
     c1, c2 = st.columns(2)
-    customer_values = sorted([str(x).strip() for x in working_df["客戶"].dropna().unique().tolist() if str(x).strip()])
+    customer_values = sorted([str(x).strip() for x in working_df["客戶"].dropna().unique().tolist() if str(x).strip()]) if not working_df.empty else []
     selected_customer = c1.selectbox("客戶", ["全部"] + customer_values, index=0, key="sales_detail_customer_teable")
     if selected_customer != "全部":
         working_df = working_df[
             working_df["客戶"].astype(str).str.strip().str.lower() == selected_customer.strip().lower()
         ].copy()
 
-    factory_values = sorted([str(x).strip() for x in working_df["工廠"].dropna().unique().tolist() if str(x).strip()])
+    factory_values = sorted([str(x).strip() for x in working_df["工廠"].dropna().unique().tolist() if str(x).strip()]) if ("工廠" in working_df.columns and not working_df.empty) else []
     selected_factory = c2.selectbox("工廠", ["全部"] + factory_values, index=0, key="sales_detail_factory_teable")
     if selected_factory != "全部":
         working_df = working_df[
             working_df["工廠"].astype(str).str.strip().str.lower() == selected_factory.strip().lower()
         ].copy()
 
-    st.caption(f"統計月份：{current_period.strftime('%Y-%m')}（接單依下單日期；出貨依 Ship date）")
+    st.caption(f"統計月份：{current_period.strftime('%Y-%m')}（只統計當月下單 / 當月出貨；接單依下單日期，出貨依 Ship date）")
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("筆數", len(working_df))
+    m1.metric("本月相關筆數", len(working_df))
     qty_total = int(pd.to_numeric(working_df["Order Q'TY (PCS)"], errors="coerce").fillna(0).sum()) if "Order Q'TY (PCS)" in working_df.columns else 0
-    m2.metric("總數量", f"{qty_total:,}")
-    m3.metric("當月接單金額", f"{working_df['接單金額'].sum():,.2f}")
-    m4.metric("當月出貨金額", f"{working_df['出貨金額'].sum():,.2f}")
+    m2.metric("本月相關數量", f"{qty_total:,}")
+    m3.metric("當月接單金額", f"{working_df['當月接單金額'].sum():,.2f}")
+    m4.metric("當月出貨金額", f"{working_df['當月出貨金額'].sum():,.2f}")
 
     found_cols = []
     if order_date_col:
@@ -2023,14 +2042,23 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     else:
         st.warning("Teable 主表目前未找到可用的日期或金額欄位，因此當月金額可能顯示為 0。")
 
+    if working_df.empty:
+        st.info("本月沒有符合條件的接單或出貨資料。")
+        return
+
     group_spec = {
         "筆數": ("客戶", "size"),
-        "當月接單金額": ("接單金額", "sum"),
-        "當月出貨金額": ("出貨金額", "sum"),
+        "當月接單金額": ("當月接單金額", "sum"),
+        "當月出貨金額": ("當月出貨金額", "sum"),
+        "本月接單筆數": ("_本月接單", "sum"),
+        "本月出貨筆數": ("_本月出貨", "sum"),
     }
     if "Order Q'TY (PCS)" in working_df.columns:
         group_spec["總數量"] = ("Order Q'TY (PCS)", "sum")
+
     summary = working_df.groupby("客戶", dropna=False).agg(**group_spec).reset_index()
+    summary = summary[(summary["當月接單金額"] != 0) | (summary["當月出貨金額"] != 0) | (summary["本月接單筆數"] != 0) | (summary["本月出貨筆數"] != 0)].copy()
+    summary = summary.sort_values(["當月接單金額", "當月出貨金額"], ascending=False)
 
     st.markdown("**各客戶彙總**")
     st.dataframe(summary, use_container_width=True, height=320)
@@ -2038,23 +2066,24 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     st.download_button(
         "下載 各客戶業績彙總 CSV",
         data=summary.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"業績明細表_各客戶彙總_{current_period.strftime('%Y%m')}.csv",
+        file_name="業績明細表_各客戶彙總.csv",
         mime="text/csv",
         key="download_sales_summary_csv_teable"
     )
 
-    detail_cols = [c for c in ["客戶", "PO#", "P/N", "Order Q'TY (PCS)", "客戶下單日期", "Ship date", "工廠", "WIP", "接單金額", "出貨金額"] if c in working_df.columns]
+    detail_cols = [c for c in ["客戶", "工廠", "PO#", "P/N", "Order Q'TY (PCS)", "客戶下單日期", "Ship date", "WIP", "當月接單金額", "當月出貨金額"] if c in working_df.columns]
     detail_df = safe_display_subset(working_df, detail_cols)
+    detail_df = detail_df[(pd.to_numeric(detail_df.get("當月接單金額", 0), errors="coerce").fillna(0) != 0) | (pd.to_numeric(detail_df.get("當月出貨金額", 0), errors="coerce").fillna(0) != 0)].copy()
+
     st.markdown("**明細資料**")
     st.dataframe(detail_df, use_container_width=True, height=520)
     st.download_button(
         "下載 業績明細表 CSV",
         data=detail_df.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"業績明細表_{current_period.strftime('%Y%m')}.csv",
+        file_name="業績明細表.csv",
         mime="text/csv",
         key="download_sales_detail_csv_teable"
     )
-
 
 
 # ================================
