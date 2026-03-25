@@ -1500,6 +1500,10 @@ menu = st.sidebar.radio(
         "Delayed Orders",
         "Shipment Forecast",
         "Orders",
+        "新訂單WIP",
+        "Sandy 內部WIP",
+        "Sandy 銷貨底",
+        "業績明細表",
         "Customer Preview",
         "Import / Update",
     ]
@@ -1623,6 +1627,145 @@ def show_orders_table(df: pd.DataFrame):
         mime="text/csv"
     )
 
+
+@st.cache_data(show_spinner=False)
+def load_local_excel_sheet(file_name: str, sheet_name: str):
+    search_paths = [
+        Path(file_name),
+        Path(__file__).resolve().parent / file_name,
+        Path("/mnt/data") / file_name,
+    ]
+    target = None
+    for sp in search_paths:
+        if sp.exists():
+            target = sp
+            break
+    if target is None:
+        raise FileNotFoundError(file_name)
+
+    df = pd.read_excel(target, sheet_name=sheet_name)
+    df = normalize_columns(df)
+    df.columns = make_unique_columns(df.columns)
+    return df, str(target)
+
+
+def render_local_excel_table(
+    title: str,
+    file_name: str,
+    sheet_name: str,
+    default_customer: str | None = None,
+    csv_name: str | None = None,
+    enable_filters: bool = True,
+):
+    st.subheader(title)
+    try:
+        df, source_path = load_local_excel_sheet(file_name, sheet_name)
+    except Exception as e:
+        st.error(f"找不到 {file_name} / {sheet_name}：{e}")
+        return
+
+    st.caption(f"來源：{Path(source_path).name} / 工作表：{sheet_name}")
+
+    display_df = df.copy()
+
+    customer_candidates = ["客戶", "Customer"]
+    customer_sheet_col = None
+    for cc in customer_candidates:
+        if cc in display_df.columns:
+            customer_sheet_col = cc
+            break
+
+    if enable_filters and customer_sheet_col:
+        customer_values = sorted(
+            [str(x).strip() for x in display_df[customer_sheet_col].dropna().unique().tolist() if str(x).strip()]
+        )
+        if customer_values:
+            if default_customer and default_customer in customer_values:
+                default_index = customer_values.index(default_customer)
+            else:
+                default_index = 0
+            selected_customer = st.selectbox(
+                "客戶篩選",
+                ["全部"] + customer_values,
+                index=default_index + 1 if default_customer and default_customer in customer_values else 0,
+                key=f"{title}_customer_filter"
+            )
+            if selected_customer != "全部":
+                display_df = display_df[
+                    display_df[customer_sheet_col].astype(str).str.strip().str.lower()
+                    == selected_customer.strip().lower()
+                ].copy()
+
+    st.dataframe(display_df, use_container_width=True, height=520)
+
+    download_name = csv_name or f"{sheet_name}.csv"
+    st.download_button(
+        f"下載 {sheet_name} CSV",
+        data=display_df.to_csv(index=False).encode("utf-8-sig"),
+        file_name=download_name,
+        mime="text/csv",
+        key=f"download_{sheet_name}"
+    )
+
+
+def render_sales_detail_table():
+    st.subheader("📈 業績明細表")
+    try:
+        df, source_path = load_local_excel_sheet("Sandy需要的銷貨底.xlsx", "銷貨底")
+    except Exception as e:
+        st.error(f"找不到 Sandy需要的銷貨底.xlsx / 銷貨底：{e}")
+        return
+
+    st.caption(f"來源：{Path(source_path).name} / 工作表：銷貨底")
+
+    display_df = df.copy()
+
+    customer_sheet_col = "客戶" if "客戶" in display_df.columns else ("Customer" if "Customer" in display_df.columns else None)
+    factory_sheet_col = "工廠" if "工廠" in display_df.columns else None
+
+    c1, c2 = st.columns(2)
+    if customer_sheet_col:
+        customer_values = sorted(
+            [str(x).strip() for x in display_df[customer_sheet_col].dropna().unique().tolist() if str(x).strip()]
+        )
+        selected_customer = c1.selectbox("客戶", ["全部"] + customer_values, key="sales_detail_customer")
+        if selected_customer != "全部":
+            display_df = display_df[
+                display_df[customer_sheet_col].astype(str).str.strip().str.lower()
+                == selected_customer.strip().lower()
+            ].copy()
+
+    if factory_sheet_col:
+        factory_values = sorted(
+            [str(x).strip() for x in display_df[factory_sheet_col].dropna().unique().tolist() if str(x).strip()]
+        )
+        selected_factory = c2.selectbox("工廠", ["全部"] + factory_values, key="sales_detail_factory")
+        if selected_factory != "全部":
+            display_df = display_df[
+                display_df[factory_sheet_col].astype(str).str.strip().str.lower()
+                == selected_factory.strip().lower()
+            ].copy()
+
+    m1, m2 = st.columns(2)
+    m1.metric("筆數", len(display_df))
+    qty_detail_col = None
+    for candidate in ["Order Q'TY (PCS)", "Order Q'TY\\n (PCS)", "Q'TY (PCS)", "QTY", "Qty"]:
+        if candidate in display_df.columns:
+            qty_detail_col = candidate
+            break
+    if qty_detail_col:
+        qty_series = pd.to_numeric(display_df[qty_detail_col], errors="coerce")
+        m2.metric("總數量", f"{int(qty_series.fillna(0).sum()):,}")
+
+    st.dataframe(display_df, use_container_width=True, height=520)
+    st.download_button(
+        "下載 業績明細表 CSV",
+        data=display_df.to_csv(index=False).encode("utf-8-sig"),
+        file_name="業績明細表.csv",
+        mime="text/csv",
+        key="download_sales_detail_csv"
+    )
+
 # ================================
 # INTERNAL VIEWS
 # ================================
@@ -1667,6 +1810,39 @@ elif menu == "Orders":
                 filtered = filtered[get_series_by_col(filtered, wip_col).astype(str) == selected_wip]
 
     show_orders_table(filtered)
+
+elif menu == "新訂單WIP":
+    render_local_excel_table(
+        title="📄 新訂單WIP",
+        file_name="新訂單WIP.xlsx",
+        sheet_name="新訂單WIP",
+        default_customer="WESCO",
+        csv_name="新訂單WIP.csv",
+        enable_filters=True,
+    )
+
+elif menu == "Sandy 內部WIP":
+    render_local_excel_table(
+        title="📄 Sandy 內部WIP",
+        file_name="Sandy需要的內部WIP.xlsx",
+        sheet_name="內部WIP",
+        default_customer="WESCO",
+        csv_name="Sandy內部WIP.csv",
+        enable_filters=True,
+    )
+
+elif menu == "Sandy 銷貨底":
+    render_local_excel_table(
+        title="📄 Sandy 銷貨底",
+        file_name="Sandy需要的銷貨底.xlsx",
+        sheet_name="銷貨底",
+        default_customer="WESCO",
+        csv_name="Sandy銷貨底.csv",
+        enable_filters=True,
+    )
+
+elif menu == "業績明細表":
+    render_sales_detail_table()
 
 elif menu == "Customer Preview":
     st.subheader("Customer Preview")
