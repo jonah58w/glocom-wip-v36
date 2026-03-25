@@ -1839,15 +1839,14 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str | None = None) -
     wip_series = get_series_by_col(source_df, wip_col) if 'wip_col' in globals() and wip_col else None
     wip_norm = normalize_status_text(wip_series) if wip_series is not None else pd.Series("", index=source_df.index)
 
-    ship_date_series = get_series_by_col(source_df, ship_date_col) if 'ship_date_col' in globals() and ship_date_col else None
-    ship_date_text = normalize_status_text(ship_date_series) if ship_date_series is not None else pd.Series("", index=source_df.index)
-
+    # NOTE:
+    # Ship date / Dock are often planned dates, not proof of actual shipment.
+    # So subset filtering must NOT use planned Ship date alone to classify shipped.
     shipment_status_col = first_existing_column(
         source_df,
         [
             "出貨狀況 (限內部使用)",
             "出貨狀況(限內部使用)",
-            "出貨狀況",
             "出貨狀況",
             "Shipment Status",
         ]
@@ -1855,16 +1854,25 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str | None = None) -
     shipment_status_series = get_series_by_col(source_df, shipment_status_col) if shipment_status_col else None
     shipment_status_norm = normalize_status_text(shipment_status_series) if shipment_status_series is not None else pd.Series("", index=source_df.index)
 
+    actual_ship_cols = [
+        "出貨日期",
+        "Actual Ship Date",
+        "Shipped Date",
+    ]
+    actual_ship_col = first_existing_column(source_df, actual_ship_cols)
+    actual_ship_series = get_series_by_col(source_df, actual_ship_col) if actual_ship_col else None
+    actual_ship_text = normalize_status_text(actual_ship_series) if actual_ship_series is not None else pd.Series("", index=source_df.index)
+
     cancel_mask = (
-        wip_norm.str.contains("cancel|cancell|取消", na=False)
-        | shipment_status_norm.str.contains("cancel|cancell|取消", na=False)
+        wip_norm.str.contains(r"cancel|cancell|取消", na=False)
+        | shipment_status_norm.str.contains(r"cancel|cancell|取消", na=False)
     )
 
     shipped_by_wip = wip_norm.str.contains(r"shipment|已出貨|出貨完成", na=False)
-    shipped_by_status = shipment_status_norm.str.contains(r"ship|shipped|已出貨|出貨完成", na=False)
-    shipped_by_date = ship_date_text.ne("") & ~ship_date_text.isin(["none", "nat", "nan"])
+    shipped_by_status = shipment_status_norm.str.contains(r"shipped|已出貨|出貨完成", na=False)
+    shipped_by_actual_date = actual_ship_text.ne("") & ~actual_ship_text.isin(["none", "nat", "nan"])
 
-    shipped_mask = shipped_by_wip | shipped_by_status | shipped_by_date
+    shipped_mask = shipped_by_wip | shipped_by_status | shipped_by_actual_date
 
     if subset_mode == "unshipped":
         mask = (~shipped_mask) & (~cancel_mask)
