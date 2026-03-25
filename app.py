@@ -14,7 +14,10 @@ import streamlit as st
 from PIL import Image
 import pytesseract
 
-from excel_exporter import generate_quote_excel_v2
+try:
+    from excel_exporter import generate_quote_excel_v2
+except Exception:
+    generate_quote_excel_v2 = None
 from factory_progress_updater import (
     dedupe_import_df_by_key,
     classify_and_update_factory_row,
@@ -1135,6 +1138,10 @@ def build_quote_data_from_existing_app():
 def show_excel_quote_export():
     st.subheader("Excel Quote Export")
 
+    if generate_quote_excel_v2 is None:
+        st.warning("Excel Quote Export 已停用。")
+        return
+
     template_path = "template.xlsx"
     if not Path(template_path).exists():
         st.error("找不到 template.xlsx，請先放到 app.py 同一層資料夾。")
@@ -1662,9 +1669,8 @@ elif menu == "Customer Preview":
             if not customers:
                 st.warning("No customers found")
             else:
-                default_customer = "WESCO"
-                default_index = customers.index(default_customer) if default_customer in customers else 0
-                selected_customer = st.selectbox("Select customer to preview", customers, index=default_index)
+                default_idx = customers.index("WESCO") if "WESCO" in customers else 0
+                selected_customer = st.selectbox("Select customer to preview", customers, index=default_idx)
 
                 preview_df = orders[
                     customer_series.astype(str).str.strip().str.lower() == selected_customer.strip().lower()
@@ -2211,7 +2217,5 @@ elif menu == "Import / Update":
             except Exception as e:
                 st.error(f"Image OCR failed: {e}")
 
-elif menu == "__REMOVED_EXCEL_QUOTE_EXPORT__":
-    show_excel_quote_export()
 
 st.caption("Auto refresh cache: 60 seconds")
