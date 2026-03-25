@@ -1842,6 +1842,11 @@ def render_teable_subset_table(
     )
 
 
+ORDER_DATE_CANDIDATES = [
+    "客戶下單日期", "工廠下單日期", "下單日期", "Order Date", "PO Date", "Date",
+    "訂單日期", "接單日期"
+]
+
 
 AMOUNT_ORDER_CANDIDATES = [
     "接單金額", "接單總金額", "Order Amount", "Order amount", "Order Total",
