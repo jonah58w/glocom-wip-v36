@@ -1848,8 +1848,7 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str | None = None) -
             "出貨狀況 (限內部使用)",
             "出貨狀況(限內部使用)",
             "出貨狀況",
-            "出貨
-狀況",
+            "出貨狀況",
             "Shipment Status",
         ]
     )
