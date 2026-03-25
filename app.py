@@ -14,15 +14,7 @@ import streamlit as st
 from PIL import Image
 import pytesseract
 
-try:
-    from excel_exporter import generate_quote_excel_v2
-    EXCEL_EXPORTER_AVAILABLE = True
-except Exception:
-    EXCEL_EXPORTER_AVAILABLE = False
-
-    def generate_quote_excel_v2(*args, **kwargs):
-        raise ModuleNotFoundError("excel_exporter.py not found. Please upload/deploy excel_exporter.py in the same folder as app.py.")
-
+from excel_exporter import generate_quote_excel_v2
 from factory_progress_updater import (
     dedupe_import_df_by_key,
     classify_and_update_factory_row,
@@ -1359,9 +1351,6 @@ def show_excel_quote_export():
     clear_customer = c2.checkbox("先清空客戶報價區", value=False, key="clear_customer_v2")
     clear_notes = c3.checkbox("先清空 Notes 區", value=False, key="clear_notes_v2")
 
-    if not EXCEL_EXPORTER_AVAILABLE:
-        st.warning("找不到 excel_exporter.py，Excel 報價匯出功能暫時不可用；其他功能可正常使用。")
-
     if st.button("產生 Excel 報價檔", key="generate_excel_quote_v2"):
         try:
             output_dir = "outputs"
@@ -1506,7 +1495,6 @@ menu = st.sidebar.radio(
         "Orders",
         "Customer Preview",
         "Import / Update",
-        "Excel Quote Export",
     ]
 )
 
@@ -1674,7 +1662,9 @@ elif menu == "Customer Preview":
             if not customers:
                 st.warning("No customers found")
             else:
-                selected_customer = st.selectbox("Select customer to preview", customers)
+                default_customer = "WESCO"
+                default_index = customers.index(default_customer) if default_customer in customers else 0
+                selected_customer = st.selectbox("Select customer to preview", customers, index=default_index)
 
                 preview_df = orders[
                     customer_series.astype(str).str.strip().str.lower() == selected_customer.strip().lower()
@@ -2221,7 +2211,7 @@ elif menu == "Import / Update":
             except Exception as e:
                 st.error(f"Image OCR failed: {e}")
 
-elif menu == "Excel Quote Export":
+elif menu == "__REMOVED_EXCEL_QUOTE_EXPORT__":
     show_excel_quote_export()
 
 st.caption("Auto refresh cache: 60 seconds")
