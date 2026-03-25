@@ -1839,24 +1839,15 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str | None = None) -
     wip_series = get_series_by_col(source_df, wip_col) if 'wip_col' in globals() and wip_col else None
     wip_norm = normalize_status_text(wip_series) if wip_series is not None else pd.Series("", index=source_df.index)
 
-    # Main rule from Teable master view:
-    # - 新訂單WIP / Sandy 內部WIP: 未出貨 = 排除 SHIPMENT 與 Cancell
-    # - Sandy 銷貨底: 只顯示 SHIPMENT
     cancel_mask = wip_norm.str.contains(r"cancel|cancell|取消", na=False)
-    shipment_mask = wip_norm.str.contains(r"shipment|已出貨|出貨完成", na=False)
+    shipment_mask = wip_norm.str.contains(r"shipment", na=False)
 
     if subset_mode == "unshipped":
+        # User rule: 新訂單WIP / 內部WIP only exclude SHIPMENT and Cancell
         mask = (~shipment_mask) & (~cancel_mask)
     elif subset_mode == "shipment_only":
+        # User rule: 銷貨底 only show SHIPMENT and exclude Cancell
         mask = shipment_mask & (~cancel_mask)
-
-        # 銷貨底只顯示當月出貨，避免抓到 2019 等舊資料
-        ship_series = get_series_by_col(source_df, ship_date_col) if 'ship_date_col' in globals() and ship_date_col else None
-        if ship_series is not None:
-            ship_dt = parse_mixed_date_series(ship_series)
-            current_month = pd.Timestamp.today().strftime("%Y-%m")
-            month_mask = ship_dt.dt.strftime("%Y-%m") == current_month
-            mask = mask & month_mask.fillna(False)
 
     return mask.fillna(False)
 
@@ -1879,6 +1870,15 @@ def render_teable_subset_table(
     if subset_mode:
         filtered_source = filtered_source[build_subset_mask(filtered_source, subset_mode)].copy()
 
+    # For Sandy 銷貨底, further restrict to current-month shipped rows by Ship date
+    if subset_mode == "shipment_only" and not filtered_source.empty:
+        ship_dt_col = first_existing_column(filtered_source, SHIP_DATE_CANDIDATES + ["出貨日期"])
+        if ship_dt_col:
+            ship_dt = parse_mixed_date_series(get_series_by_col(filtered_source, ship_dt_col))
+            current_month = pd.Timestamp.today().strftime("%Y-%m")
+            month_mask = ship_dt.dt.strftime("%Y-%m") == current_month
+            filtered_source = filtered_source[month_mask.fillna(False)].copy()
+
     display_df, mapping = build_teable_view_df(filtered_source, specs)
     if default_customer:
         customer_display_col = "客戶" if "客戶" in display_df.columns else ("Customer" if "Customer" in display_df.columns else None)
@@ -1891,7 +1891,7 @@ def render_teable_subset_table(
         if subset_mode == "unshipped":
             st.caption("資料來源：Teable 主表即時欄位（未出貨，已排除 SHIPMENT 及 Cancell）")
         elif subset_mode == "shipment_only":
-            st.caption(f"資料來源：Teable 主表即時欄位（只顯示當月 SHIPMENT，已排除 Cancell）")
+            st.caption("資料來源：Teable 主表即時欄位（只顯示 SHIPMENT，已排除 Cancell）")
         else:
             st.caption("資料來源：Teable 主表即時欄位")
 
@@ -2060,6 +2060,8 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     ship_invoice_series = parse_numeric_series(get_series_by_col(source_df, ship_amount_col)) if ship_amount_col else pd.Series(0.0, index=source_df.index)
     tooling_series = parse_numeric_series(get_series_by_col(source_df, tooling_col)) if tooling_col else pd.Series(0.0, index=source_df.index)
 
+    # Temporary rule until true order amount field is confirmed:
+    # use INVOICE + TOOLING for both order and ship amount month buckets.
     order_total_series = order_invoice_series.add(tooling_series, fill_value=0.0)
     ship_total_series = ship_invoice_series.add(tooling_series, fill_value=0.0)
 
