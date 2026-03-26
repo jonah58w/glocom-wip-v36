@@ -1868,7 +1868,7 @@ def build_subset_mask_new_order_today(df: pd.DataFrame) -> pd.Series:
 
     change_col = first_existing_column(
         df,
-        ["更改 Booking", "更改Booking", "Ship via change", "出貨方式變更"]
+        ["更改 Booking", "更改 Booking", "更改Booking", "Ship via change", "出貨方式變更"]
     )
     change_flag = _series_nonblank(get_series_by_col(df, change_col) if change_col else None, df.index)
 
