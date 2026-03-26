@@ -1827,52 +1827,93 @@ def apply_customer_filter(display_df: pd.DataFrame, customer_col_name: str, defa
     return display_df
 
 
+
 def normalize_status_text(series: pd.Series) -> pd.Series:
     if series is None:
         return pd.Series("", index=pd.RangeIndex(0))
     return series.fillna("").astype(str).str.strip().str.lower()
 
 
+def _today_normalized() -> pd.Timestamp:
+    return pd.Timestamp.today().normalize()
+
+
+def _series_nonblank(series: pd.Series | None, index_like) -> pd.Series:
+    if series is None:
+        return pd.Series(False, index=index_like)
+    s = series.fillna("").astype(str).str.strip()
+    return s.ne("")
+
+
+def build_subset_mask_new_order_today(df: pd.DataFrame) -> pd.Series:
+    # 新訂單WIP：
+    # 1) 當天下單的新訂單
+    # 2) 當天有任何訂單客戶交期
+    # 3) 出貨方式變更者（以「更改 Booking」欄位非空為代理判斷）
+    today = _today_normalized()
+
+    order_date_col = first_existing_column(
+        df,
+        ORDER_DATE_CANDIDATES + ["客戶下單日期", "工廠下單日期", "下單日期", "接單日期"]
+    )
+    order_dt = parse_mixed_date_series(get_series_by_col(df, order_date_col)) if order_date_col else pd.Series(pd.NaT, index=df.index)
+    order_today = order_dt.dt.normalize() == today
+
+    due_col = first_existing_column(
+        df,
+        SHIP_DATE_CANDIDATES + ["交期 (更改)", "交期(更改)", "交期", "客戶交期", "預交日", "預定交期", "交貨期"]
+    )
+    due_dt = parse_mixed_date_series(get_series_by_col(df, due_col)) if due_col else pd.Series(pd.NaT, index=df.index)
+    due_today = due_dt.dt.normalize() == today
+
+    change_col = first_existing_column(
+        df,
+        ["更改 Booking", "更改
+Booking", "更改Booking", "Ship via change", "出貨方式變更"]
+    )
+    change_flag = _series_nonblank(get_series_by_col(df, change_col) if change_col else None, df.index)
+
+    wip_s = get_series_by_col(df, wip_col) if 'wip_col' in globals() and wip_col else None
+    wip_norm = normalize_status_text(wip_s) if wip_s is not None else pd.Series("", index=df.index)
+    exclude_flag = wip_norm.str.contains(r"shipment|cancel|cancell|cancelled|取消", na=False)
+
+    mask = (order_today.fillna(False) | due_today.fillna(False) | change_flag.fillna(False)) & (~exclude_flag.fillna(False))
+    return mask.fillna(False)
+
+
 def build_subset_mask_unshipped(df: pd.DataFrame) -> pd.Series:
-    # 未出貨：排除 SHIPMENT / ship out / 出貨完成 / 出貨 + Cancell
-    wip_s = get_series_by_col(df, wip_col) if wip_col else None
+    # Sandy 內部WIP：扣除 WIP 是 shipment 或 cancelled
+    wip_s = get_series_by_col(df, wip_col) if 'wip_col' in globals() and wip_col else None
     wip_norm = normalize_status_text(wip_s) if wip_s is not None else pd.Series("", index=df.index)
 
-    internal_ship_col = first_existing_column(df, ["出貨狀況 (限內部使用)", "出貨狀況(限內部使用)"])
-    internal_ship_s = get_series_by_col(df, internal_ship_col) if internal_ship_col else None
-    internal_ship_norm = normalize_status_text(internal_ship_s) if internal_ship_s is not None else None
-
-    base_shipped_flag = wip_norm.str.contains(r"shipment|ship out|出貨完成|出貨", na=False)
-    if internal_ship_norm is not None:
-        shipped_flag = base_shipped_flag | internal_ship_norm.str.contains(r"已完成|ok", na=False)
-    else:
-        shipped_flag = base_shipped_flag
-
-    cancel_flag = wip_norm.str.contains(r"cancel|cancell|取消", na=False)
-    mask = (~shipped_flag) & (~cancel_flag)
+    exclude_flag = wip_norm.str.contains(r"shipment|cancel|cancell|cancelled|取消", na=False)
+    mask = ~exclude_flag
     return mask.fillna(False)
 
 
 def build_subset_mask_shipment_current_month(df: pd.DataFrame) -> pd.Series:
-    # 已出貨：WIP 出貨相關 + 排除 Cancell + Ship date 只取當月
-    wip_s = get_series_by_col(df, wip_col) if wip_col else None
+    # Sandy 銷貨底：當月出貨者
+    today = pd.Timestamp.today()
+    current_month = today.strftime("%Y-%m")
+
+    wip_s = get_series_by_col(df, wip_col) if 'wip_col' in globals() and wip_col else None
     wip_norm = normalize_status_text(wip_s) if wip_s is not None else pd.Series("", index=df.index)
 
-    cancel_flag = wip_norm.str.contains(r"cancel|cancell|取消", na=False)
-    shipped_flag = wip_norm.str.contains(r"shipment|ship out|出貨完成|出貨", na=False)
+    shipment_flag = wip_norm.str.contains(r"shipment", na=False)
+    cancel_flag = wip_norm.str.contains(r"cancel|cancell|cancelled|取消", na=False)
 
     ship_date_name = first_existing_column(df, SHIP_DATE_CANDIDATES + ["出貨日期", "出貨日期(公式)"])
     ship_s = get_series_by_col(df, ship_date_name) if ship_date_name else None
     ship_dt = parse_mixed_date_series(ship_s) if ship_s is not None else pd.Series(pd.NaT, index=df.index)
+    month_flag = ship_dt.dt.strftime("%Y-%m") == current_month
 
-    this_month = pd.Timestamp.today().strftime("%Y-%m")
-    month_flag = ship_dt.dt.strftime("%Y-%m") == this_month
-
-    mask = shipped_flag & (~cancel_flag) & month_flag.fillna(False)
+    mask = shipment_flag & (~cancel_flag) & month_flag.fillna(False)
     return mask.fillna(False)
 
 
 def build_subset_mask(source_df: pd.DataFrame, subset_mode: str | None = None) -> pd.Series:
+    if subset_mode == "new_order_today":
+        return build_subset_mask_new_order_today(source_df)
     if subset_mode == "unshipped":
         return build_subset_mask_unshipped(source_df)
     if subset_mode == "shipment_only":
@@ -1895,10 +1936,8 @@ def render_teable_subset_table(
         return
 
     filtered_source = source_df.copy()
-    if subset_mode == "unshipped":
-        filtered_source = filtered_source[build_subset_mask_unshipped(filtered_source)].copy()
-    elif subset_mode == "shipment_only":
-        filtered_source = filtered_source[build_subset_mask_shipment_current_month(filtered_source)].copy()
+    if subset_mode:
+        filtered_source = filtered_source[build_subset_mask(filtered_source, subset_mode)].copy()
 
     display_df, mapping = build_teable_view_df(filtered_source, specs)
     if default_customer:
@@ -1909,10 +1948,12 @@ def render_teable_subset_table(
     if caption:
         st.caption(caption)
     else:
-        if subset_mode == "unshipped":
-            st.caption("資料來源：Teable 主表即時欄位（未出貨，已排除 SHIPMENT / ship out / 出貨完成 / 出貨 與 Cancell）")
+        if subset_mode == "new_order_today":
+            st.caption("資料來源：Teable 主表即時欄位（當天下單新單，或當天客戶交期，或有出貨方式變更；已排除 shipment / cancelled）")
+        elif subset_mode == "unshipped":
+            st.caption("資料來源：Teable 主表即時欄位（Sandy 內部WIP：已扣除 WIP 為 shipment / cancelled）")
         elif subset_mode == "shipment_only":
-            st.caption("資料來源：Teable 主表即時欄位（只顯示當月 SHIPMENT / ship out / 出貨完成 / 出貨，已排除 Cancell）")
+            st.caption("資料來源：Teable 主表即時欄位（Sandy 銷貨底：只顯示當月出貨者）")
         else:
             st.caption("資料來源：Teable 主表即時欄位")
 
@@ -2245,7 +2286,7 @@ elif menu == "新訂單WIP":
         specs=SANDY_NEW_ORDER_SPECS,
         default_customer=None,
         csv_name="新訂單WIP.csv",
-        subset_mode="unshipped",
+        subset_mode="new_order_today",
     )
 
 elif menu == "Sandy 內部WIP":
