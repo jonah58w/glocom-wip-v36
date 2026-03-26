@@ -1647,9 +1647,26 @@ def build_subset_mask_new_order_today(df: pd.DataFrame) -> pd.Series:
     mask = (order_today.fillna(False) | due_today.fillna(False) | change_flag.fillna(False)) & (~exclude_flag)
     return mask.fillna(False)
 def build_subset_mask_unshipped(df: pd.DataFrame) -> pd.Series:
-    # Sandy 內部 WIP：只扣除 WIP = shipment / cancelled
+    # Sandy 內部 WIP：只扣除 WIP = shipment / cancelled，且只保留 2026 年数据
     exclude_flag = _wip_exclude_mask(df)
-    return (~exclude_flag).fillna(False)
+    
+    # 过滤 2026 年数据 - 检查 Ship date 或 Factory Due Date
+    ship_date_name = first_existing_column(df, SHIP_DATE_CANDIDATES + ["出貨日期", "出貨日期 (公式)"])
+    ship_s = get_series_by_col(df, ship_date_name) if ship_date_name else None
+    ship_dt = parse_mixed_date_series(ship_s) if ship_s is not None else pd.Series(pd.NaT, index=df.index)
+    
+    # 如果 Ship date 没有数据，尝试用 Factory Due Date
+    if ship_dt.isna().all():
+        due_date_name = first_existing_column(df, FACTORY_DUE_CANDIDATES)
+        due_s = get_series_by_col(df, due_date_name) if due_date_name else None
+        ship_dt = parse_mixed_date_series(due_s) if due_s is not None else pd.Series(pd.NaT, index=df.index)
+    
+    # 检查年份是否为 2026
+    year_2026_flag = ship_dt.dt.year == 2026
+    
+    # 结合排除标志和年份过滤
+    mask = (~exclude_flag) & year_2026_flag.fillna(False)
+    return mask.fillna(False)
 def build_subset_mask_shipment_current_month(df: pd.DataFrame) -> pd.Series:
     # Sandy 銷貨底：當月出貨者
     today = pd.Timestamp.today()
@@ -1698,7 +1715,7 @@ def render_teable_subset_table(
         if subset_mode == "new_order_today":
             st.caption("資料來源：Teable 主表即時欄位（當天下單新單，或當天客戶交期，或有出貨方式變更；已排除 shipment / cancelled）")
         elif subset_mode == "unshipped":
-            st.caption("資料來源：Teable 主表即時欄位（Sandy 內部 WIP：已扣除 WIP 為 shipment / cancelled）")
+            st.caption("資料來源：Teable 主表即時欄位（Sandy 內部 WIP：已扣除 WIP 為 shipment / cancelled，且只顯示 2026 年数据）")
         elif subset_mode == "shipment_only":
             st.caption("資料來源：Teable 主表即時欄位（Sandy 銷貨底：只顯示當月出貨者）")
         else:
