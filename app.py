@@ -1846,7 +1846,11 @@ def _series_nonblank(series: pd.Series | None, index_like) -> pd.Series:
 
 
 def _resolve_wip_series(df: pd.DataFrame) -> pd.Series:
-    # Always resolve WIP directly from the current dataframe, not only from the global detected column.
+    # Prefer the exact WIP column in the current dataframe.
+    if "WIP" in df.columns:
+        exact = get_series_by_col(df, "WIP")
+        if exact is not None:
+            return exact
     src, series = first_existing_series(df, ["WIP"] + WIP_CANDIDATES)
     if series is not None:
         return series
@@ -1860,7 +1864,7 @@ def _resolve_wip_series(df: pd.DataFrame) -> pd.Series:
 def _wip_exclude_mask(df: pd.DataFrame) -> pd.Series:
     # Only exclude rows whose WIP is shipment / cancelled.
     wip_norm = normalize_status_text(_resolve_wip_series(df))
-    return wip_norm.str.contains(r"(shipment|cancelled|cancell|cancel)|取消", na=False).fillna(False)
+    return wip_norm.str.contains(r"\b(shipment|cancelled|cancell|cancel)\b|取消", na=False).fillna(False)
 
 
 def build_subset_mask_new_order_today(df: pd.DataFrame) -> pd.Series:
@@ -1907,8 +1911,8 @@ def build_subset_mask_shipment_current_month(df: pd.DataFrame) -> pd.Series:
     current_month = today.strftime("%Y-%m")
 
     wip_norm = normalize_status_text(_resolve_wip_series(df))
-    shipment_flag = wip_norm.str.contains(r"shipment", na=False)
-    cancel_flag = wip_norm.str.contains(r"(cancel|cancell|cancelled)|取消", na=False)
+    shipment_flag = wip_norm.str.contains(r"\bshipment\b", na=False)
+    cancel_flag = wip_norm.str.contains(r"\b(cancel|cancell|cancelled)\b|取消", na=False)
 
     ship_date_name = first_existing_column(df, SHIP_DATE_CANDIDATES + ["出貨日期", "出貨日期(公式)"])
     ship_s = get_series_by_col(df, ship_date_name) if ship_date_name else None
