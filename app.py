@@ -1845,6 +1845,24 @@ def _series_nonblank(series: pd.Series | None, index_like) -> pd.Series:
     return s.ne("")
 
 
+def _resolve_wip_series(df: pd.DataFrame) -> pd.Series:
+    # Always resolve WIP directly from the current dataframe, not only from the global detected column.
+    src, series = first_existing_series(df, ["WIP"] + WIP_CANDIDATES)
+    if series is not None:
+        return series
+    if 'wip_col' in globals() and wip_col:
+        fallback = get_series_by_col(df, wip_col)
+        if fallback is not None:
+            return fallback
+    return pd.Series("", index=df.index)
+
+
+def _wip_exclude_mask(df: pd.DataFrame) -> pd.Series:
+    # Only exclude rows whose WIP is shipment / cancelled.
+    wip_norm = normalize_status_text(_resolve_wip_series(df))
+    return wip_norm.str.contains(r"(shipment|cancelled|cancell|cancel)|取消", na=False).fillna(False)
+
+
 def build_subset_mask_new_order_today(df: pd.DataFrame) -> pd.Series:
     # 新訂單WIP：
     # 1) 當天下單的新訂單
@@ -1868,26 +1886,19 @@ def build_subset_mask_new_order_today(df: pd.DataFrame) -> pd.Series:
 
     change_col = first_existing_column(
         df,
-        ["更改 Booking", "更改 Booking", "更改Booking", "Ship via change", "出貨方式變更"]
+        ["更改 Booking", "更改Booking", "Ship via change", "出貨方式變更"]
     )
     change_flag = _series_nonblank(get_series_by_col(df, change_col) if change_col else None, df.index)
 
-    wip_s = get_series_by_col(df, wip_col) if 'wip_col' in globals() and wip_col else None
-    wip_norm = normalize_status_text(wip_s) if wip_s is not None else pd.Series("", index=df.index)
-    exclude_flag = wip_norm.str.contains(r"shipment|cancel|cancell|cancelled|取消", na=False)
-
-    mask = (order_today.fillna(False) | due_today.fillna(False) | change_flag.fillna(False)) & (~exclude_flag.fillna(False))
+    exclude_flag = _wip_exclude_mask(df)
+    mask = (order_today.fillna(False) | due_today.fillna(False) | change_flag.fillna(False)) & (~exclude_flag)
     return mask.fillna(False)
 
 
 def build_subset_mask_unshipped(df: pd.DataFrame) -> pd.Series:
-    # Sandy 內部WIP：扣除 WIP 是 shipment 或 cancelled
-    wip_s = get_series_by_col(df, wip_col) if 'wip_col' in globals() and wip_col else None
-    wip_norm = normalize_status_text(wip_s) if wip_s is not None else pd.Series("", index=df.index)
-
-    exclude_flag = wip_norm.str.contains(r"shipment|cancel|cancell|cancelled|取消", na=False)
-    mask = ~exclude_flag
-    return mask.fillna(False)
+    # Sandy 內部WIP：只扣除 WIP = shipment / cancelled
+    exclude_flag = _wip_exclude_mask(df)
+    return (~exclude_flag).fillna(False)
 
 
 def build_subset_mask_shipment_current_month(df: pd.DataFrame) -> pd.Series:
@@ -1895,11 +1906,9 @@ def build_subset_mask_shipment_current_month(df: pd.DataFrame) -> pd.Series:
     today = pd.Timestamp.today()
     current_month = today.strftime("%Y-%m")
 
-    wip_s = get_series_by_col(df, wip_col) if 'wip_col' in globals() and wip_col else None
-    wip_norm = normalize_status_text(wip_s) if wip_s is not None else pd.Series("", index=df.index)
-
-    shipment_flag = wip_norm.str.contains(r"shipment", na=False)
-    cancel_flag = wip_norm.str.contains(r"cancel|cancell|cancelled|取消", na=False)
+    wip_norm = normalize_status_text(_resolve_wip_series(df))
+    shipment_flag = wip_norm.str.contains(r"shipment", na=False)
+    cancel_flag = wip_norm.str.contains(r"(cancel|cancell|cancelled)|取消", na=False)
 
     ship_date_name = first_existing_column(df, SHIP_DATE_CANDIDATES + ["出貨日期", "出貨日期(公式)"])
     ship_s = get_series_by_col(df, ship_date_name) if ship_date_name else None
