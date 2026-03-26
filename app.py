@@ -1850,6 +1850,7 @@ def build_subset_mask_new_order_today(df: pd.DataFrame) -> pd.Series:
     # 1) 當天下單的新訂單
     # 2) 當天有任何訂單客戶交期
     # 3) 出貨方式變更者（以「更改 Booking」欄位非空為代理判斷）
+    # 並排除 WIP = shipment / cancelled
     today = _today_normalized()
 
     order_date_col = first_existing_column(
@@ -1868,15 +1869,15 @@ def build_subset_mask_new_order_today(df: pd.DataFrame) -> pd.Series:
 
     change_col = first_existing_column(
         df,
-        ["更改 Booking", "更改 Booking", "更改Booking", "Ship via change", "出貨方式變更"]
+        ["更改 Booking", "更改Booking", "Ship via change", "出貨方式變更"]
     )
-    change_flag = _series_nonblank(get_series_by_col(df, change_col) if change_col else None, df.index)
+    change_flag = _series_nonblank(get_series_by_col(df, change_col)) if change_col else pd.Series(False, index=df.index)
 
     wip_s = get_series_by_col(df, wip_col) if 'wip_col' in globals() and wip_col else None
     wip_norm = normalize_status_text(wip_s) if wip_s is not None else pd.Series("", index=df.index)
     exclude_flag = wip_norm.str.contains(r"shipment|cancel|cancell|cancelled|取消", na=False)
 
-    mask = (order_today.fillna(False) | due_today.fillna(False) | change_flag.fillna(False)) & (~exclude_flag.fillna(False))
+    mask = (order_today.fillna(False) | due_today.fillna(False) | change_flag.fillna(False)) & (~exclude_flag)
     return mask.fillna(False)
 
 
@@ -2880,3 +2881,5 @@ elif menu == "Import / Update":
 
 
 # Excel Quote Export removed from menu.
+
+翻譯
