@@ -770,3 +770,34 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     else:
         st.info("沒有足夠資料可顯示近 12 個月趨勢。")
 
+def show_new_orders_wip_report(source_df: pd.DataFrame):
+    render_teable_subset_table(
+        title="📄 新訂單 WIP",
+        source_df=source_df,
+        specs=SANDY_NEW_ORDER_SPECS,
+        default_customer=None,
+        csv_name="新訂單 WIP.csv",
+        subset_mode="new_order_today",
+    )
+
+
+def show_sandy_internal_wip_report(source_df: pd.DataFrame):
+    render_teable_subset_table(
+        title="📄 Sandy 內部 WIP",
+        source_df=source_df,
+        specs=SANDY_INTERNAL_WIP_SPECS,
+        default_customer=None,
+        csv_name="Sandy 內部 WIP.csv",
+        subset_mode="unshipped",
+    )
+
+
+def show_sandy_sales_report(source_df: pd.DataFrame):
+    render_teable_subset_table(
+        title="📄 Sandy 銷貨底",
+        source_df=source_df,
+        specs=SANDY_SALES_BASE_SPECS,
+        default_customer=None,
+        csv_name="Sandy 銷貨底.csv",
+        subset_mode="shipment_only",
+    )
