@@ -1,23 +1,24 @@
 # -*- coding: utf-8 -*-
 """
 reports.py  ── GLOCOM Control Tower 業績明細表
-v3 修正：
-  1. 2026-03 已出貨加入歷史彙總金額 $58,392.42（舊系統移轉，16筆）
-  2. 移除補登 UI
-  3. 近12個月改為固定往前推12個月區間（不受歷史零散資料影響）
+v4：加入統計圖表
+  - 已出貨 vs 預計出貨（水平堆疊長條）
+  - 依工廠 / 依客戶銷貨佔比（甜甜圈圓餅）
+  - 近12個月銷貨趨勢（長條 + 折線）
 """
 
 from __future__ import annotations
 
 import re
+import json
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ================================
 # 歷史移轉金額（一次性，寫死）
 # key: "YYYY-MM"  value: float（已出貨）
-# 日後若有其他月份需要補，照格式加一行即可
 # ================================
 LEGACY_SHIPPED: dict[str, float] = {
     "2026-03": 58_392.42,
@@ -50,6 +51,10 @@ PLANNED_SHIP_DATE_CANDIDATES = ["Ship date", "Ship Date", "Required Ship date", 
 
 CANCELLED_KEYWORDS = ["PO CANCELLED", "PO CANCELED", "CANCELLATION",
                       "CANCELLED", "CANCELED", "CANCEL"]
+
+# 圖表色盤
+CHART_COLORS = ["#378ADD", "#1D9E75", "#D85A30", "#D4537E",
+                "#7F77DD", "#888780", "#639922", "#BA7517"]
 
 
 # ================================
@@ -150,6 +155,207 @@ def _is_cancelled(wip_series: pd.Series) -> pd.Series:
 
 
 # ================================
+# CHART HELPERS
+# ================================
+
+def _chart_colors_js(n: int) -> str:
+    colors = CHART_COLORS * (n // len(CHART_COLORS) + 1)
+    return json.dumps(colors[:n])
+
+
+def _render_stacked_bar(month_key: str, shipped: float, forecast: float):
+    """水平堆疊長條：已出貨 vs 預計出貨"""
+    data = json.dumps({
+        "shipped":  round(shipped, 2),
+        "forecast": round(forecast, 2),
+        "label":    month_key,
+    })
+    html = f"""
+<div style="position:relative;width:100%;height:80px;">
+  <canvas id="stackBar"></canvas>
+</div>
+<div style="display:flex;gap:16px;font-size:12px;color:#888;margin-top:6px;">
+  <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#378ADD;margin-right:4px;"></span>已出貨</span>
+  <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#9FE1CB;margin-right:4px;"></span>預計出貨</span>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+(function(){{
+  var d = {data};
+  new Chart(document.getElementById('stackBar'), {{
+    type: 'bar',
+    data: {{
+      labels: [d.label],
+      datasets: [
+        {{ label: '已出貨',   data: [d.shipped],  backgroundColor: '#378ADD', borderRadius: 4 }},
+        {{ label: '預計出貨', data: [d.forecast], backgroundColor: '#9FE1CB', borderRadius: 4 }}
+      ]
+    }},
+    options: {{
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: {{
+        legend: {{ display: false }},
+        tooltip: {{ callbacks: {{ label: function(c){{ return ' US$' + c.raw.toLocaleString(); }} }} }}
+      }},
+      scales: {{
+        x: {{ stacked: true,
+              ticks: {{ callback: function(v){{ return '$' + Math.round(v/1000) + 'k'; }} }},
+              grid: {{ color: 'rgba(128,128,128,.12)' }} }},
+        y: {{ stacked: true, grid: {{ display: false }} }}
+      }}
+    }}
+  }});
+}})();
+</script>
+"""
+    components.html(html, height=110)
+
+
+def _render_pie_charts(fac_df: pd.DataFrame, cus_df: pd.DataFrame):
+    """工廠 / 客戶 甜甜圈圓餅（並排）"""
+    # 排除合計列
+    fac = fac_df[fac_df["工廠"] != "合計"].copy() if not fac_df.empty else pd.DataFrame()
+    cus = cus_df[cus_df["客戶"] != "合計"].copy() if not cus_df.empty else pd.DataFrame()
+
+    fac_labels = json.dumps(fac["工廠"].tolist() if not fac.empty else ["(無資料)"])
+    fac_data   = json.dumps([round(v, 2) for v in fac["銷貨金額(USD)"].tolist()] if not fac.empty else [0])
+    cus_labels = json.dumps(cus["客戶"].tolist() if not cus.empty else ["(無資料)"])
+    cus_data   = json.dumps([round(v, 2) for v in cus["銷貨金額(USD)"].tolist()] if not cus.empty else [0])
+    fac_n = max(len(fac), 1)
+    cus_n = max(len(cus), 1)
+    fac_colors = _chart_colors_js(fac_n)
+    cus_colors = _chart_colors_js(cus_n)
+
+    html = f"""
+<style>
+.pie-wrap {{ display:grid; grid-template-columns:1fr 1fr; gap:20px; }}
+.pie-block {{ }}
+.pie-title {{ font-size:13px; font-weight:500; color:#555; margin-bottom:6px; }}
+.pie-legend {{ display:flex; flex-wrap:wrap; gap:8px; font-size:11px; color:#777; margin-bottom:6px; }}
+.pie-dot {{ width:9px; height:9px; border-radius:2px; display:inline-block; margin-right:3px; }}
+</style>
+<div class="pie-wrap">
+  <div class="pie-block">
+    <div class="pie-title">依工廠銷貨佔比</div>
+    <div class="pie-legend" id="facLeg"></div>
+    <div style="position:relative;width:100%;height:200px;"><canvas id="facPie"></canvas></div>
+  </div>
+  <div class="pie-block">
+    <div class="pie-title">依客戶銷貨佔比</div>
+    <div class="pie-legend" id="cusLeg"></div>
+    <div style="position:relative;width:100%;height:200px;"><canvas id="cusPie"></canvas></div>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+(function(){{
+  var COLORS = {CHART_COLORS};
+
+  function buildLegend(id, labels, data, colors) {{
+    var total = data.reduce(function(a,b){{return a+b;}}, 0);
+    var el = document.getElementById(id);
+    labels.forEach(function(l,i) {{
+      var pct = total > 0 ? (data[i]/total*100).toFixed(1) : '0.0';
+      el.innerHTML += '<span style="display:flex;align-items:center;gap:3px">'
+        + '<span class="pie-dot" style="background:'+colors[i%colors.length]+'"></span>'
+        + l + ' ' + pct + '%</span>';
+    }});
+  }}
+
+  function makeDoughnut(id, labels, data, colors) {{
+    new Chart(document.getElementById(id), {{
+      type: 'doughnut',
+      data: {{ labels: labels, datasets: [{{
+        data: data,
+        backgroundColor: colors,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,.2)'
+      }}] }},
+      options: {{
+        responsive: true, maintainAspectRatio: false, cutout: '58%',
+        plugins: {{
+          legend: {{ display: false }},
+          tooltip: {{ callbacks: {{ label: function(c) {{
+            var total = c.dataset.data.reduce(function(a,b){{return a+b;}},0);
+            var pct = total > 0 ? (c.raw/total*100).toFixed(1) : '0.0';
+            return ' US$' + c.raw.toLocaleString() + ' (' + pct + '%)';
+          }} }} }}
+        }}
+      }}
+    }});
+  }}
+
+  var facLabels = {fac_labels};
+  var facData   = {fac_data};
+  var facColors = {fac_colors};
+  var cusLabels = {cus_labels};
+  var cusData   = {cus_data};
+  var cusColors = {cus_colors};
+
+  buildLegend('facLeg', facLabels, facData, facColors);
+  buildLegend('cusLeg', cusLabels, cusData, cusColors);
+  makeDoughnut('facPie', facLabels, facData, facColors);
+  makeDoughnut('cusPie', cusLabels, cusData, cusColors);
+}})();
+</script>
+""".replace("{CHART_COLORS}", json.dumps(CHART_COLORS * 3))
+    components.html(html, height=290)
+
+
+def _render_trend_chart(monthly: list[dict]):
+    """近12個月長條+折線組合圖"""
+    labels   = json.dumps([r["月份"] for r in monthly])
+    shipped  = json.dumps([round(r["已出貨"], 2)   for r in monthly])
+    forecast = json.dumps([round(r["預計出貨"], 2)  for r in monthly])
+    totals   = json.dumps([round(r["銷貨合計"], 2)  for r in monthly])
+
+    html = f"""
+<div style="display:flex;gap:16px;font-size:12px;color:#888;margin-bottom:8px;flex-wrap:wrap;">
+  <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#378ADD;margin-right:4px;"></span>已出貨</span>
+  <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#9FE1CB;margin-right:4px;"></span>預計出貨</span>
+  <span><span style="display:inline-block;width:28px;height:2px;background:#D85A30;margin-right:4px;vertical-align:middle;"></span>銷貨合計</span>
+</div>
+<div style="position:relative;width:100%;height:260px;">
+  <canvas id="trendChart"></canvas>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+(function(){{
+  new Chart(document.getElementById('trendChart'), {{
+    type: 'bar',
+    data: {{
+      labels: {labels},
+      datasets: [
+        {{ label: '已出貨',   data: {shipped},  backgroundColor: '#378ADD', order: 2, borderRadius: 3 }},
+        {{ label: '預計出貨', data: {forecast}, backgroundColor: '#9FE1CB', order: 2, borderRadius: 3 }},
+        {{ label: '銷貨合計', data: {totals},
+           type: 'line', borderColor: '#D85A30', backgroundColor: 'transparent',
+           pointBackgroundColor: '#D85A30', pointRadius: 4, borderWidth: 2, order: 1 }}
+      ]
+    }},
+    options: {{
+      responsive: true, maintainAspectRatio: false,
+      plugins: {{
+        legend: {{ display: false }},
+        tooltip: {{ callbacks: {{ label: function(c){{ return ' US$' + c.raw.toLocaleString(); }} }} }}
+      }},
+      scales: {{
+        x: {{ stacked: true,
+              ticks: {{ autoSkip: false, maxRotation: 45, font: {{ size: 11 }} }},
+              grid: {{ display: false }} }},
+        y: {{ stacked: true,
+              ticks: {{ callback: function(v){{ return '$' + Math.round(v/1000) + 'k'; }} }},
+              grid: {{ color: 'rgba(128,128,128,.12)' }} }}
+      }}
+    }}
+  }});
+}})();
+</script>
+"""
+    components.html(html, height=300)
+
+
+# ================================
 # VIEW SPECS
 # ================================
 
@@ -175,7 +381,7 @@ SANDY_NEW_ORDER_SPECS = [
     ("Ship via",              col_candidates("Ship via")),
     ("箱數",                  col_candidates("箱數", "CTNS", "CTN")),
     ("重量",                  col_candidates("重量", "Weight", "KGs")),
-    ("重貨優惠",              col_candidates("重貨優惠", "重貨\n 優惠")),
+    ("重貨優惠",              col_candidates("重貨優惠")),
     ("Pricing & Qty issue",   col_candidates("Pricing & Qty issue")),
     ("T/T",                   col_candidates("T/T")),
     ("工廠出貨事項",          col_candidates("工廠出貨事項", "工廠出貨注意事項")),
@@ -269,19 +475,19 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
     if subset_mode == "unshipped":
         not_shipment  = ~wip_upper.eq("SHIPMENT")
         not_cancelled = ~_is_cancelled(wip_raw)
-        cust_col  = find_col(source_df, ["客戶下單日期"])
-        fact_col  = find_col(source_df, ["工廠下單日期"])
-        ship_col  = find_col(source_df, PLANNED_SHIP_DATE_CANDIDATES)
-        cust_d    = (parse_mixed_date_series(get_series_by_col(source_df, cust_col))
-                     if cust_col else pd.Series(pd.NaT, index=idx))
-        fact_d    = (parse_mixed_date_series(get_series_by_col(source_df, fact_col))
-                     if fact_col else pd.Series(pd.NaT, index=idx))
-        ship_d    = (parse_mixed_date_series(get_series_by_col(source_df, ship_col))
-                     if ship_col else pd.Series(pd.NaT, index=idx))
-        year_s    = (cust_d.dt.year
-                     .where(cust_d.notna(), fact_d.dt.year)
-                     .where(cust_d.notna() | fact_d.notna(), ship_d.dt.year))
-        year_ok   = year_s.isna() | year_s.eq(current_year)
+        cust_col = find_col(source_df, ["客戶下單日期"])
+        fact_col = find_col(source_df, ["工廠下單日期"])
+        ship_col = find_col(source_df, PLANNED_SHIP_DATE_CANDIDATES)
+        cust_d   = (parse_mixed_date_series(get_series_by_col(source_df, cust_col))
+                    if cust_col else pd.Series(pd.NaT, index=idx))
+        fact_d   = (parse_mixed_date_series(get_series_by_col(source_df, fact_col))
+                    if fact_col else pd.Series(pd.NaT, index=idx))
+        ship_d   = (parse_mixed_date_series(get_series_by_col(source_df, ship_col))
+                    if ship_col else pd.Series(pd.NaT, index=idx))
+        year_s   = (cust_d.dt.year
+                    .where(cust_d.notna(), fact_d.dt.year)
+                    .where(cust_d.notna() | fact_d.notna(), ship_d.dt.year))
+        year_ok  = year_s.isna() | year_s.eq(current_year)
         return not_shipment & not_cancelled & year_ok
 
     if subset_mode == "shipment_only":
@@ -357,17 +563,15 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     qtys      = (get_series_by_col(source_df, qty_col).astype(str).fillna("")
                  if qty_col else pd.Series("", index=source_df.index))
 
-    # ── 月份選單：只顯示近24個月內有資料的月份 ───────────────────────────────
+    # ── 月份選單（近24個月 + 當月） ──────────────────────────────────────────
     today          = pd.Timestamp.today().normalize()
     current_period = today.to_period("M")
 
-    valid_periods: set = set()
+    valid_periods: set = {current_period}
     for s in [order_dates, actual_dates, plan_dates]:
         for p in s.dt.to_period("M").dropna().unique().tolist():
             if (current_period - p).n <= 24:
                 valid_periods.add(p)
-    # 當月一定要有
-    valid_periods.add(current_period)
 
     periods  = sorted(valid_periods)
     selected = st.selectbox(
@@ -409,13 +613,11 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     order_total    = float(order_amount[order_mask].fillna(0).sum())
     shipped_total  = float(shipped_df["金額(USD)"].fillna(0).sum())
     forecast_total = float(forecast_df["金額(USD)"].fillna(0).sum())
-
-    # ★ 加入歷史移轉金額
     legacy_amt     = LEGACY_SHIPPED.get(month_key, 0.0)
     shipped_total += legacy_amt
     month_total    = shipped_total + forecast_total
 
-    # ── 指標 ─────────────────────────────────────────────────────────────────
+    # ── 指標卡 ────────────────────────────────────────────────────────────────
     st.markdown(f"### {selected.month}月 業績明細表")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("接單金額 (USD)",     f"${order_total:,.2f}",
@@ -443,8 +645,13 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
             f"出貨後 WIP 更新為 SHIPMENT，{selected.month}月銷貨合計將增至 US${month_total:,.2f}。"
         )
 
-    # ── 依工廠 / 客戶統計 ────────────────────────────────────────────────────
+    # ── ① 已出貨 vs 預計出貨 堆疊長條 ────────────────────────────────────────
+    st.markdown("#### 本月出貨進度")
+    _render_stacked_bar(month_key, shipped_total, forecast_total)
+
+    # ── 工廠 / 客戶 統計表 ────────────────────────────────────────────────────
     left, right = st.columns(2)
+
     with left:
         st.markdown(f"#### 🏭 依工廠別統計（{selected.month}月銷貨）")
         if shipped_df.empty:
@@ -452,15 +659,16 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
             if legacy_amt:
                 msg += f"\n歷史移轉金額 US${legacy_amt:,.2f} 已計入合計，無工廠明細。"
             st.info(msg)
+            fac_table = pd.DataFrame(columns=["工廠", "訂單數", "銷貨金額(USD)"])
         else:
-            fac = shipped_df.groupby("工廠", dropna=False).agg(
+            fac_table = shipped_df.groupby("工廠", dropna=False).agg(
                 訂單數=("PO#", "count"), 銷貨金額=("金額(USD)", "sum")
             ).reset_index()
-            fac.columns = ["工廠", "訂單數", "銷貨金額(USD)"]
-            fac = pd.concat([fac, pd.DataFrame(
-                [["合計", int(fac["訂單數"].sum()), float(fac["銷貨金額(USD)"].sum())]],
-                columns=fac.columns)], ignore_index=True)
-            st.dataframe(fac, use_container_width=True, hide_index=True)
+            fac_table.columns = ["工廠", "訂單數", "銷貨金額(USD)"]
+            fac_table = pd.concat([fac_table, pd.DataFrame(
+                [["合計", int(fac_table["訂單數"].sum()), float(fac_table["銷貨金額(USD)"].sum())]],
+                columns=fac_table.columns)], ignore_index=True)
+            st.dataframe(fac_table, use_container_width=True, hide_index=True)
 
     with right:
         st.markdown(f"#### 👥 依客戶別統計（{selected.month}月銷貨）")
@@ -469,15 +677,21 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
             if legacy_amt:
                 msg += f"\n歷史移轉金額 US${legacy_amt:,.2f} 已計入合計，無客戶明細。"
             st.info(msg)
+            cus_table = pd.DataFrame(columns=["客戶", "訂單數", "銷貨金額(USD)"])
         else:
-            cus = shipped_df.groupby("客戶", dropna=False).agg(
+            cus_table = shipped_df.groupby("客戶", dropna=False).agg(
                 訂單數=("PO#", "count"), 銷貨金額=("金額(USD)", "sum")
             ).reset_index()
-            cus.columns = ["客戶", "訂單數", "銷貨金額(USD)"]
-            cus = pd.concat([cus, pd.DataFrame(
-                [["合計", int(cus["訂單數"].sum()), float(cus["銷貨金額(USD)"].sum())]],
-                columns=cus.columns)], ignore_index=True)
-            st.dataframe(cus, use_container_width=True, hide_index=True)
+            cus_table.columns = ["客戶", "訂單數", "銷貨金額(USD)"]
+            cus_table = pd.concat([cus_table, pd.DataFrame(
+                [["合計", int(cus_table["訂單數"].sum()), float(cus_table["銷貨金額(USD)"].sum())]],
+                columns=cus_table.columns)], ignore_index=True)
+            st.dataframe(cus_table, use_container_width=True, hide_index=True)
+
+    # ── ② 工廠 / 客戶 圓餅圖 ─────────────────────────────────────────────────
+    if not shipped_df.empty:
+        st.markdown("#### 本月銷貨佔比")
+        _render_pie_charts(fac_table, cus_table)
 
     # ── 明細 ──────────────────────────────────────────────────────────────────
     st.markdown("#### 已出貨明細")
@@ -489,24 +703,19 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     st.markdown("#### 預計出貨明細")
     st.dataframe(forecast_df, use_container_width=True, hide_index=True)
 
-    # ── 近 12 個月趨勢（固定往前推12個月，空月份補 0） ───────────────────────
-    st.markdown("#### 近 12 個月月銷貨趨勢")
+    # ── ③ 近12個月趨勢 ────────────────────────────────────────────────────────
     monthly = []
-    for i in range(11, -1, -1):      # 11個月前 → 當月
+    for i in range(11, -1, -1):
         p     = current_period - i
         p_key = f"{p.year}-{p.month:02d}"
-
         s_amt = float(amount[is_shipment & (actual_dates.dt.to_period("M") == p)].fillna(0).sum())
         f_amt = float(amount[(~is_shipment) & (plan_dates.dt.to_period("M") == p)].fillna(0).sum())
-        s_amt += LEGACY_SHIPPED.get(p_key, 0.0)   # 加入歷史移轉
+        s_amt += LEGACY_SHIPPED.get(p_key, 0.0)
+        monthly.append({"月份": p_key, "已出貨": round(s_amt, 2),
+                         "預計出貨": round(f_amt, 2), "銷貨合計": round(s_amt + f_amt, 2)})
 
-        monthly.append({
-            "月份":     p_key,
-            "已出貨":   round(s_amt, 2),
-            "預計出貨": round(f_amt, 2),
-            "銷貨合計": round(s_amt + f_amt, 2),
-        })
-
+    st.markdown("#### 近 12 個月月銷貨趨勢")
+    _render_trend_chart(monthly)
     st.dataframe(pd.DataFrame(monthly), use_container_width=True, hide_index=True)
 
     # ── Debug ─────────────────────────────────────────────────────────────────
