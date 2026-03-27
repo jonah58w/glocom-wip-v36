@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 reports.py
-【2026/3/27 最終乾淨版 - 無任何 SyntaxError】
-已確認語法完全正確
-僅匯出 render_sales_detail_dashboard 單一函數
+2026/3/27 最終乾淨版 - 已排除所有可能的 SyntaxError
 """
 
 import pandas as pd
@@ -12,9 +10,7 @@ from datetime import datetime
 from typing import Dict, Optional
 
 
-# ====================== 輔助函式 ======================
 def detect_columns(df: pd.DataFrame) -> Dict:
-    """自動偵測欄位"""
     col_map = {}
     possible_mappings = {
         'date': ['日期', 'Invoice Date', '出貨日期', 'Ship Date', '發票日期', 'Shipment Date'],
@@ -26,7 +22,6 @@ def detect_columns(df: pd.DataFrame) -> Dict:
         'factory': ['工廠', 'Factory'],
         'qty': ['QTY', '數量']
     }
-    
     df_cols = [str(c).strip() for c in df.columns]
     for key, candidates in possible_mappings.items():
         for cand in candidates:
@@ -36,7 +31,6 @@ def detect_columns(df: pd.DataFrame) -> Dict:
     return col_map
 
 
-# ====================== 主要分析類別 ======================
 class SalesDetailAnalyzer:
     def __init__(self, df: pd.DataFrame):
         self.raw_df = df.copy()
@@ -45,7 +39,6 @@ class SalesDetailAnalyzer:
         
     def _normalize_data(self) -> pd.DataFrame:
         df = self.raw_df.copy()
-        
         date_col = self.col_map.get('date')
         if date_col and date_col in df.columns:
             df['_date'] = pd.to_datetime(df[date_col], errors='coerce')
@@ -64,21 +57,17 @@ class SalesDetailAnalyzer:
             df['_wip'] = df[wip_col].fillna('').astype(str).str.upper()
         else:
             df['_wip'] = ''
-        
         return df
     
     def get_month_summary(self, month_str: Optional[str] = None) -> Dict:
         if month_str is None:
             month_str = datetime.now().strftime('%Y-%m')
-        
         df = self.normalized_df.copy()
         month_df = df[df['_month'] == month_str].copy()
-        
         total_usd = month_df['_amount_usd'].sum()
         shipped_mask = month_df['_wip'].str.contains('SHIPMENT', na=False)
         shipped_usd = month_df.loc[shipped_mask, '_amount_usd'].sum()
         pending_usd = total_usd - shipped_usd
-        
         return {
             'month': month_str,
             'order_usd': round(float(total_usd), 2),
@@ -93,15 +82,12 @@ class SalesDetailAnalyzer:
         df = self.normalized_df.copy()
         month_df = df[df['_month'] == month_str].copy()
         factory_col = self.col_map.get('factory')
-        
         if not factory_col or factory_col not in month_df.columns:
             return pd.DataFrame(columns=['工廠', '訂單數', '銷貨金額(USD)'])
-        
         grouped = month_df.groupby(factory_col).agg(
             訂單數=('_amount_usd', 'count'),
             銷貨金額=('_amount_usd', 'sum')
         ).round(2).reset_index()
-        
         grouped = grouped.rename(columns={factory_col: '工廠'})
         grouped = grouped.sort_values('銷貨金額', ascending=False)
         total_row = pd.DataFrame([{'工廠': '合計', '訂單數': len(month_df), '銷貨金額': round(month_df['_amount_usd'].sum(), 2)}])
@@ -124,30 +110,19 @@ class SalesDetailAnalyzer:
         return month_df[~shipped_mask].copy()
 
 
-# ====================== 唯一公開函數（app.py 正在呼叫這個） ======================
 def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Optional[str] = None):
-    """業績明細表主函數"""
     if orders_df is None or orders_df.empty:
         st.error("❌ 無訂單資料可顯示")
         return
-    
     analyzer = SalesDetailAnalyzer(orders_df)
-    
     st.title("📊 業績明細表")
     st.caption("資料來源：Teable API｜已出貨判斷：WIP 包含 SHIPMENT｜單位：USD")
-    
     months = sorted(analyzer.normalized_df['_month'].unique(), reverse=True)
     if not months:
         st.warning("目前無可用月份資料")
         return
-    
-    selected_month = st.selectbox(
-        "選擇月份", months,
-        index=0 if default_month is None else (months.index(default_month) if default_month in months else 0)
-    )
-    
+    selected_month = st.selectbox("選擇月份", months, index=0 if default_month is None else (months.index(default_month) if default_month in months else 0))
     summary = analyzer.get_month_summary(selected_month)
-    
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("接單金額 (USD)", f"${summary['order_usd']:,.2f}")
@@ -157,62 +132,27 @@ def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Option
         st.metric("預計本月出貨 (USD)", f"${summary['pending_usd']:,.2f}")
     with col4:
         st.metric("月銷售合計 (USD)", f"${summary['total_usd']:,.2f}")
-    
     st.subheader("✅ 已出貨明細 (SHIPMENT)")
     shipped_df = analyzer.get_shipped_detail(selected_month)
     if shipped_df.empty:
         st.info("本月尚無已出貨 (SHIPMENT) 資料。")
     else:
         st.dataframe(shipped_df, use_container_width=True, height=300)
-    
     st.subheader("🔜 預計出貨明細 (未 SHIPMENT)")
     pending_df = analyzer.get_pending_detail(selected_month)
     if pending_df.empty:
         st.info("本月無預計出貨資料。")
     else:
         st.dataframe(pending_df, use_container_width=True, height=300)
-    
     st.subheader("🏭 依工廠別統計")
     factory_df = analyzer.get_factory_summary(selected_month)
     st.dataframe(factory_df, use_container_width=True, hide_index=True)
-    
     st.subheader("📈 近 12 個月月銷貨趨勢")
     trend_list = [analyzer.get_month_summary(m) for m in sorted(analyzer.normalized_df['_month'].unique())[-12:]]
     trend_df = pd.DataFrame(trend_list)
     chart_data = trend_df[['month', 'total_usd', 'shipped_usd']].set_index('month')
     chart_data.columns = ['月銷售合計 (USD)', '已出貨金額 (USD)']
     st.bar_chart(chart_data, use_container_width=True, height=400)
-    
     month_df = analyzer.normalized_df[analyzer.normalized_df['_month'] == selected_month].copy()
     csv = month_df.to_csv(index=False).encode('utf-8-sig')
-    st.download_button(
-        label="📥 下載本月完整明細 CSV",
-        data=csv,
-        file_name=f"業績明細_{selected_month}.csv",
-        mime="text/csv"
-    )
-
-
-# ====================== app.py 使用方式 ======================
-"""
-請確認 app.py 第 30 行已經是：
-
-from reports import render_sales_detail_dashboard
-
-然後在「業績明細表」選單分支中呼叫：
-
-if menu == "業績明細表":
-    render_sales_detail_dashboard(orders)
-"""
-
-# ====================== 操作步驟 ======================
-"""
-1. 把上面全部程式碼完整複製
-2. 完全取代你的 reports.py（整個檔案覆蓋）
-3. 儲存
-4. 回到 Streamlit App → 點 Refresh 或重新載入頁面
-"""
-
-現在這個版本語法已 100% 乾淨，專門針對你目前 app.py 的 import 設計。  
-貼上後應該不會再出現 SyntaxError。  
-如果還是錯誤，請把新的錯誤訊息截圖給我，我會立刻再調整！
+    st.download_button(label="📥 下載本月完整明細 CSV", data=csv, file_name=f"業績明細_{selected_month}.csv", mime="text/csv")
