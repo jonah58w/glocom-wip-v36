@@ -1277,6 +1277,10 @@ with st.expander("Debug"):
     st.write("API Status:", api_status)
     st.write("TABLE_URL:", TABLE_URL)
     st.write("Token loaded:", bool(TEABLE_TOKEN))
+    st.write("總筆數:", len(orders))  # ← 加這行
+    st.write("WIP分布:", orders["WIP"].value_counts().to_dict() if "WIP" in orders.columns else {})  # ← 加這行
+    st.write("總筆數:", len(orders))
+    st.write("WIP分布:", orders["WIP"].value_counts().to_dict() if "WIP" in orders.columns else {})
     st.write("Columns:", list(orders.columns) if not orders.empty else [])
     if isinstance(api_text, str):
         st.text(api_text[:1200])
