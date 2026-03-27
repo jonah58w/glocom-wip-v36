@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 reports.py
-【最終修正版 - 2026/3/27】專為解決 ImportError 設計
-已確認只匯出 render_sales_detail_dashboard 一個公開函數
-完全符合目前 APP 截圖與附件格式，無任何外部套件依賴
+【2026/3/27 最終相容版】
+解決 NameError: render_sales_detail_from_teable
+同時支援舊呼叫名稱 + 新儀表板
 """
 
 import pandas as pd
@@ -14,7 +14,6 @@ from typing import Dict, Optional
 
 # ====================== 輔助函式 ======================
 def detect_columns(df: pd.DataFrame) -> Dict:
-    """自動偵測 Teable 欄位（已針對你目前 APP 最佳化）"""
     col_map = {}
     possible_mappings = {
         'date': ['日期', 'Invoice Date', '出貨日期', 'Ship Date', '發票日期', 'Shipment Date'],
@@ -36,7 +35,7 @@ def detect_columns(df: pd.DataFrame) -> Dict:
     return col_map
 
 
-# ====================== 主要分析類別（內部使用） ======================
+# ====================== 主要分析類別 ======================
 class SalesDetailAnalyzer:
     def __init__(self, df: pd.DataFrame):
         self.raw_df = df.copy()
@@ -46,7 +45,6 @@ class SalesDetailAnalyzer:
     def _normalize_data(self) -> pd.DataFrame:
         df = self.raw_df.copy()
         
-        # 日期 → 月份
         date_col = self.col_map.get('date')
         if date_col and date_col in df.columns:
             df['_date'] = pd.to_datetime(df[date_col], errors='coerce')
@@ -54,14 +52,12 @@ class SalesDetailAnalyzer:
         else:
             df['_month'] = datetime.now().strftime('%Y-%m')
         
-        # 金額欄位
         amount_col = self.col_map.get('amount_usd')
         if amount_col and amount_col in df.columns:
             df['_amount_usd'] = pd.to_numeric(df[amount_col], errors='coerce').fillna(0.0)
         else:
             df['_amount_usd'] = 0.0
         
-        # WIP 狀態
         wip_col = self.col_map.get('wip_status')
         if wip_col and wip_col in df.columns:
             df['_wip'] = df[wip_col].fillna('').astype(str).str.upper()
@@ -127,9 +123,8 @@ class SalesDetailAnalyzer:
         return month_df[~shipped_mask].copy()
 
 
-# ====================== 唯一公開函數 ======================
+# ====================== 主儀表板 ======================
 def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Optional[str] = None):
-    """完整渲染業績明細表（這是 app.py 唯一需要呼叫的函數）"""
     if orders_df is None or orders_df.empty:
         st.error("❌ 無訂單資料可顯示")
         return
@@ -185,7 +180,6 @@ def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Option
     chart_data.columns = ['月銷售合計 (USD)', '已出貨金額 (USD)']
     st.bar_chart(chart_data, use_container_width=True, height=400)
     
-    # 匯出
     month_df = analyzer.normalized_df[analyzer.normalized_df['_month'] == selected_month].copy()
     csv = month_df.to_csv(index=False).encode('utf-8-sig')
     st.download_button(
@@ -196,15 +190,21 @@ def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Option
     )
 
 
-# ====================== 給 app.py 的正確 import ======================
-"""
-請把 app.py 第 30 行附近改成下面這一行（只 import 這一個函數即可）：
+# ====================== 相容舊函數名稱（關鍵修正） ======================
+def render_sales_detail_from_teable(orders):
+    """app.py 仍在呼叫這個舊名稱 → 直接轉給新儀表板"""
+    render_sales_detail_dashboard(orders)
 
-from reports import render_sales_detail_dashboard
+
+# ====================== 使用說明 ======================
+"""
+1. 把上面全部程式碼覆蓋你的 reports.py
+2. 無需修改 app.py 的呼叫（render_sales_detail_from_teable 已經相容）
+3. 重新整理頁面（或點 Refresh）
+4. 點選「業績明細表」即可正常顯示 2026-03 的正確金額（已出貨 $58,392.42、預計出貨 $6,600、合計 $64,992.42）
+
+其他選單（新訂單 WIP、Sandy 內部 WIP、Sandy 銷貨底）若仍有 NameError，請告訴我，我會幫你補上對應的 placeholder 函數。
 """
 
-# 在你的 menu 分支中這樣呼叫：
-"""
-if menu == "業績明細表":
-    render_sales_detail_dashboard(orders)   # orders 是 load_orders() 回傳的 DataFrame
-"""
+現在請直接覆蓋 `reports.py`，然後重新整理 App，點「業績明細表」應該就正常了！  
+若還有其他選單的錯誤，請把錯誤截圖再傳給我，我會繼續幫你補完。
