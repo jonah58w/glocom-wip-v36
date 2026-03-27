@@ -422,18 +422,24 @@ SANDY_INTERNAL_WIP_SPECS = [
 ]
 
 SANDY_SALES_SPECS = [
-    ("客戶",      CUSTOMER_CANDIDATES),
-    ("PO#",       PO_CANDIDATES),
-    ("P/N",       PART_CANDIDATES),
-    ("Q'TY (PCS)", QTY_CANDIDATES),
-    ("工廠",      FACTORY_CANDIDATES),
-    ("出貨日期",  ACTUAL_SHIP_DATE_CANDIDATES),
-    ("Ship date", PLANNED_SHIP_DATE_CANDIDATES),
-    ("WIP",       WIP_CANDIDATES),
-    ("接單金額",  AMOUNT_ORDER_CANDIDATES),
-    ("銷貨金額",  AMOUNT_SHIP_CANDIDATES),
-    ("Tracking No.", col_candidates("Tracking No.", "Tracking No", "TrackingNo.")), 
-    ("Note",      REMARK_CANDIDATES),
+    ("客戶",                  CUSTOMER_CANDIDATES),
+    ("PO#",                   PO_CANDIDATES),
+    ("P/N",                   PART_CANDIDATES),
+    ("Q'TY (PCS)",            QTY_CANDIDATES),
+    ("工廠",                  FACTORY_CANDIDATES),
+    ("Dock",                  col_candidates("Dock")),
+    ("出貨日期",              ACTUAL_SHIP_DATE_CANDIDATES),
+    ("Ship date",             PLANNED_SHIP_DATE_CANDIDATES),
+    ("工廠交期",              FACTORY_DUE_CANDIDATES),
+    ("交期 (更改)",           col_candidates("交期 (更改)", "交期\n (更改)")),
+    ("併貨日期 (限內部使用)", col_candidates("併貨日期 (限內部使用)", "併貨日期\n (限內部使用)")),
+    ("Ship to",               col_candidates("Ship to")),
+    ("Ship via",              col_candidates("Ship via")),
+    ("WIP",                   WIP_CANDIDATES),
+    ("接單金額",              AMOUNT_ORDER_CANDIDATES),
+    ("銷貨金額",              AMOUNT_SHIP_CANDIDATES),
+    ("Tracking No.",          col_candidates("Tracking No.", "Tracking No", "TrackingNo.")),
+    ("Note",                  REMARK_CANDIDATES),
 ]
 
 
