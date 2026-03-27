@@ -432,6 +432,7 @@ SANDY_SALES_SPECS = [
     ("WIP",       WIP_CANDIDATES),
     ("接單金額",  AMOUNT_ORDER_CANDIDATES),
     ("銷貨金額",  AMOUNT_SHIP_CANDIDATES),
+    ("Tracking No.", col_candidates("Tracking No.", "Tracking No", "TrackingNo.")), 
     ("Note",      REMARK_CANDIDATES),
 ]
 
