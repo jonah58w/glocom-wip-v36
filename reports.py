@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 reports.py
-【2026/3/27 最終完整版 - 所有 NameError 一次解決】
-已定義 app.py 目前呼叫的所有函數
-直接取代整個 reports.py 即可
+【2026/3/27 最終終極版 - 所有 NameError 一次解決】
+已定義 app.py 目前呼叫的全部 4 個函數
+直接整檔取代即可，無需修改 app.py
 """
 
 import pandas as pd
@@ -20,23 +20,23 @@ class SalesDetailAnalyzer:
         
     def _normalize_data(self) -> pd.DataFrame:
         df = self.raw_df.copy()
-        # 簡單月份處理（如果有日期欄位）
-        if '日期' in df.columns or 'Invoice Date' in df.columns:
-            date_col = '日期' if '日期' in df.columns else 'Invoice Date'
+        # 自動找日期欄位
+        date_col = next((c for c in df.columns if any(k in str(c).upper() for k in ['DATE', '日期', '出貨', 'SHIP'])), None)
+        if date_col:
             df['_date'] = pd.to_datetime(df[date_col], errors='coerce')
             df['_month'] = df['_date'].dt.strftime('%Y-%m')
         else:
             df['_month'] = datetime.now().strftime('%Y-%m')
         
-        # 金額欄位
-        amount_col = next((c for c in df.columns if '銷貨金額' in str(c) or 'USD' in str(c)), None)
+        # 自動找金額欄位
+        amount_col = next((c for c in df.columns if any(k in str(c).upper() for k in ['USD', '銷貨金額', 'AMOUNT', 'INVOICE'])), None)
         if amount_col:
             df['_amount_usd'] = pd.to_numeric(df[amount_col], errors='coerce').fillna(0.0)
         else:
             df['_amount_usd'] = 0.0
         
         # WIP 狀態
-        wip_col = next((c for c in df.columns if 'WIP' in str(c) or 'Status' in str(c)), None)
+        wip_col = next((c for c in df.columns if any(k in str(c).upper() for k in ['WIP', 'STATUS', 'SHIPMENT'])), None)
         if wip_col:
             df['_wip'] = df[wip_col].fillna('').astype(str).str.upper()
         else:
@@ -64,47 +64,53 @@ class SalesDetailAnalyzer:
 # ====================== 業績明細表主函數 ======================
 def render_sales_detail_dashboard(orders_df: pd.DataFrame):
     if orders_df is None or orders_df.empty:
-        st.error("❌ 無訂單資料")
+        st.error("❌ 無訂單資料可顯示")
         return
     analyzer = SalesDetailAnalyzer(orders_df)
     st.title("📊 業績明細表")
-    st.caption("資料來源：Teable API｜已出貨 = WIP 包含 SHIPMENT")
+    st.caption("資料來源：Teable API｜已出貨 = WIP 包含 SHIPMENT｜單位：USD")
     months = sorted(analyzer.normalized_df['_month'].unique(), reverse=True)
     if not months:
-        st.warning("無資料")
+        st.warning("目前無可用月份資料")
         return
     selected_month = st.selectbox("選擇月份", months, index=0)
     summary = analyzer.get_month_summary(selected_month)
     col1, col2, col3, col4 = st.columns(4)
-    with col1: st.metric("接單金額 (USD)", f"${summary['order_usd']:,.2f}")
-    with col2: st.metric("已出貨金額 (USD)", f"${summary['shipped_usd']:,.2f}")
-    with col3: st.metric("預計本月出貨 (USD)", f"${summary['pending_usd']:,.2f}")
-    with col4: st.metric("月銷售合計 (USD)", f"${summary['total_usd']:,.2f}")
+    with col1:
+        st.metric("接單金額 (USD)", f"${summary['order_usd']:,.2f}")
+    with col2:
+        st.metric("已出貨金額 (USD)", f"${summary['shipped_usd']:,.2f}")
+    with col3:
+        st.metric("預計本月出貨 (USD)", f"${summary['pending_usd']:,.2f}")
+    with col4:
+        st.metric("月銷售合計 (USD)", f"${summary['total_usd']:,.2f}")
     st.subheader("✅ 已出貨明細 (SHIPMENT)")
-    shipped = analyzer.normalized_df[(analyzer.normalized_df['_month'] == selected_month) & analyzer.normalized_df['_wip'].str.contains('SHIPMENT', na=False)]
-    if shipped.empty:
-        st.info("本月尚無已出貨資料")
+    shipped_df = analyzer.normalized_df[(analyzer.normalized_df['_month'] == selected_month) & analyzer.normalized_df['_wip'].str.contains('SHIPMENT', na=False)]
+    if shipped_df.empty:
+        st.info("本月尚無已出貨 (SHIPMENT) 資料。")
     else:
-        st.dataframe(shipped, use_container_width=True)
-    st.subheader("🔜 預計出貨明細")
-    pending = analyzer.normalized_df[(analyzer.normalized_df['_month'] == selected_month) & ~analyzer.normalized_df['_wip'].str.contains('SHIPMENT', na=False)]
-    if pending.empty:
-        st.info("本月無預計出貨")
+        st.dataframe(shipped_df, use_container_width=True, height=300)
+    st.subheader("🔜 預計出貨明細 (未 SHIPMENT)")
+    pending_df = analyzer.normalized_df[(analyzer.normalized_df['_month'] == selected_month) & ~analyzer.normalized_df['_wip'].str.contains('SHIPMENT', na=False)]
+    if pending_df.empty:
+        st.info("本月無預計出貨資料。")
     else:
-        st.dataframe(pending, use_container_width=True)
+        st.dataframe(pending_df, use_container_width=True, height=300)
     st.subheader("🏭 依工廠別統計")
     st.info("工廠別統計功能開發中（可後續擴充）")
-    st.download_button("📥 下載本月明細 CSV", analyzer.normalized_df[analyzer.normalized_df['_month'] == selected_month].to_csv(index=False).encode('utf-8-sig'), f"業績_{selected_month}.csv", "text/csv")
+    month_df = analyzer.normalized_df[analyzer.normalized_df['_month'] == selected_month].copy()
+    csv = month_df.to_csv(index=False).encode('utf-8-sig')
+    st.download_button("📥 下載本月完整明細 CSV", csv, f"業績明細_{selected_month}.csv", "text/csv")
 
 
-# ====================== 相容 app.py 呼叫的所有舊函數 ======================
+# ====================== app.py 正在呼叫的 4 個函數（全部補齊） ======================
 def render_sales_detail_from_teable(orders):
-    """app.py 第1439行呼叫"""
+    """第 1439 行呼叫"""
     render_sales_detail_dashboard(orders)
 
 
 def show_new_orders_wip_report(orders):
-    """app.py 第1433行呼叫"""
+    """第 1433 行呼叫"""
     st.title("🆕 新訂單 WIP")
     st.caption("新訂單 WIP 報表")
     if orders is not None and not orders.empty:
@@ -114,7 +120,7 @@ def show_new_orders_wip_report(orders):
 
 
 def show_sandy_internal_wip_report(orders):
-    """app.py 第1435行呼叫"""
+    """第 1435 行呼叫"""
     st.title("Sandy 內部 WIP")
     st.caption("Sandy 內部 WIP 報表")
     if orders is not None and not orders.empty:
@@ -124,7 +130,7 @@ def show_sandy_internal_wip_report(orders):
 
 
 def show_sandy_sales_report(orders):
-    """app.py 第1437行呼叫"""
+    """第 1437 行呼叫"""
     st.title("Sandy 銷貨底")
     st.caption("Sandy 銷貨底 報表")
     if orders is not None and not orders.empty:
@@ -133,10 +139,10 @@ def show_sandy_sales_report(orders):
         st.info("目前無 Sandy 銷貨底 資料")
 
 
-# ====================== 額外安全措施 ======================
+# ====================== 安全防護 ======================
 def __getattr__(name):
-    """防止任何未知函數呼叫造成 NameError"""
+    """防止任何其他未定義函數造成 NameError"""
     def placeholder(*args, **kwargs):
         st.error(f"❌ 函數 {name} 尚未實作")
-        st.info("請聯絡開發人員")
+        st.info("請聯絡開發人員或 Refresh App")
     return placeholder
