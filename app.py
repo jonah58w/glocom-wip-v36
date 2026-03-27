@@ -696,7 +696,7 @@ def load_orders():
                 or data.get("next_page_token")
                 or None
             )
-            if not page_token or len(records) < 1000:
+            if not page_token:
                 break
         df = pd.DataFrame(all_rows)
         df = normalize_columns(df)
