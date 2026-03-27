@@ -671,6 +671,7 @@ def load_orders():
                 "fieldKeyType": "name",
                 "cellFormat": "text",
                 "take": 1000,
+                   "viewId": "viwGqqwdvy5WkaqfQuJ",     
             }
             if page_token:
                 params["pageToken"] = page_token
