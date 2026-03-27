@@ -40,6 +40,20 @@ AMOUNT_SHIP_CANDIDATES = [
 ACTUAL_SHIP_DATE_CANDIDATES = ["出貨日期_排序", "出貨日期", "Actual Ship Date", "Actual ship date"]
 PLANNED_SHIP_DATE_CANDIDATES = ["Ship date", "Ship Date", "Required Ship date", "confrimed DD"]
 
+# ── 變更紀錄欄位（用來偵測當天是否有訂單異動）──────────────────────────
+CHANGE_DATE_CANDIDATES = [
+    "變更日期", "更新日期", "最後更新", "Last Updated", "Updated Date",
+    "Modified Date", "修改日期", "異動日期",
+    # 交期欄位有值也視為可能變更
+    "交期 (更改)", "交期\n (更改)",
+]
+
+# ── PO Cancelled / Cancellation 相關 WIP 關鍵字 ──────────────────────────
+CANCELLED_KEYWORDS = [
+    "PO CANCELLED", "PO Cancelled", "CANCELLED", "CANCELLATION",
+    "Cancellation", "CANCEL",
+]
+
 MANUAL_HISTORY_PATH = Path("sales_manual_history.csv")
 
 
@@ -229,20 +243,97 @@ def _latest_or_today(date_series: pd.Series) -> pd.Timestamp | None:
     return date_series.dropna().max().normalize()
 
 
+def _is_cancelled(wip_series: pd.Series) -> pd.Series:
+    """
+    回傳 bool Series：WIP 含有 PO Cancelled / Cancellation 等關鍵字
+    比對時忽略大小寫，並去除前後空格。
+    """
+    upper = wip_series.astype(str).str.strip().str.upper()
+    mask = pd.Series(False, index=wip_series.index)
+    for kw in CANCELLED_KEYWORDS:
+        mask = mask | upper.str.contains(kw.upper(), regex=False, na=False)
+    return mask
+
+
 def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
     idx = source_df.index
-    wip_col = find_col(source_df, WIP_CANDIDATES)
-    wip = get_series_by_col(source_df, wip_col).astype(str).str.upper().str.strip() if wip_col else pd.Series("", index=idx)
-    order_col = find_col(source_df, ORDER_DATE_CANDIDATES)
-    order_dates = parse_mixed_date_series(get_series_by_col(source_df, order_col)) if order_col else pd.Series(pd.NaT, index=idx)
+    today = pd.Timestamp.today().normalize()
 
+    # ── WIP 欄位 ──────────────────────────────────────────────────────────
+    wip_col = find_col(source_df, WIP_CANDIDATES)
+    wip = (
+        get_series_by_col(source_df, wip_col).astype(str).str.strip()
+        if wip_col
+        else pd.Series("", index=idx)
+    )
+    wip_upper = wip.str.upper()
+
+    # ── 下單日期 ──────────────────────────────────────────────────────────
+    order_col = find_col(source_df, ORDER_DATE_CANDIDATES)
+    order_dates = (
+        parse_mixed_date_series(get_series_by_col(source_df, order_col))
+        if order_col
+        else pd.Series(pd.NaT, index=idx)
+    )
+
+    # ── 實際出貨日期 ──────────────────────────────────────────────────────
+    actual_col = find_col(source_df, ACTUAL_SHIP_DATE_CANDIDATES)
+    actual_dates = (
+        parse_mixed_date_series(get_series_by_col(source_df, actual_col))
+        if actual_col
+        else pd.Series(pd.NaT, index=idx)
+    )
+
+    # ── 變更日期（找得到就用，找不到就用 order_dates 當 fallback）────────
+    change_col = find_col(source_df, CHANGE_DATE_CANDIDATES)
+    change_dates = (
+        parse_mixed_date_series(get_series_by_col(source_df, change_col))
+        if change_col
+        else pd.Series(pd.NaT, index=idx)
+    )
+
+    # ────────────────────────────────────────────────────────────────────
+    # 1. 新訂單 WIP
+    #    條件：當天下單，或當天有變更（交期/數量/價格/出貨方式等）
+    # ────────────────────────────────────────────────────────────────────
     if subset_mode == "new_order_today":
-        pivot = _latest_or_today(order_dates)
-        return order_dates.dt.normalize().eq(pivot) if pivot is not None else pd.Series(True, index=idx)
+        order_today = order_dates.dt.normalize().eq(today)
+        change_today = change_dates.dt.normalize().eq(today)
+        return order_today | change_today
+
+    # ────────────────────────────────────────────────────────────────────
+    # 2. Sandy 內部 WIP
+    #    條件：
+    #      a) WIP 不是 SHIPMENT（大小寫不限）
+    #      b) WIP 不含 PO Cancelled / Cancellation 關鍵字
+    #      c) 限當年度資料
+    #         優先看 order_dates；若無，看 actual_dates；若都無則保留
+    # ────────────────────────────────────────────────────────────────────
     if subset_mode == "unshipped":
-        return ~wip.eq("SHIPMENT")
+        current_year = today.year
+
+        not_shipment = ~wip_upper.eq("SHIPMENT")
+        not_cancelled = ~_is_cancelled(wip)
+
+        # 年度判斷：order_dates 有值就用；否則用 actual_dates；都沒有則不過濾年度
+        year_from_order = order_dates.dt.year
+        year_from_actual = actual_dates.dt.year
+        effective_year = year_from_order.where(order_dates.notna(), year_from_actual)
+
+        # 若該筆完全沒有日期資料，視為允許顯示（保守做法，不遺漏）
+        year_ok = effective_year.isna() | effective_year.eq(current_year)
+
+        return not_shipment & not_cancelled & year_ok
+
+    # ────────────────────────────────────────────────────────────────────
+    # 3. Sandy 銷貨底
+    #    條件：WIP == SHIPMENT 且 出貨日期 == 今天
+    # ────────────────────────────────────────────────────────────────────
     if subset_mode == "shipment_only":
-        return wip.eq("SHIPMENT")
+        is_shipment = wip_upper.eq("SHIPMENT")
+        shipped_today = actual_dates.dt.normalize().eq(today)
+        return is_shipment & shipped_today
+
     return pd.Series(True, index=idx)
 
 
@@ -358,7 +449,6 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
 
     order_dates = parse_mixed_date_series(get_series_by_col(source_df, order_col))
     actual_dates = parse_mixed_date_series(get_series_by_col(source_df, actual_col))
-    # actual fallback: if 出貨日期_排序 missing, use 出貨日期 text explicitly
     if actual_col != find_col(source_df, ["出貨日期"]):
         fallback_actual = parse_mixed_date_series(get_series_by_col(source_df, find_col(source_df, ["出貨日期"])))
         actual_dates = actual_dates.where(actual_dates.notna(), fallback_actual)
@@ -426,7 +516,6 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     shipped_total = float(shipped_df["金額(USD)"].fillna(0).sum())
     forecast_total = float(forecast_df["金額(USD)"].fillna(0).sum())
 
-    # manual additions
     if not manual_month.empty:
         add_order = manual_month.loc[manual_month["type"].eq("接單"), "amount_num"].fillna(0).sum()
         add_shipped = manual_month.loc[manual_month["type"].eq("已出貨"), "amount_num"].fillna(0).sum()
@@ -500,7 +589,6 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     st.markdown("#### 預計出貨明細")
     st.dataframe(forecast_df, use_container_width=True, hide_index=True)
 
-    # 12-month trend by shipment actual date + forecast plan date (same month total shown separately)
     monthly = []
     all_periods = sorted(periods)[-12:]
     for p in all_periods:
