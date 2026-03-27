@@ -184,6 +184,20 @@ def first_existing_series(df: pd.DataFrame, candidates):
         return None, None
     series = get_series_by_col(df, src)
     return src, series
+
+def make_unique_columns(columns):
+    seen = {}
+    result = []
+    for col in list(columns):
+        name = str(col)
+        count = seen.get(name, 0)
+        if count == 0:
+            result.append(name)
+        else:
+            result.append(f"{name}_{count+1}")
+        seen[name] = count + 1
+    return result
+
 def build_teable_view_df(source_df: pd.DataFrame, specs):
     view_df = pd.DataFrame(index=source_df.index)
     mapping = {}
