@@ -159,6 +159,19 @@ SANDY_SALES_BASE_SPECS = [
     ("Tracking No.", col_candidates("Tracking No.", "Tracking No")),
     ("Note", col_candidates("Note", "情況", "Remark", "備註")),
 ]
+def make_unique_columns(columns):
+    seen = {}
+    new_cols = []
+    for col in columns:
+        col = str(col)
+        if col not in seen:
+            seen[col] = 0
+            new_cols.append(col)
+        else:
+            seen[col] += 1
+            new_cols.append(f"{col}_{seen[col]}")
+    return new_cols
+
 def normalize_col_key(col_name):
     s = str(col_name or "")
     s = s.replace("\n", "")
