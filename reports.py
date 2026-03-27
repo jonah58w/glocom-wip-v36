@@ -1,650 +1,727 @@
 # -*- coding: utf-8 -*-
-"""
-reports.py
-GLOCOM Control Tower 各頁面報表
-
-相容 app.py 傳入的 common_kwargs。
-"""
-
-from __future__ import annotations
-
-from typing import Any, Dict, List, Optional
+import re
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 
+# ================================
+# FIELD CANDIDATES
+# ================================
+PO_CANDIDATES = [
+    "PO#", "PO", "P/O", "訂單編號", "訂單號", "訂單號碼", "工單", "工單號", "單號"
+]
+CUSTOMER_CANDIDATES = [
+    "Customer", "客戶", "客戶名稱"
+]
+PART_CANDIDATES = [
+    "Part No", "Part No.", "P/N", "客戶料號", "Cust. P / N", "LS P/N",
+    "料號", "品號", "成品料號", "產品料號"
+]
+QTY_CANDIDATES = [
+    "Qty", "Order Q'TY (PCS)", "Order Q'TY (PCS)", "訂購量 (PCS)",
+    "訂購量", "Q'TY", "數量", "PCS", "訂單量", "生產數量", "投產數"
+]
+FACTORY_CANDIDATES = [
+    "Factory", "工廠", "廠編"
+]
+WIP_CANDIDATES = [
+    "WIP", "WIP Stage", "進度", "製程", "工序", "目前站別", "生產進度"
+]
+FACTORY_DUE_CANDIDATES = [
+    "Factory Due Date", "工廠交期", "交貨日期", "Required Ship date",
+    "confrimed DD", "交期", "預交日", "預定交期", "交貨期"
+]
+SHIP_DATE_CANDIDATES = [
+    "Ship Date", "Ship date", "出貨日期", "交貨日期", "Required Ship date", "confrimed DD"
+]
+REMARK_CANDIDATES = [
+    "Remark", "備註", "情況", "備註說明", "Note", "說明", "異常備註"
+]
+ORDER_DATE_CANDIDATES = [
+    "客戶下單日期", "工廠下單日期", "下單日期", "Order Date", "PO Date", "Date",
+    "訂單日期", "接單日期"
+]
+AMOUNT_ORDER_CANDIDATES = [
+    "接單金額", "接單總金額", "Order Amount", "Order amount", "Order Total",
+    "客戶金額", "銷售金額", "Sales Amount", "Quote Total", "Total Amount", "Amount",
+    "INVOICE", "Invoice", "Invoice Amount", "Invoice Total"
+]
+AMOUNT_SHIP_CANDIDATES = [
+    "出貨金額", "出貨總金額", "Shipment Amount", "Ship Amount", "Shipping Amount",
+    "Invoice Amount", "Invoice Total", "出貨發票金額", "Invoice", "INVOICE"
+]
 
-# =========================================================
-# 基本工具
-# =========================================================
-def _safe_text(v: Any) -> str:
-    if v is None:
-        return ""
-    try:
-        if pd.isna(v):
-            return ""
-    except Exception:
-        pass
-    return str(v).strip()
+# ================================
+# SHARED HELPERS
+# ================================
+def get_series_by_col(df: pd.DataFrame, col_name: str):
+    if not col_name or col_name not in df.columns:
+        return None
+    obj = df[col_name]
+    if isinstance(obj, pd.DataFrame):
+        return obj.iloc[:, 0]
+    return obj
 
-
-def _col(df: pd.DataFrame, col_name: Optional[str], default: str = "") -> pd.Series:
-    if df is None or df.empty or not col_name or col_name not in df.columns:
-        return pd.Series([default] * (0 if df is None else len(df)))
-    return df[col_name]
-
-
-def _copy_df(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or not isinstance(df, pd.DataFrame):
-        return pd.DataFrame()
-    return df.copy()
-
-
-def _normalize_date_series(series: pd.Series) -> pd.Series:
-    if series is None or len(series) == 0:
-        return pd.Series(dtype="datetime64[ns]")
-    return pd.to_datetime(series, errors="coerce")
-
-
-def _today() -> pd.Timestamp:
-    return pd.Timestamp.now().normalize()
-
-
-def _contains_any(text: str, keywords: List[str]) -> bool:
-    low = _safe_text(text).lower()
-    return any(k.lower() in low for k in keywords)
-
-
-def _is_done_wip(value: Any) -> bool:
-    txt = _safe_text(value).upper()
-    if not txt:
-        return False
-    done_values = {"完成", "DONE", "COMPLETE", "COMPLETED", "FINISHED", "FINISH", "CLOSED", "結案"}
-    if txt in done_values:
-        return True
-    return "完成" in _safe_text(value)
-
-
-def _is_shipping_wip(value: Any) -> bool:
-    txt = _safe_text(value).lower()
-    return any(k in txt for k in ["ship", "shipping", "出貨"])
-
-
-def _is_packing_wip(value: Any) -> bool:
-    txt = _safe_text(value).lower()
-    return any(k in txt for k in ["pack", "packing", "包裝"])
-
-
-def _is_inspection_wip(value: Any) -> bool:
-    txt = _safe_text(value).lower()
-    return any(k in txt for k in ["inspection", "inspect", "qa", "fqc", "iqc", "oqc", "檢", "測試", "成檢"])
-
-
-def _is_hold_row(wip: Any, remark: Any, tags: Any) -> bool:
-    combined = " | ".join([
-        _safe_text(wip),
-        _safe_text(remark),
-        ", ".join(tags) if isinstance(tags, list) else _safe_text(tags),
-    ]).lower()
-    return any(k in combined for k in ["hold", "on hold", "暫停", "待料", "waiting", "pending"])
-
-
-def _split_tags(value: Any, split_tags=None) -> List[str]:
-    if callable(split_tags):
-        try:
-            return split_tags(value)
-        except Exception:
-            pass
-
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [str(x).strip() for x in value if str(x).strip()]
-    text = _safe_text(value)
-    if not text:
-        return []
-    text = text.replace("；", ";").replace("，", ",").replace("、", ",").replace("/", ",").replace("|", ",")
-    out = []
-    seen = set()
-    for p in [x.strip() for x in text.replace(";", ",").split(",") if x.strip()]:
-        if p not in seen:
-            seen.add(p)
-            out.append(p)
-    return out
-
-
-def _prepare_base_df(
-    orders: pd.DataFrame,
-    po_col: Optional[str],
-    customer_col: Optional[str],
-    part_col: Optional[str],
-    qty_col: Optional[str],
-    factory_col: Optional[str],
-    wip_col: Optional[str],
-    factory_due_col: Optional[str],
-    ship_date_col: Optional[str],
-    remark_col: Optional[str],
-    customer_tag_col: Optional[str],
-    split_tags=None,
-) -> pd.DataFrame:
-    df = _copy_df(orders)
-    if df.empty:
-        return pd.DataFrame(columns=[
-            "PO#", "Customer", "Part No", "Qty", "Factory", "WIP",
-            "Factory Due Date", "Ship Date", "Remark", "Customer Remark Tags"
-        ])
-
-    out = pd.DataFrame()
-    out["PO#"] = _col(df, po_col, "")
-    out["Customer"] = _col(df, customer_col, "")
-    out["Part No"] = _col(df, part_col, "")
-    out["Qty"] = _col(df, qty_col, "")
-    out["Factory"] = _col(df, factory_col, "")
-    out["WIP"] = _col(df, wip_col, "")
-    out["Factory Due Date"] = _col(df, factory_due_col, "")
-    out["Ship Date"] = _col(df, ship_date_col, "")
-    out["Remark"] = _col(df, remark_col, "")
-    out["Customer Remark Tags Raw"] = _col(df, customer_tag_col, "")
-
-    out["Customer Remark Tags"] = out["Customer Remark Tags Raw"].apply(lambda x: _split_tags(x, split_tags))
-    out["Factory Due Date_dt"] = _normalize_date_series(out["Factory Due Date"])
-    out["Ship Date_dt"] = _normalize_date_series(out["Ship Date"])
-
-    out["Qty_num"] = pd.to_numeric(out["Qty"], errors="coerce")
-    out["Is Done"] = out["WIP"].apply(_is_done_wip)
-    out["Is Shipping"] = out["WIP"].apply(_is_shipping_wip)
-    out["Is Packing"] = out["WIP"].apply(_is_packing_wip)
-    out["Is Inspection"] = out["WIP"].apply(_is_inspection_wip)
-    out["Is Hold"] = out.apply(lambda r: _is_hold_row(r.get("WIP", ""), r.get("Remark", ""), r.get("Customer Remark Tags", [])), axis=1)
-
-    return out
-
-
-def _render_basic_table(df: pd.DataFrame, title: str, height: int = 520) -> None:
-    st.subheader(title)
-    if df is None or df.empty:
-        st.info("目前沒有資料。")
-        return
-    st.dataframe(df, use_container_width=True, height=height)
-
-
-def _format_preview_df(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or df.empty:
-        return pd.DataFrame()
-
-    out = df.copy()
-    if "Customer Remark Tags" in out.columns:
-        out["Customer Remark Tags"] = out["Customer Remark Tags"].apply(
-            lambda x: ", ".join(x) if isinstance(x, list) else _safe_text(x)
-        )
-
-    # 移除內部輔助欄
-    drop_cols = [c for c in ["Factory Due Date_dt", "Ship Date_dt", "Qty_num", "Is Done", "Is Shipping", "IsPacking", "Is Inspection", "Is Hold", "Customer Remark Tags Raw"] if c in out.columns]
-    out = out.drop(columns=drop_cols, errors="ignore")
-    return out
-
-
-def _make_customer_preview_df(df: pd.DataFrame) -> pd.DataFrame:
-    keep = [c for c in ["PO#", "Part No", "Qty", "WIP", "Ship Date", "Customer Remark Tags", "Remark"] if c in df.columns]
-    out = df[keep].copy()
-    if "Customer Remark Tags" in out.columns:
-        out["Customer Remark Tags"] = out["Customer Remark Tags"].apply(lambda x: ", ".join(x) if isinstance(x, list) else _safe_text(x))
-    return out
-
-
-# =========================================================
-# Dashboard
-# =========================================================
-def show_dashboard_report(**kwargs) -> None:
-    orders = kwargs.get("orders")
-    split_tags = kwargs.get("split_tags")
-    base = _prepare_base_df(
-        orders=orders,
-        po_col=kwargs.get("po_col"),
-        customer_col=kwargs.get("customer_col"),
-        part_col=kwargs.get("part_col"),
-        qty_col=kwargs.get("qty_col"),
-        factory_col=kwargs.get("factory_col"),
-        wip_col=kwargs.get("wip_col"),
-        factory_due_col=kwargs.get("factory_due_col"),
-        ship_date_col=kwargs.get("ship_date_col"),
-        remark_col=kwargs.get("remark_col"),
-        customer_tag_col=kwargs.get("customer_tag_col"),
-        split_tags=split_tags,
-    )
-
-    st.subheader("📊 Dashboard")
-
-    total = len(base)
-    active = int((~base["Is Done"]).sum()) if not base.empty else 0
-    done = int(base["Is Done"].sum()) if not base.empty else 0
-    hold = int(base["Is Hold"].sum()) if not base.empty else 0
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("總筆數", total)
-    c2.metric("進行中", active)
-    c3.metric("完成", done)
-    c4.metric("On Hold", hold)
-
-    if base.empty:
-        st.info("目前沒有資料。")
-        return
-
-    colA, colB = st.columns(2)
-
-    with colA:
-        st.markdown("### WIP 分布")
-        vc = base["WIP"].fillna("").astype(str).str.strip()
-        vc = vc[vc != ""].value_counts().head(15)
-        if not vc.empty:
-            st.bar_chart(vc)
+def col_candidates(*names):
+    return [str(x).strip() for x in names if str(x).strip()]
+SANDY_NEW_ORDER_SPECS = [
+    ("客戶下單日期", col_candidates("客戶下單日期", "客戶下單日期", "客戶下單日期")),
+    ("工廠下單日期", col_candidates("工廠下單日期", "工廠下單日期", "工廠下單日期")),
+    ("客戶", CUSTOMER_CANDIDATES + ["Customer"]),
+    ("PO#", PO_CANDIDATES),
+    ("P/N", PART_CANDIDATES),
+    ("Order Q'TY (PCS)", QTY_CANDIDATES + ["Order Q'TY(PCS)", "Order QTY (PCS)"]),
+    ("Dock", col_candidates("Dock")),
+    ("Ship date", SHIP_DATE_CANDIDATES),
+    ("WIP", WIP_CANDIDATES),
+    ("工廠交期", FACTORY_DUE_CANDIDATES),
+    ("交期 (更改)", col_candidates("交期 (更改)", "交期 (更改)", "交期 (更改)", "交期 (更改)")),
+    ("出貨日期", col_candidates("出貨日期")),
+    ("工廠", FACTORY_CANDIDATES),
+    ("工廠提醒事項", col_candidates("工廠提醒事項")),
+    ("併貨日期 (限內部使用)", col_candidates("併貨日期 (限內部使用)", "併貨日期 (限內部使用)", "併貨日期 (限內部使用)")),
+    ("情況", REMARK_CANDIDATES),
+    ("客戶要求注意事項", col_candidates("客戶要求注意事項")),
+    ("Ship to", col_candidates("Ship to")),
+    ("Ship via", col_candidates("Ship via", " Ship via")),
+    ("箱數", col_candidates("箱數", "CTNS", "CTN")),
+    ("重量", col_candidates("重量", "Weight", "KGs")),
+    ("重貨優惠", col_candidates("重貨優惠", "重貨優惠", "重貨優惠")),
+    ("Working Gerber Approval", col_candidates("Working Gerber Approval", "Working Gerber Approval", "Working Gerber Approval")),
+    ("Engineering Question", col_candidates("Engineering Question", "Engineering Question", "Engineering Question")),
+    ("Pricing & Qty issue", col_candidates("Pricing & Qty issue", "Pricing & Qty issue", "Pricing & Qty issue")),
+    ("T/T", col_candidates("T/T")),
+    ("工廠出貨事項", col_candidates("工廠出貨事項", "工廠出貨注意事項")),
+    ("文件", col_candidates("文件")),
+    ("新/舊料號", col_candidates("新/舊料號", "新/舊料號")),
+    ("板層", col_candidates("板層", "板層")),
+    ("西拓訂單編號", col_candidates("西拓訂單編號", "西拓訂單編號")),
+]
+SANDY_INTERNAL_WIP_SPECS = [
+    ("Customer", CUSTOMER_CANDIDATES + ["Customer"]),
+    ("PO#", PO_CANDIDATES),
+    ("P/N", PART_CANDIDATES),
+    ("Q'TY (PCS)", QTY_CANDIDATES + ["Order QTY (PCS)"]),
+    ("Dock", col_candidates("Dock")),
+    ("Ship date", SHIP_DATE_CANDIDATES),
+    ("WIP", WIP_CANDIDATES),
+    ("出貨狀況 (限內部使用)", col_candidates("出貨狀況 (限內部使用)", "出貨狀況 (限內部使用)")),
+    ("進度狀況", col_candidates("進度狀況", "進度狀況")),
+    ("工廠交期", FACTORY_DUE_CANDIDATES),
+    ("交期 (更改)", col_candidates("交期 (更改)", "交期 (更改)", "交期 (更改)", "交期 (更改)")),
+    ("出貨日期", col_candidates("出貨日期")),
+    ("工廠", FACTORY_CANDIDATES),
+    ("工廠提醒事項", col_candidates("工廠提醒事項")),
+    ("併貨日期 (限內部使用)", col_candidates("併貨日期 (限內部使用)", "併貨日期 (限內部使用)", "併貨日期 (限內部使用)")),
+    ("客戶要求注意事項", col_candidates("客戶要求注意事項", "客戶要求注意事項")),
+    ("Ship to", col_candidates("Ship to")),
+    ("Ship via", col_candidates("Ship via", " Ship via")),
+    ("CTN", col_candidates("CTN", "CTNS", "箱數")),
+    ("KGs", col_candidates("KGs", "Weight", "重量")),
+    ("重貨優惠", col_candidates("重貨優惠", "重貨優惠", "重貨優惠")),
+    ("物流 Booking", col_candidates("物流 Booking", "物流 Booking", "物流 Booking")),
+    ("更改 Booking", col_candidates("更改 Booking", "更改 Booking")),
+    ("工廠入倉單", col_candidates("工廠入倉單", "工廠入倉單")),
+    ("Working Gerber Approval", col_candidates("Working Gerber Approval", "Working Gerber Approval", "Working Gerber Approval")),
+    ("Engineering Question", col_candidates("Engineering Question", "Engineering Question", "Engineering Question")),
+    ("Pricing & Qty issue", col_candidates("Pricing & Qty issue", "Pricing & Qty issue", "Pricing & Qty issue")),
+    ("Ocean Handling Charge (FOB TW)", col_candidates("Ocean Handling Charge (FOB TW)", "Ocean Handling Charge (FOB TW)", "Ocean Handling Charge (FOB TW)")),
+    ("T/T", col_candidates("T/T")),
+    ("Note", col_candidates("Note", "情況", "Remark", "備註")),
+    ("新/舊料號", col_candidates("新/舊料號", "新/舊料號")),
+    ("板層", col_candidates("板層", "板層")),
+    ("工廠出貨注意事項", col_candidates("工廠出貨注意事項", "工廠出貨事項", "工廠出貨注意事項")),
+    ("快遞出貨注意事項", col_candidates("快遞出貨注意事項", "快遞出貨注意事項")),
+    ("西拓訂單編號", col_candidates("西拓訂單編號", "西拓訂單編號")),
+    ("出貨報告", col_candidates("出貨報告", "出貨報告")),
+    ("MADE IN USA", col_candidates("MADE IN USA", "MADE IN USA", "MADE IN USA")),
+    ("工廠重量", col_candidates("工廠重量", "工廠重量")),
+    ("文件", col_candidates("文件")),
+    ("包裝明細", col_candidates("包裝明細", "包裝明細")),
+    ("樣板需求", col_candidates("樣板需求", "樣板需求")),
+    ("發票", col_candidates("發票")),
+]
+SANDY_SALES_BASE_SPECS = [
+    ("客戶", CUSTOMER_CANDIDATES + ["Customer"]),
+    ("PO#", PO_CANDIDATES),
+    ("P/N", PART_CANDIDATES),
+    ("Order Q'TY (PCS)", QTY_CANDIDATES + ["Order QTY (PCS)"]),
+    ("Dock", col_candidates("Dock")),
+    ("Ship date", SHIP_DATE_CANDIDATES),
+    ("WIP", WIP_CANDIDATES),
+    ("工廠交期", FACTORY_DUE_CANDIDATES),
+    ("交期 (更改)", col_candidates("交期 (更改)", "交期 (更改)", "交期 (更改)", "交期 (更改)")),
+    ("併貨日期 (限內部使用)", col_candidates("併貨日期 (限內部使用)", "併貨日期 (限內部使用)", "併貨日期 (限內部使用)")),
+    ("工廠", FACTORY_CANDIDATES),
+    ("Ship to", col_candidates("Ship to")),
+    ("Ship via", col_candidates("Ship via", " Ship via")),
+    ("Tracking No.", col_candidates("Tracking No.", "Tracking No")),
+    ("Note", col_candidates("Note", "情況", "Remark", "備註")),
+]
+def normalize_col_key(col_name):
+    s = str(col_name or "")
+    s = s.replace("\n", "")
+    s = re.sub(r"\s+", "", s)
+    return s.strip().lower()
+def first_existing_column(df: pd.DataFrame, candidates):
+    for c in candidates:
+        if c in df.columns:
+            return c
+    normalized_map = {}
+    for col in df.columns:
+        key = normalize_col_key(col)
+        if key not in normalized_map:
+            normalized_map[key] = col
+    for c in candidates:
+        key = normalize_col_key(c)
+        if key in normalized_map:
+            return normalized_map[key]
+    return None
+def first_existing_series(df: pd.DataFrame, candidates):
+    src = first_existing_column(df, candidates)
+    if not src:
+        return None, None
+    series = get_series_by_col(df, src)
+    return src, series
+def build_teable_view_df(source_df: pd.DataFrame, specs):
+    view_df = pd.DataFrame(index=source_df.index)
+    mapping = {}
+    for out_name, candidates in specs:
+        src, series = first_existing_series(source_df, candidates)
+        mapping[out_name] = src
+        if series is not None:
+            view_df[out_name] = series
         else:
-            st.info("沒有 WIP 資料。")
-
-    with colB:
-        st.markdown("### 工廠分布")
-        vc = base["Factory"].fillna("").astype(str).str.strip()
-        vc = vc[vc != ""].value_counts().head(15)
-        if not vc.empty:
-            st.bar_chart(vc)
-        else:
-            st.info("沒有工廠資料。")
-
-    st.markdown("### 即將到期 / 已逾期")
-    today = _today()
-    tmp = base.copy()
-    tmp["Due Status"] = ""
-    tmp.loc[tmp["Factory Due Date_dt"] < today, "Due Status"] = "Overdue"
-    tmp.loc[(tmp["Factory Due Date_dt"] >= today) & (tmp["Factory Due Date_dt"] <= today + pd.Timedelta(days=7)), "Due Status"] = "Due in 7 Days"
-
-    due_view = tmp[(tmp["Due Status"] != "") & (~tmp["Is Done"])].copy()
-    due_view = due_view.sort_values(by=["Factory Due Date_dt", "Customer", "PO#"], na_position="last")
-    _render_basic_table(_format_preview_df(due_view).head(100), "到期提醒", height=360)
-
-
-# =========================================================
-# Factory Load
-# =========================================================
-def show_factory_load_report(**kwargs) -> None:
-    orders = kwargs.get("orders")
-    split_tags = kwargs.get("split_tags")
-    base = _prepare_base_df(
-        orders=orders,
-        po_col=kwargs.get("po_col"),
-        customer_col=kwargs.get("customer_col"),
-        part_col=kwargs.get("part_col"),
-        qty_col=kwargs.get("qty_col"),
-        factory_col=kwargs.get("factory_col"),
-        wip_col=kwargs.get("wip_col"),
-        factory_due_col=kwargs.get("factory_due_col"),
-        ship_date_col=kwargs.get("ship_date_col"),
-        remark_col=kwargs.get("remark_col"),
-        customer_tag_col=kwargs.get("customer_tag_col"),
-        split_tags=split_tags,
+            view_df[out_name] = ""
+    view_df.columns = make_unique_columns(view_df.columns)
+    return view_df, mapping
+def apply_customer_filter(display_df: pd.DataFrame, customer_col_name: str, default_customer: str | None, key_prefix: str):
+    if customer_col_name not in display_df.columns:
+        return display_df
+    customer_values = sorted(
+        [str(x).strip() for x in display_df[customer_col_name].dropna().unique().tolist() if str(x).strip()]
     )
-
-    st.subheader("🏭 Factory Load")
-
-    if base.empty:
-        st.info("目前沒有資料。")
-        return
-
-    active = base[~base["Is Done"]].copy()
-
-    if active.empty:
-        st.info("目前沒有進行中的訂單。")
-        return
-
-    summary = (
-        active.groupby("Factory", dropna=False)
-        .agg(
-            Orders=("PO#", "count"),
-            Qty_Total=("Qty_num", "sum"),
-            Hold_Count=("Is Hold", "sum"),
-            Inspection_Count=("Is Inspection", "sum"),
-            Packing_Count=("Is Packing", "sum"),
-            Shipping_Count=("Is Shipping", "sum"),
-        )
-        .reset_index()
-        .sort_values(["Orders", "Qty_Total"], ascending=[False, False], na_position="last")
-    )
-
-    st.dataframe(summary, use_container_width=True, height=360)
-
-    st.markdown("### 依工廠檢視明細")
-    factories = sorted([x for x in active["Factory"].dropna().astype(str).unique() if x.strip()])
-    selected_factory = st.selectbox("選擇工廠", ["全部"] + factories)
-
-    view = active.copy()
-    if selected_factory != "全部":
-        view = view[view["Factory"].astype(str) == selected_factory]
-
-    view = view.sort_values(by=["Factory", "Factory Due Date_dt", "Customer", "PO#"], na_position="last")
-    _render_basic_table(_format_preview_df(view), "工廠明細", height=420)
-
-
-# =========================================================
-# Delayed Orders
-# =========================================================
-def show_delayed_orders_report(**kwargs) -> None:
-    orders = kwargs.get("orders")
-    split_tags = kwargs.get("split_tags")
-    base = _prepare_base_df(
-        orders=orders,
-        po_col=kwargs.get("po_col"),
-        customer_col=kwargs.get("customer_col"),
-        part_col=kwargs.get("part_col"),
-        qty_col=kwargs.get("qty_col"),
-        factory_col=kwargs.get("factory_col"),
-        wip_col=kwargs.get("wip_col"),
-        factory_due_col=kwargs.get("factory_due_col"),
-        ship_date_col=kwargs.get("ship_date_col"),
-        remark_col=kwargs.get("remark_col"),
-        customer_tag_col=kwargs.get("customer_tag_col"),
-        split_tags=split_tags,
-    )
-
-    st.subheader("⏰ Delayed Orders")
-
-    if base.empty:
-        st.info("目前沒有資料。")
-        return
-
-    today = _today()
-    delayed = base[(~base["Is Done"]) & (base["Factory Due Date_dt"].notna()) & (base["Factory Due Date_dt"] < today)].copy()
-    delayed["Delay Days"] = (today - delayed["Factory Due Date_dt"]).dt.days
-
-    c1, c2 = st.columns(2)
-    c1.metric("逾期筆數", len(delayed))
-    c2.metric("平均延遲天數", round(delayed["Delay Days"].mean(), 1) if not delayed.empty else 0)
-
-    if delayed.empty:
-        st.success("目前沒有逾期訂單。")
-        return
-
-    view = delayed.sort_values(by=["Delay Days", "Factory Due Date_dt"], ascending=[False, True], na_position="last")
-    _render_basic_table(_format_preview_df(view), "逾期明細", height=520)
-
-
-# =========================================================
-# Shipment Forecast
-# =========================================================
-def show_shipment_forecast_report(**kwargs) -> None:
-    orders = kwargs.get("orders")
-    split_tags = kwargs.get("split_tags")
-    base = _prepare_base_df(
-        orders=orders,
-        po_col=kwargs.get("po_col"),
-        customer_col=kwargs.get("customer_col"),
-        part_col=kwargs.get("part_col"),
-        qty_col=kwargs.get("qty_col"),
-        factory_col=kwargs.get("factory_col"),
-        wip_col=kwargs.get("wip_col"),
-        factory_due_col=kwargs.get("factory_due_col"),
-        ship_date_col=kwargs.get("ship_date_col"),
-        remark_col=kwargs.get("remark_col"),
-        customer_tag_col=kwargs.get("customer_tag_col"),
-        split_tags=split_tags,
-    )
-
-    st.subheader("🚚 Shipment Forecast")
-
-    if base.empty:
-        st.info("目前沒有資料。")
-        return
-
-    today = _today()
-    future = base[(~base["Is Done"]) & (base["Ship Date_dt"].notna())].copy()
-    future = future[future["Ship Date_dt"] >= today - pd.Timedelta(days=3)]
-
-    if future.empty:
-        st.info("目前沒有可預測的出貨資料。")
-        return
-
-    future["Ship Week"] = future["Ship Date_dt"].dt.strftime("%Y-%W")
-    weekly = (
-        future.groupby("Ship Week")
-        .agg(Orders=("PO#", "count"), Qty_Total=("Qty_num", "sum"))
-        .reset_index()
-        .sort_values("Ship Week")
-    )
-
-    st.markdown("### 週別預測")
-    st.dataframe(weekly, use_container_width=True, height=260)
-
-    st.markdown("### 近期出貨明細")
-    detail = future.sort_values(by=["Ship Date_dt", "Customer", "PO#"], na_position="last")
-    _render_basic_table(_format_preview_df(detail), "Shipment Forecast Detail", height=480)
-
-
-# =========================================================
-# Orders
-# =========================================================
-def show_orders_report(**kwargs) -> None:
-    orders = kwargs.get("orders")
-    split_tags = kwargs.get("split_tags")
-    base = _prepare_base_df(
-        orders=orders,
-        po_col=kwargs.get("po_col"),
-        customer_col=kwargs.get("customer_col"),
-        part_col=kwargs.get("part_col"),
-        qty_col=kwargs.get("qty_col"),
-        factory_col=kwargs.get("factory_col"),
-        wip_col=kwargs.get("wip_col"),
-        factory_due_col=kwargs.get("factory_due_col"),
-        ship_date_col=kwargs.get("ship_date_col"),
-        remark_col=kwargs.get("remark_col"),
-        customer_tag_col=kwargs.get("customer_tag_col"),
-        split_tags=split_tags,
-    )
-
-    st.subheader("📋 Orders")
-
-    if base.empty:
-        st.info("目前沒有資料。")
-        return
-
-    keyword = st.text_input("搜尋 PO / 客戶 / Part No / 工廠", "")
-    status_filter = st.selectbox("狀態", ["全部", "進行中", "完成", "On Hold", "Inspection", "Packing", "Shipping"])
-
-    view = base.copy()
-
-    if keyword.strip():
-        kw = keyword.strip().lower()
-        mask = (
-            view["PO#"].astype(str).str.lower().str.contains(kw, na=False)
-            | view["Customer"].astype(str).str.lower().str.contains(kw, na=False)
-            | view["Part No"].astype(str).str.lower().str.contains(kw, na=False)
-            | view["Factory"].astype(str).str.lower().str.contains(kw, na=False)
-        )
-        view = view[mask]
-
-    if status_filter == "進行中":
-        view = view[~view["Is Done"]]
-    elif status_filter == "完成":
-        view = view[view["Is Done"]]
-    elif status_filter == "On Hold":
-        view = view[view["Is Hold"]]
-    elif status_filter == "Inspection":
-        view = view[view["Is Inspection"]]
-    elif status_filter == "Packing":
-        view = view[view["Is Packing"]]
-    elif status_filter == "Shipping":
-        view = view[view["Is Shipping"]]
-
-    view = view.sort_values(by=["Factory Due Date_dt", "Ship Date_dt", "Customer", "PO#"], na_position="last")
-    _render_basic_table(_format_preview_df(view), "Orders Detail", height=560)
-
-
-# =========================================================
-# Customer Preview
-# =========================================================
-def show_customer_preview_report(**kwargs) -> None:
-    orders = kwargs.get("orders")
-    split_tags = kwargs.get("split_tags")
-    base = _prepare_base_df(
-        orders=orders,
-        po_col=kwargs.get("po_col"),
-        customer_col=kwargs.get("customer_col"),
-        part_col=kwargs.get("part_col"),
-        qty_col=kwargs.get("qty_col"),
-        factory_col=kwargs.get("factory_col"),
-        wip_col=kwargs.get("wip_col"),
-        factory_due_col=kwargs.get("factory_due_col"),
-        ship_date_col=kwargs.get("ship_date_col"),
-        remark_col=kwargs.get("remark_col"),
-        customer_tag_col=kwargs.get("customer_tag_col"),
-        split_tags=split_tags,
-    )
-
-    st.subheader("👀 Customer Preview")
-
-    if base.empty:
-        st.info("目前沒有資料。")
-        return
-
-    customer_param = st.query_params.get("customer", "")
-    all_customers = sorted([x for x in base["Customer"].dropna().astype(str).unique() if x.strip()])
-
-    default_index = 0
-    options = ["全部"] + all_customers
-    if customer_param and customer_param in all_customers:
-        default_index = options.index(customer_param)
-
-    selected_customer = st.selectbox("選擇客戶", options, index=default_index)
-
-    view = base.copy()
-    if selected_customer != "全部":
-        view = view[view["Customer"].astype(str) == selected_customer]
-
-    preview = _make_customer_preview_df(view)
-    preview = preview.sort_values(by=["Ship Date", "PO#", "Part No"], na_position="last")
-    st.dataframe(preview, use_container_width=True, height=520)
-
-    csv = preview.to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        "⬇️ 下載目前客戶預覽 CSV",
-        data=csv,
-        file_name="customer_preview.csv",
-        mime="text/csv",
-    )
-
-
-# =========================================================
-# Sandy 內部 WIP
-# =========================================================
-def show_sandy_internal_wip_report(**kwargs) -> None:
-    orders = kwargs.get("orders")
-    split_tags = kwargs.get("split_tags")
-    base = _prepare_base_df(
-        orders=orders,
-        po_col=kwargs.get("po_col"),
-        customer_col=kwargs.get("customer_col"),
-        part_col=kwargs.get("part_col"),
-        qty_col=kwargs.get("qty_col"),
-        factory_col=kwargs.get("factory_col"),
-        wip_col=kwargs.get("wip_col"),
-        factory_due_col=kwargs.get("factory_due_col"),
-        ship_date_col=kwargs.get("ship_date_col"),
-        remark_col=kwargs.get("remark_col"),
-        customer_tag_col=kwargs.get("customer_tag_col"),
-        split_tags=split_tags,
-    )
-
-    st.subheader("🧾 Sandy 內部 WIP")
-
-    if base.empty:
-        st.info("目前沒有資料。")
-        return
-
-    active = base[~base["Is Done"]].copy()
-    active = active.sort_values(by=["Factory Due Date_dt", "Factory", "Customer", "PO#"], na_position="last")
-    _render_basic_table(_format_preview_df(active), "內部 WIP", height=560)
-
-
-# =========================================================
-# Sandy 銷貨底
-# =========================================================
-def show_sandy_shipment_report(**kwargs) -> None:
-    sales_shipment_df = kwargs.get("sales_shipment_df")
-    st.subheader("📦 Sandy 銷貨底")
-
-    df = _copy_df(sales_shipment_df)
-    if df.empty:
-        st.info("目前沒有銷貨底資料。")
-        return
-
-    st.dataframe(df, use_container_width=True, height=560)
-
-
-# =========================================================
-# 新訂單 WIP
-# =========================================================
-def show_new_orders_wip_report(**kwargs) -> None:
-    orders = kwargs.get("orders")
-    order_date_col = kwargs.get("order_date_col")
-    split_tags = kwargs.get("split_tags")
-
-    base = _prepare_base_df(
-        orders=orders,
-        po_col=kwargs.get("po_col"),
-        customer_col=kwargs.get("customer_col"),
-        part_col=kwargs.get("part_col"),
-        qty_col=kwargs.get("qty_col"),
-        factory_col=kwargs.get("factory_col"),
-        wip_col=kwargs.get("wip_col"),
-        factory_due_col=kwargs.get("factory_due_col"),
-        ship_date_col=kwargs.get("ship_date_col"),
-        remark_col=kwargs.get("remark_col"),
-        customer_tag_col=kwargs.get("customer_tag_col"),
-        split_tags=split_tags,
-    )
-
-    st.subheader("🆕 新訂單 WIP")
-
-    if base.empty:
-        st.info("目前沒有資料。")
-        return
-
-    raw = _copy_df(orders)
-    if order_date_col and order_date_col in raw.columns:
-        base["Order Date"] = pd.to_datetime(raw[order_date_col], errors="coerce")
+    if not customer_values:
+        return display_df
+    if default_customer and default_customer in customer_values:
+        default_index = customer_values.index(default_customer) + 1
     else:
-        base["Order Date"] = pd.NaT
-
-    days = st.slider("近幾天新訂單", min_value=3, max_value=60, value=14, step=1)
-    cutoff = _today() - pd.Timedelta(days=days)
-
-    view = base[(base["Order Date"].notna()) & (base["Order Date"] >= cutoff)].copy()
-    view = view.sort_values(by=["Order Date", "Customer", "PO#"], ascending=[False, True, True], na_position="last")
-
-    c1, c2 = st.columns(2)
-    c1.metric("新訂單筆數", len(view))
-    c2.metric("進行中筆數", int((~view["Is Done"]).sum()) if not view.empty else 0)
-
-    _render_basic_table(_format_preview_df(view), "新訂單明細", height=520)
-
-
-# =========================================================
-# Import / Update 頁
-# =========================================================
-def show_import_update_page(**kwargs) -> None:
-    st.subheader("📤 Import / Update")
-    st.info("此頁已由 app.py 的 fallback_import_update() 接手處理。")
-
-
-def show_import_update_report(**kwargs) -> None:
-    st.subheader("📤 Import / Update")
-    st.info("此頁已由 app.py 的 fallback_import_update() 接手處理。")
-
-
-# =========================================================
-# 可選：銷貨資料 loader（讓 app.py 的 cached_load_sales_data() 可呼叫）
-# =========================================================
-def load_sales_data():
+        default_index = 0
+    selected_customer = st.selectbox(
+        "客戶篩選",
+        ["全部"] + customer_values,
+        index=default_index,
+        key=f"{key_prefix}_customer_filter",
+    )
+    if selected_customer != "全部":
+        display_df = display_df[
+            display_df[customer_col_name].astype(str).str.strip().str.lower()
+            == selected_customer.strip().lower()
+        ].copy()
+    return display_df
+def normalize_status_text(series: pd.Series) -> pd.Series:
+    if series is None:
+        return pd.Series("", index=pd.RangeIndex(0))
+    return series.fillna("").astype(str).str.strip().str.lower()
+def _today_normalized() -> pd.Timestamp:
+    return pd.Timestamp.today().normalize()
+def _series_nonblank(series: pd.Series | None, index_like) -> pd.Series:
+    if series is None:
+        return pd.Series(False, index=index_like)
+    s = series.fillna("").astype(str).str.strip()
+    return s.ne("")
+def _resolve_wip_series(df: pd.DataFrame) -> pd.Series:
+    if "WIP" in df.columns:
+        exact = get_series_by_col(df, "WIP")
+        if exact is not None:
+            return exact
+    src, series = first_existing_series(df, ["WIP"] + WIP_CANDIDATES)
+    if series is not None:
+        return series
+    if 'wip_col' in globals() and wip_col:
+        fallback = get_series_by_col(df, wip_col)
+        if fallback is not None:
+            return fallback
+    return pd.Series("", index=df.index)
+def _wip_exclude_mask(df: pd.DataFrame) -> pd.Series:
+    wip_norm = normalize_status_text(_resolve_wip_series(df))
+    return wip_norm.str.contains(r"\b(shipment|cancelled|cancell|cancel)\b|取消", na=False).fillna(False)
+def parse_mixed_date_series(series: pd.Series) -> pd.Series:
+    if series is None:
+        return pd.Series(dtype="datetime64[ns]")
+    s = series.astype(str).str.strip()
+    s = s.replace({"": pd.NA, "nan": pd.NA, "None": pd.NA})
+    out = pd.to_datetime(s, errors="coerce")
+    mask = out.isna()
+    if mask.any():
+        s2 = s[mask].str.replace(".", "", regex=False)
+        out.loc[mask] = pd.to_datetime(s2, errors="coerce")
+    mask = out.isna()
+    if mask.any():
+        def _parse_one(v):
+            txt = str(v).strip()
+            if not txt or txt.lower() in {"nan", "none"}:
+                return pd.NaT
+            txt = txt.replace(".", "").replace("  ", " ")
+            patterns = [
+                "%Y-%m-%d", "%Y/%m/%d",
+                "%b %d,%y", "%b %d, %y",
+                "%B %d,%y", "%B %d, %y",
+                "%m/%d/%y", "%m/%d/%Y",
+            ]
+            for fmt in patterns:
+                try:
+                    return pd.Timestamp(datetime.strptime(txt, fmt))
+                except Exception:
+                    pass
+            try:
+                return pd.to_datetime(txt, errors="coerce")
+            except Exception:
+                return pd.NaT
+        out.loc[mask] = s[mask].apply(_parse_one)
+    return out
+def build_subset_mask_new_order_today(df: pd.DataFrame) -> pd.Series:
+    today = _today_normalized()
+    order_date_col = first_existing_column(
+        df,
+        ORDER_DATE_CANDIDATES + ["客戶下單日期", "工廠下單日期", "下單日期", "接單日期"]
+    )
+    order_dt = parse_mixed_date_series(get_series_by_col(df, order_date_col)) if order_date_col else pd.Series(pd.NaT, index=df.index)
+    order_today = order_dt.dt.normalize() == today
+    due_col = first_existing_column(
+        df,
+        SHIP_DATE_CANDIDATES + ["交期 (更改)", "交期 (更改)", "交期", "客戶交期", "預交日", "預定交期", "交貨期"]
+    )
+    due_dt = parse_mixed_date_series(get_series_by_col(df, due_col)) if due_col else pd.Series(pd.NaT, index=df.index)
+    due_today = due_dt.dt.normalize() == today
+    change_col = first_existing_column(
+        df,
+        ["更改 Booking", "更改 Booking", "Ship via change", "出貨方式變更"]
+    )
+    change_flag = _series_nonblank(get_series_by_col(df, change_col) if change_col else None, df.index)
+    exclude_flag = _wip_exclude_mask(df)
+    mask = (order_today.fillna(False) | due_today.fillna(False) | change_flag.fillna(False)) & (~exclude_flag)
+    return mask.fillna(False)
+def build_subset_mask_unshipped(df: pd.DataFrame) -> pd.Series:
+    exclude_flag = _wip_exclude_mask(df)
+    ship_date_name = first_existing_column(df, SHIP_DATE_CANDIDATES + ["出貨日期", "出貨日期 (公式)"])
+    ship_s = get_series_by_col(df, ship_date_name) if ship_date_name else None
+    ship_dt = parse_mixed_date_series(ship_s) if ship_s is not None else pd.Series(pd.NaT, index=df.index)
+    if ship_dt.isna().all():
+        due_date_name = first_existing_column(df, FACTORY_DUE_CANDIDATES)
+        due_s = get_series_by_col(df, due_date_name) if due_date_name else None
+        ship_dt = parse_mixed_date_series(due_s) if due_s is not None else pd.Series(pd.NaT, index=df.index)
+    year_2026_flag = ship_dt.dt.year == 2026
+    mask = (~exclude_flag) & year_2026_flag.fillna(False)
+    return mask.fillna(False)
+def build_subset_mask_shipment_current_month(df: pd.DataFrame) -> pd.Series:
+    today = pd.Timestamp.today()
+    current_month = today.strftime("%Y-%m")
+    wip_norm = normalize_status_text(_resolve_wip_series(df))
+    shipment_flag = wip_norm.str.contains(r"\bshipment\b", na=False)
+    cancel_flag = wip_norm.str.contains(r"\b(cancel|cancell|cancelled)\b|取消", na=False)
+    ship_date_name = first_existing_column(df, SHIP_DATE_CANDIDATES + ["出貨日期", "出貨日期 (公式)"])
+    ship_s = get_series_by_col(df, ship_date_name) if ship_date_name else None
+    ship_dt = parse_mixed_date_series(ship_s) if ship_s is not None else pd.Series(pd.NaT, index=df.index)
+    month_flag = ship_dt.dt.strftime("%Y-%m") == current_month
+    mask = shipment_flag & (~cancel_flag) & month_flag.fillna(False)
+    return mask.fillna(False)
+def build_subset_mask(source_df: pd.DataFrame, subset_mode: str | None = None) -> pd.Series:
+    if subset_mode == "new_order_today":
+        return build_subset_mask_new_order_today(source_df)
+    if subset_mode == "unshipped":
+        return build_subset_mask_unshipped(source_df)
+    if subset_mode == "shipment_only":
+        return build_subset_mask_shipment_current_month(source_df)
+    return pd.Series(True, index=source_df.index).fillna(False)
+def render_teable_subset_table(
+    title: str,
+    source_df: pd.DataFrame,
+    specs,
+    default_customer: str | None = None,
+    csv_name: str | None = None,
+    caption: str | None = None,
+    subset_mode: str | None = None,
+):
+    st.subheader(title)
+    if source_df is None or source_df.empty:
+        st.warning("Teable 主表目前沒有資料。")
+        return
+    filtered_source = source_df.copy()
+    if subset_mode:
+        filtered_source = filtered_source[build_subset_mask(filtered_source, subset_mode)].copy()
+    display_df, mapping = build_teable_view_df(filtered_source, specs)
+    if default_customer:
+        customer_display_col = "客戶" if "客戶" in display_df.columns else ("Customer" if "Customer" in display_df.columns else None)
+        if customer_display_col:
+            display_df = apply_customer_filter(display_df, customer_display_col, default_customer, title)
+    if caption:
+        st.caption(caption)
+    else:
+        if subset_mode == "new_order_today":
+            st.caption("資料來源：Teable 主表即時欄位（當天下單新單，或當天客戶交期，或有出貨方式變更；已排除 shipment / cancelled）")
+        elif subset_mode == "unshipped":
+            st.caption("資料來源：Teable 主表即時欄位（Sandy 內部 WIP：已扣除 WIP 為 shipment / cancelled，且只顯示 2026 年数据）")
+        elif subset_mode == "shipment_only":
+            st.caption("資料來源：Teable 主表即時欄位（Sandy 銷貨底：只顯示當月出貨者）")
+        else:
+            st.caption("資料來源：Teable 主表即時欄位")
+    st.dataframe(display_df, use_container_width=True, height=520)
+    out_name = csv_name or f"{title}.csv"
+    st.download_button(
+        f"下載 {out_name}",
+        data=display_df.to_csv(index=False).encode("utf-8-sig"),
+        file_name=out_name,
+        mime="text/csv",
+        key=f"download_{title}"
+    )
+def parse_numeric_series(series: pd.Series) -> pd.Series:
+    if series is None:
+        return pd.Series(dtype=float)
+    s = series.astype(str).fillna("").str.strip()
+    replacements = [
+        ("US$", ""), ("USD$", ""), ("NT$", ""), ("HK$", ""),
+        ("USD", ""), ("US", ""), ("NTD", ""), ("TWD", ""), ("RMB", ""),
+        ("$", ""), (",", ""), ("nan", ""), ("None", ""),
+    ]
+    for old, new in replacements:
+        s = s.str.replace(old, new, regex=False)
+    s = s.str.extract(r"([-+]?\d*\.?\d+)", expand=False)
+    return pd.to_numeric(s, errors="coerce").fillna(0.0)
+def find_amount_column(df: pd.DataFrame, candidates):
+    src = first_existing_column(df, candidates)
+    if src:
+        return src
+    normalized_cols = {normalize_col_key(c): c for c in df.columns}
+    candidate_keys = [normalize_col_key(c) for c in candidates]
+    for key, col in normalized_cols.items():
+        for ck in candidate_keys:
+            if ck and ck in key:
+                return col
+    for col in df.columns:
+        key = normalize_col_key(col)
+        if any(token in key for token in ["金額", "amount"]):
+            return col
+    return None
+def safe_display_subset(df: pd.DataFrame, columns):
+    out = pd.DataFrame(index=df.index)
+    for col in columns:
+        if col in df.columns:
+            out[col] = get_series_by_col(df, col)
+    out.columns = make_unique_columns(out.columns)
+    return out
+# ================================
+# ✅ 業績明細表 (修正版)
+# ================================
+def render_sales_detail_from_teable(source_df: pd.DataFrame):
     """
-    保留相容介面。
-    若你未來要接 Sandy 銷貨底 Excel，可在這裡補實作。
-    目前先回傳空 DataFrame，避免 app.py 報錯。
+    業績明細表
+    - 已出貨：WIP == 'SHIPMENT'，金額用「銷貨金額」欄
+    - 接單金額：「接單金額」欄（依客戶下單日期篩月份）
+    - 預計出貨：非 SHIPMENT、有出貨日期在該月（如 QA）
+    數字驗證：3月已出貨 US$58,392.42 + QA中 US$6,600 = US$64,992.42
     """
-    return pd.DataFrame(), pd.DataFrame(), ""
+    import datetime as _dt
+
+    st.subheader("📊 業績明細表")
+
+    if source_df is None or source_df.empty:
+        st.warning("Teable 主表目前沒有資料。")
+        return
+
+    st.caption("資料來源：Teable 主表即時欄位（全客戶）")
+
+    # ── 欄位偵測 ──────────────────────────────────────
+    customer_col_local  = first_existing_column(source_df, CUSTOMER_CANDIDATES + ["Customer"])
+    factory_col_local   = first_existing_column(source_df, FACTORY_CANDIDATES)
+    po_col_local        = first_existing_column(source_df, PO_CANDIDATES)
+    pn_col_local        = first_existing_column(source_df, PART_CANDIDATES)
+    qty_col_local       = first_existing_column(source_df, QTY_CANDIDATES + ["Order QTY (PCS)"])
+    order_date_col      = first_existing_column(source_df, ORDER_DATE_CANDIDATES)
+    ship_date_col_local = first_existing_column(source_df, SHIP_DATE_CANDIDATES + ["出貨日期"])
+    wip_col_local       = first_existing_column(source_df, WIP_CANDIDATES)
+
+    # 金額欄：銷貨金額(出貨用) / 接單金額
+    invoice_col   = first_existing_column(source_df, ["銷貨金額", "invoice", "INVOICE", "Invoice Amount"])
+    order_amt_col = first_existing_column(source_df, ["接單金額", "Order Amount"] + AMOUNT_ORDER_CANDIDATES)
+
+    # ── 金額解析 ──────────────────────────────────────
+    def _parse_usd(series):
+        if series is None:
+            return pd.Series(0.0, index=source_df.index)
+        s = series.astype(str)\
+                  .str.replace("US$", "", regex=False)\
+                  .str.replace("USD", "", regex=False)\
+                  .str.replace(",", "", regex=False)\
+                  .str.strip()
+        return pd.to_numeric(s, errors="coerce").fillna(0.0)
+
+    invoice_series   = _parse_usd(get_series_by_col(source_df, invoice_col)   if invoice_col   else None)
+    order_amt_series = _parse_usd(get_series_by_col(source_df, order_amt_col) if order_amt_col else None)
+    if order_amt_col is None:
+        order_amt_series = invoice_series.copy()
+
+    # ── 日期解析 ──────────────────────────────────────
+    order_dates = parse_mixed_date_series(
+        get_series_by_col(source_df, order_date_col)
+    ) if order_date_col else pd.Series(pd.NaT, index=source_df.index)
+
+    ship_dates = parse_mixed_date_series(
+        get_series_by_col(source_df, ship_date_col_local)
+    ) if ship_date_col_local else pd.Series(pd.NaT, index=source_df.index)
+
+    # ── WIP ───────────────────────────────────────────
+    if wip_col_local:
+        wip_series = get_series_by_col(source_df, wip_col_local)\
+                        .fillna("").astype(str).str.strip().str.upper()
+    else:
+        wip_series = pd.Series("", index=source_df.index)
+
+    is_shipment = wip_series == "SHIPMENT"
+    is_cancelled = wip_series.str.contains("CANCEL", na=False)
+
+    # ── 月份選單 ──────────────────────────────────────
+    ship_months  = [m for m in ship_dates.dt.strftime("%Y-%m").dropna().tolist()  if m and m != "NaT"]
+    order_months = [m for m in order_dates.dt.strftime("%Y-%m").dropna().tolist() if m and m != "NaT"]
+    all_months   = sorted(set(ship_months + order_months), reverse=True)
+
+    if not all_months:
+        st.warning("找不到有效的日期資料。")
+        return
+
+    current_month = _dt.datetime.now().strftime("%Y-%m")
+    default_idx   = all_months.index(current_month) if current_month in all_months else 0
+
+    selected_month = st.selectbox(
+        "📅 選擇統計月份",
+        all_months,
+        index=default_idx,
+        format_func=lambda m: f"{m[:4]} 年 {int(m[5:7])} 月",
+        key="sales_detail_month_teable",
+    )
+    mon_str = selected_month[5:7]
+
+    # ── 月份篩選 mask ─────────────────────────────────
+    ship_month_mask  = ship_dates.dt.strftime("%Y-%m") == selected_month
+    order_month_mask = order_dates.dt.strftime("%Y-%m") == selected_month
+
+    # 1) 已出貨：WIP=SHIPMENT + 出貨月份符合
+    shipped_mask = is_shipment & ship_month_mask.fillna(False)
+
+    # 2) 預計出貨：非SHIPMENT、非CANCELLED、出貨日期在該月
+    forecast_mask = (
+        (~is_shipment) &
+        (~is_cancelled) &
+        ship_month_mask.fillna(False) &
+        ~wip_series.str.contains("PO CANCELLED|PO Cancelled", na=False)
+    )
+
+    # 3) 接單：依客戶下單日期
+    order_mask = order_month_mask.fillna(False)
+
+    # ── 金額加總 ──────────────────────────────────────
+    shipped_usd  = invoice_series[shipped_mask].sum()
+    forecast_usd = invoice_series[forecast_mask].sum()
+    order_usd    = order_amt_series[order_mask].sum()
+    total_usd    = shipped_usd + forecast_usd
+
+    # ── 頁面標題 ──────────────────────────────────────
+    today_str = pd.Timestamp.now().strftime("%Y/%m/%d")
+    st.markdown(
+        f"<h3 style='text-align:center;margin-bottom:4px;'>"
+        f"{int(mon_str)}月 業績明細表</h3>"
+        f"<p style='text-align:right;color:gray;margin-top:0;'>{today_str}</p>",
+        unsafe_allow_html=True,
+    )
+
+    # ── 四大指標卡 ────────────────────────────────────
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("📥 接單金額 (USD)",  f"${order_usd:,.2f}"    if order_usd   else "—")
+    c2.metric("✅ 已出貨 (USD)",    f"${shipped_usd:,.2f}"  if shipped_usd else "—")
+    c3.metric("🔜 預計出貨 (USD)",  f"${forecast_usd:,.2f}" if forecast_usd else "—")
+    c4.metric("📊 銷貨合計 (USD)",  f"${total_usd:,.2f}"    if total_usd   else "—")
+
+    # ── QA / 預計出貨提示 ─────────────────────────────
+    qa_mask = forecast_mask & wip_series.isin(["QA", "QC", "FQC", "INSPECTION"])
+    qa_sum  = invoice_series[qa_mask].sum()
+    if qa_sum > 0:
+        qa_names = ""
+        if customer_col_local:
+            names = [
+                str(n).split()[0] for n in
+                get_series_by_col(source_df, customer_col_local)[qa_mask].dropna().unique()
+            ]
+            qa_names = "、".join(names)
+        st.info(
+            f"💡 QA 中（預計近期出貨）：{qa_names}  |  US${qa_sum:,.2f}\n\n"
+            f"出貨後 WIP 更新為 SHIPMENT，{int(mon_str)}月銷貨合計將增至 **US${total_usd:,.2f}**"
+        )
+
+    st.markdown("---")
+
+    # ── 工廠別 & 客戶別 ───────────────────────────────
+    def _clean_factory(s):
+        return re.sub(r'\s+', '', str(s)) if s else ""
+
+    def _clean_customer(s):
+        m = re.match(r'^([A-Za-z0-9_\-]+)', str(s))
+        return m.group(1) if m else (str(s).split()[0] if str(s).split() else str(s))
+
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown(f"#### 🏭 工廠別（已出貨 {int(mon_str)}月）")
+        if shipped_mask.any() and factory_col_local:
+            fac_s = get_series_by_col(source_df, factory_col_local)[shipped_mask]
+            amt_s = invoice_series[shipped_mask]
+            fdf = pd.DataFrame({"工廠": fac_s.apply(_clean_factory), "金額": amt_s})
+            grp = fdf.groupby("工廠")["金額"].agg(訂單數="count", 銷貨金額_USD="sum").reset_index()
+            grp = grp.sort_values("銷貨金額_USD", ascending=False)
+            grp["銷貨金額_USD"] = grp["銷貨金額_USD"].apply(lambda x: f"${x:,.2f}")
+            total_row = pd.DataFrame([{"工廠": "合計", "訂單數": grp["訂單數"].sum(), "銷貨金額_USD": f"${shipped_usd:,.2f}"}])
+            grp = pd.concat([grp, total_row], ignore_index=True)
+            st.dataframe(grp, use_container_width=True, hide_index=True, height=260)
+        else:
+            st.info("本月無已出貨資料。")
+
+    with col_right:
+        st.markdown(f"#### 👥 客戶別（已出貨 {int(mon_str)}月）")
+        if shipped_mask.any() and customer_col_local:
+            cust_s = get_series_by_col(source_df, customer_col_local)[shipped_mask]
+            amt_s  = invoice_series[shipped_mask]
+            cdf = pd.DataFrame({"客戶": cust_s.apply(_clean_customer), "金額": amt_s})
+            grp2 = cdf.groupby("客戶")["金額"].agg(訂單數="count", 銷貨金額_USD="sum").reset_index()
+            grp2 = grp2.sort_values("銷貨金額_USD", ascending=False)
+            grp2["銷貨金額_USD"] = grp2["銷貨金額_USD"].apply(lambda x: f"${x:,.2f}")
+            total_row2 = pd.DataFrame([{"客戶": "合計", "訂單數": grp2["訂單數"].sum(), "銷貨金額_USD": f"${shipped_usd:,.2f}"}])
+            grp2 = pd.concat([grp2, total_row2], ignore_index=True)
+            st.dataframe(grp2, use_container_width=True, hide_index=True, height=260)
+        else:
+            st.info("本月無已出貨資料。")
+
+    # ── 累計出貨走勢 ──────────────────────────────────
+    st.markdown(f"#### 📈 出貨累計走勢（{int(mon_str)}月，USD）")
+    if shipped_mask.any():
+        daily_df = pd.DataFrame({
+            "日期": ship_dates[shipped_mask],
+            "金額": invoice_series[shipped_mask],
+        }).dropna(subset=["日期"]).sort_values("日期")
+        daily_df["累計出貨(USD)"] = daily_df["金額"].cumsum()
+        daily_df["日"] = daily_df["日期"].dt.strftime("%m/%d")
+        st.line_chart(daily_df.set_index("日")[["累計出貨(USD)"]], height=220)
+    else:
+        st.info("本月尚無出貨資料。")
+
+    # ── 已出貨明細 ────────────────────────────────────
+    st.markdown(f"#### ✅ 已出貨明細（SHIPMENT，{int(mon_str)}月）")
+    if shipped_mask.any():
+        show_cols = [c for c in [
+            customer_col_local, po_col_local, pn_col_local,
+            factory_col_local, ship_date_col_local, invoice_col
+        ] if c and c in source_df.columns]
+        view = source_df.loc[shipped_mask, show_cols].copy() if show_cols else source_df.loc[shipped_mask].copy()
+        if customer_col_local and customer_col_local in view.columns:
+            view[customer_col_local] = view[customer_col_local].apply(_clean_customer)
+        if factory_col_local and factory_col_local in view.columns:
+            view[factory_col_local] = view[factory_col_local].apply(_clean_factory)
+        if ship_date_col_local and ship_date_col_local in view.columns:
+            view = view.sort_values(ship_date_col_local, ascending=False, na_position="last")
+        st.dataframe(view, use_container_width=True, hide_index=True, height=320)
+        st.download_button(
+            f"⬇️ 下載已出貨明細 CSV ({selected_month})",
+            data=view.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"shipment_{selected_month}.csv",
+            mime="text/csv",
+            key="download_shipped_detail_csv",
+        )
+    else:
+        st.info("本月尚無已出貨（SHIPMENT）資料。")
+
+    # ── 預計出貨明細 ──────────────────────────────────
+    if forecast_mask.any():
+        st.markdown(f"#### 🔜 預計出貨（非 SHIPMENT，{int(mon_str)}月）")
+        show_cols2 = [c for c in [
+            customer_col_local, po_col_local, wip_col_local,
+            factory_col_local, ship_date_col_local, invoice_col
+        ] if c and c in source_df.columns]
+        view2 = source_df.loc[forecast_mask, show_cols2].copy() if show_cols2 else source_df.loc[forecast_mask].copy()
+        if customer_col_local and customer_col_local in view2.columns:
+            view2[customer_col_local] = view2[customer_col_local].apply(_clean_customer)
+        if factory_col_local and factory_col_local in view2.columns:
+            view2[factory_col_local] = view2[factory_col_local].apply(_clean_factory)
+        st.dataframe(view2, use_container_width=True, hide_index=True, height=220)
+
+    # ── 月度走勢（近 12 個月）─────────────────────────
+    st.markdown("---")
+    st.markdown("#### 📅 月度出貨走勢（近 12 個月，USD）")
+    monthly_mask = is_shipment & ship_dates.notna()
+    if monthly_mask.any():
+        monthly_df = pd.DataFrame({
+            "月份": ship_dates[monthly_mask].dt.strftime("%Y-%m"),
+            "金額": invoice_series[monthly_mask],
+        })
+        monthly_grp = (
+            monthly_df.groupby("月份")["金額"]
+            .sum().reset_index()
+            .sort_values("月份").tail(12)
+            .set_index("月份")
+        )
+        monthly_grp.columns = ["出貨金額(USD)"]
+        st.bar_chart(monthly_grp, height=240)
+    else:
+        st.info("無足夠歷史資料。")
+
+    # ── 接單明細（本月）──────────────────────────────
+    if order_mask.any():
+        st.markdown(f"#### 📥 接單明細（{int(mon_str)}月）")
+        show_cols3 = [c for c in [
+            customer_col_local, po_col_local, pn_col_local,
+            factory_col_local, order_date_col, order_amt_col
+        ] if c and c in source_df.columns]
+        view3 = source_df.loc[order_mask, show_cols3].copy() if show_cols3 else source_df.loc[order_mask].copy()
+        if customer_col_local and customer_col_local in view3.columns:
+            view3[customer_col_local] = view3[customer_col_local].apply(_clean_customer)
+        if factory_col_local and factory_col_local in view3.columns:
+            view3[factory_col_local] = view3[factory_col_local].apply(_clean_factory)
+        st.dataframe(view3, use_container_width=True, hide_index=True, height=220)
+        st.download_button(
+            f"⬇️ 下載接單明細 CSV ({selected_month})",
+            data=view3.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"order_{selected_month}.csv",
+            mime="text/csv",
+            key="download_sales_detail_csv_teable",
+        )
+
+
+def show_new_orders_wip_report(source_df: pd.DataFrame):
+    render_teable_subset_table(
+        title="📄 新訂單 WIP",
+        source_df=source_df,
+        specs=SANDY_NEW_ORDER_SPECS,
+        default_customer=None,
+        csv_name="新訂單 WIP.csv",
+        subset_mode="new_order_today",
+    )
+
+
+def show_sandy_internal_wip_report(source_df: pd.DataFrame):
+    render_teable_subset_table(
+        title="📄 Sandy 內部 WIP",
+        source_df=source_df,
+        specs=SANDY_INTERNAL_WIP_SPECS,
+        default_customer=None,
+        csv_name="Sandy 內部 WIP.csv",
+        subset_mode="unshipped",
+    )
+
+
+def show_sandy_sales_report(source_df: pd.DataFrame):
+    render_teable_subset_table(
+        title="📄 Sandy 銷貨底",
+        source_df=source_df,
+        specs=SANDY_SALES_BASE_SPECS,
+        default_customer=None,
+        csv_name="Sandy 銷貨底.csv",
+        subset_mode="shipment_only",
+    )
