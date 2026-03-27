@@ -262,21 +262,24 @@ def _wip_exclude_mask(df: pd.DataFrame) -> pd.Series:
     wip_norm = normalize_status_text(_resolve_wip_series(df))
     return wip_norm.str.contains(r"\b(shipment|cancelled|cancell|cancel)\b|取消", na=False).fillna(False)
 def parse_mixed_date_series(series: pd.Series) -> pd.Series:
-    """
-    Robust date parsing for Teable mixed date fields.
+    """Safe mixed-date parser without regex-heavy string ops.
 
-    Key fix:
-    values like "26-03-24" must be interpreted as YY-MM-DD -> 2026-03-24,
-    not misread by pandas/dateutil as 2024-03-26 or 2026-03-19.
+    Supports:
+    - Excel serial dates
+    - YY-MM-DD / YYYY-MM-DD / slash variants
+    - Mon DD, YY / Mon DD, YYYY
+    - MM/DD/YY / MM-DD-YYYY
+    - month-day values without year (assume current year)
     """
     if series is None:
         return pd.Series(dtype="datetime64[ns]")
 
-    s = pd.Series(series).astype(str).str.strip()
+    s = pd.Series(series, copy=False)
+    s = s.astype(str).str.strip()
     s = s.replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "NaT": pd.NA})
+
     out = pd.Series(pd.NaT, index=s.index, dtype="datetime64[ns]")
 
-    # Excel serial dates
     numeric = pd.to_numeric(s, errors="coerce")
     excel_mask = numeric.notna() & (numeric > 20000) & (numeric < 80000)
     if excel_mask.any():
@@ -284,48 +287,52 @@ def parse_mixed_date_series(series: pd.Series) -> pd.Series:
             numeric.loc[excel_mask], unit="D", origin="1899-12-30", errors="coerce"
         )
 
-    # Normalize month strings like "Mar. 24, 26" -> "Mar 24, 26"
-    s_clean = (
-        s.str.replace(r"(?<=\b[A-Za-z]{3,9})\.", "", regex=True)
-         .str.replace(r"\s+", " ", regex=True)
-         .str.strip()
-    )
+    def _clean_text(v):
+        txt = "" if pd.isna(v) else str(v).strip()
+        if not txt or txt.lower() in {"nan", "none", "nat"}:
+            return ""
+        txt = txt.replace(".", " ")
+        txt = txt.replace(" ,", ",")
+        txt = " ".join(txt.split())
+        txt = txt.replace(" ,", ",")
+        return txt
 
-    patterns = [
-        (r"^\d{2}-\d{2}-\d{2}$", "%y-%m-%d"),   # 26-03-24
-        (r"^\d{4}-\d{2}-\d{2}$", "%Y-%m-%d"),   # 2026-03-24
-        (r"^\d{2}/\d{2}/\d{2}$", "%y/%m/%d"),
-        (r"^\d{4}/\d{2}/\d{2}$", "%Y/%m/%d"),
-        (r"^[A-Za-z]{3,9} \d{1,2}, ?\d{2}$", "%b %d, %y"),
-        (r"^[A-Za-z]{3,9} \d{1,2}, ?\d{4}$", "%b %d, %Y"),
-        (r"^\d{1,2}/\d{1,2}/\d{2}$", "%m/%d/%y"),
-        (r"^\d{1,2}/\d{1,2}/\d{4}$", "%m/%d/%Y"),
-        (r"^\d{1,2}-\d{1,2}-\d{2}$", "%m-%d-%y"),
-        (r"^\d{1,2}-\d{1,2}-\d{4}$", "%m-%d-%Y"),
-    ]
+    def _parse_one(v):
+        txt = _clean_text(v)
+        if not txt:
+            return pd.NaT
 
-    for regex_pat, fmt in patterns:
-        mask = out.isna() & s_clean.str.match(regex_pat, na=False)
-        if mask.any():
+        for fmt in [
+            "%y-%m-%d", "%Y-%m-%d", "%y/%m/%d", "%Y/%m/%d",
+            "%b %d, %y", "%B %d, %y", "%b %d, %Y", "%B %d, %Y",
+            "%m/%d/%y", "%m/%d/%Y", "%m-%d-%y", "%m-%d-%Y",
+            "%b %d %y", "%B %d %y", "%b %d %Y", "%B %d %Y",
+        ]:
             try:
-                out.loc[mask] = pd.to_datetime(s_clean.loc[mask], format=fmt, errors="coerce")
+                return pd.Timestamp(datetime.strptime(txt, fmt))
             except Exception:
                 pass
 
-    # Month day without year, e.g. "Mar 26" -> assume current year
-    mask = out.isna() & s_clean.str.match(r"^[A-Za-z]{3,9} \d{1,2}$", na=False)
-    if mask.any():
-        current_year = pd.Timestamp.today().year
-        out.loc[mask] = pd.to_datetime(
-            s_clean.loc[mask] + f", {current_year}", format="%b %d, %Y", errors="coerce"
-        )
+        parts = txt.split()
+        if len(parts) == 2 and parts[0][:3].isalpha():
+            current_year = pd.Timestamp.today().year
+            for fmt in ["%b %d %Y", "%B %d %Y"]:
+                try:
+                    return pd.Timestamp(datetime.strptime(f"{txt} {current_year}", fmt))
+                except Exception:
+                    pass
 
-    # Final fallback only on still-unparsed rows
+        try:
+            return pd.to_datetime(txt, errors="coerce")
+        except Exception:
+            return pd.NaT
+
     mask = out.isna()
     if mask.any():
-        out.loc[mask] = pd.to_datetime(s_clean.loc[mask], errors="coerce")
+        out.loc[mask] = s.loc[mask].apply(_parse_one)
 
     return pd.to_datetime(out, errors="coerce")
+
 def build_subset_mask_new_order_today(df: pd.DataFrame) -> pd.Series:
     today = _today_normalized()
     order_date_col = first_existing_column(
