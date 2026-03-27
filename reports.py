@@ -1,28 +1,21 @@
 # -*- coding: utf-8 -*-
 """
 reports.py
-完整修正版（2026/3/27 最終版） - 完全依照目前 APP 截圖與附件格式
-資料來源：Teable API (load_orders() 取得的 DataFrame)
-重點修正：
-1. 金額欄位統一使用「銷貨金額(USD)」作為接單與出貨金額來源
-2. 已出貨 = WIP 欄位包含 "SHIPMENT" 的金額總和
-3. 預計出貨 = 本月非 SHIPMENT 的金額總和
-4. 接單金額 = 本月全部金額總和（與月銷售合計相同）
-5. 月銷售合計 = 已出貨 + 預計出貨
-6. 新增「依工廠別統計」、「已出貨明細」、「預計出貨明細」
-7. 完全匹配 PDF 截圖與附件圖片的顯示格式與數字
+完整修正版（2026/3/27 最終版 - 已移除 plotly 依賴）
+解決 ModuleNotFoundError: plotly.graph_objects
+資料來源：Teable API
+完全依照你上傳的 PDF 截圖 + 附件圖片格式與數字
 """
 
 import pandas as pd
 import streamlit as st
 from datetime import datetime
 from typing import Dict, Optional
-import plotly.graph_objects as go
 
 
 # ====================== 輔助函式 ======================
 def detect_columns(df: pd.DataFrame) -> Dict:
-    """自動偵測 Teable 實際欄位名稱（已針對目前 APP 截圖最佳化）"""
+    """自動偵測 Teable 實際欄位名稱（已針對目前 APP 最佳化）"""
     col_map = {}
     possible_mappings = {
         'date': ['日期', 'Invoice Date', '出貨日期', 'Ship Date', '發票日期', 'Shipment Date'],
@@ -76,11 +69,10 @@ class SalesDetailAnalyzer:
         else:
             df['_wip'] = ''
         
-        # 其他欄位保留原名稱
         return df
     
     def get_month_summary(self, month_str: Optional[str] = None) -> Dict:
-        """單月摘要（完全匹配 PDF 截圖的四個指標）"""
+        """單月摘要（完全匹配 PDF 與附件圖片的四個指標）"""
         if month_str is None:
             month_str = datetime.now().strftime('%Y-%m')
         
@@ -94,10 +86,10 @@ class SalesDetailAnalyzer:
         
         return {
             'month': month_str,
-            'order_usd': round(float(total_usd), 2),      # 接單金額
-            'shipped_usd': round(float(shipped_usd), 2),  # 已出貨金額 (SHIPMENT)
-            'pending_usd': round(float(pending_usd), 2),  # 預計出貨金額
-            'total_usd': round(float(total_usd), 2),      # 月銷售合計
+            'order_usd': round(float(total_usd), 2),
+            'shipped_usd': round(float(shipped_usd), 2),
+            'pending_usd': round(float(pending_usd), 2),
+            'total_usd': round(float(total_usd), 2),
             'order_count': len(month_df),
             'shipped_count': int(shipped_mask.sum())
         }
@@ -110,7 +102,7 @@ class SalesDetailAnalyzer:
         return pd.DataFrame(results)
     
     def get_factory_summary(self, month_str: Optional[str] = None) -> pd.DataFrame:
-        """依工廠別統計（完全匹配附件圖片格式）"""
+        """依工廠別統計（完全匹配附件圖片）"""
         if month_str is None:
             month_str = datetime.now().strftime('%Y-%m')
         df = self.normalized_df.copy()
@@ -127,7 +119,7 @@ class SalesDetailAnalyzer:
         
         grouped = grouped.rename(columns={factory_col: '工廠'})
         grouped = grouped.sort_values('銷貨金額', ascending=False)
-        total_row = pd.DataFrame([{'工廠': '合計', '訂單數': len(month_df), '銷貨金額': month_df['_amount_usd'].sum()}])
+        total_row = pd.DataFrame([{'工廠': '合計', '訂單數': len(month_df), '銷貨金額': round(month_df['_amount_usd'].sum(), 2)}])
         return pd.concat([grouped, total_row], ignore_index=True)
     
     def get_shipped_detail(self, month_str: Optional[str] = None) -> pd.DataFrame:
@@ -173,7 +165,7 @@ def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Option
         index=0 if default_month is None else (months.index(default_month) if default_month in months else 0)
     )
     
-    # 當月四項指標（完全匹配 PDF 第1頁格式）
+    # 當月四項指標（完全匹配 PDF 第1頁）
     summary = analyzer.get_month_summary(selected_month)
     
     col1, col2, col3, col4 = st.columns(4)
@@ -186,7 +178,7 @@ def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Option
     with col4:
         st.metric("月銷售合計 (USD)", f"${summary['total_usd']:,.2f}")
     
-    # 已出貨明細與預計出貨明細（完全匹配 PDF 第3頁格式）
+    # 已出貨明細與預計出貨明細（完全匹配 PDF 第3頁）
     st.subheader("✅ 已出貨明細 (SHIPMENT)")
     shipped_df = analyzer.get_shipped_detail(selected_month)
     if shipped_df.empty:
@@ -206,21 +198,16 @@ def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Option
     factory_df = analyzer.get_factory_summary(selected_month)
     st.dataframe(factory_df, use_container_width=True, hide_index=True)
     
-    # 近12個月趨勢圖（匹配 PDF 第4頁）
+    # 近12個月趨勢圖（使用 Streamlit 原生 bar_chart，不需 plotly）
     st.subheader("📈 近 12 個月月銷貨趨勢")
     trend_df = analyzer.get_monthly_trend(12)
-    
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=trend_df['month'], y=trend_df['total_usd'], name='月銷售合計 (USD)', marker_color='#1f77b4'))
-    fig.add_trace(go.Bar(x=trend_df['month'], y=trend_df['shipped_usd'], name='已出貨金額 (USD)', marker_color='#ff7f0e'))
-    fig.update_layout(
-        barmode='group',
-        height=400,
-        xaxis_title="月份",
-        yaxis_title="金額 (USD)",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    chart_data = trend_df[['month', 'total_usd', 'shipped_usd']].set_index('month')
+    chart_data.columns = ['月銷售合計 (USD)', '已出貨金額 (USD)']
+    st.bar_chart(
+        chart_data,
+        use_container_width=True,
+        height=400
     )
-    st.plotly_chart(fig, use_container_width=True)
     
     # 匯出按鈕
     month_df = analyzer.normalized_df[analyzer.normalized_df['_month'] == selected_month].copy()
