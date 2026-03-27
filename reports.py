@@ -5,6 +5,12 @@ v4：加入統計圖表
   - 已出貨 vs 預計出貨（水平堆疊長條）
   - 依工廠 / 依客戶銷貨佔比（甜甜圈圓餅）
   - 近12個月銷貨趨勢（長條 + 折線）
+
+[修正 v4.1]
+  - build_subset_mask "unshipped" 模式移除 year_ok 年份篩選
+    原因：year_ok 只保留 current_year 的訂單，導致跨年舊訂單
+    （如 2025 年下單、尚未出貨）全部被濾掉，Sandy WIP 只剩 5 筆
+    修正後正確顯示全部 17 筆（非 SHIPMENT、非 Cancelled）
 """
 
 from __future__ import annotations
@@ -456,7 +462,6 @@ def build_teable_view_df(source_df: pd.DataFrame, specs):
 def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
     idx          = source_df.index
     today        = pd.Timestamp.today().normalize()
-    current_year = today.year
 
     wip_col   = find_col(source_df, WIP_CANDIDATES)
     wip_raw   = (get_series_by_col(source_df, wip_col).astype(str).str.strip()
@@ -473,22 +478,14 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
         return cust_d.dt.normalize().eq(today).fillna(False) | fact_d.dt.normalize().eq(today).fillna(False)
 
     if subset_mode == "unshipped":
+        # ✅ 修正重點：移除 year_ok 年份篩選
+        # 原本的 year_ok = year_s.isna() | year_s.eq(current_year) 會把
+        # 跨年舊訂單（如 2025 年下單、尚未出貨）全部過濾掉，
+        # 導致 Sandy WIP 從 17 筆縮減為 5 筆。
+        # 正確邏輯：只要「非 SHIPMENT」且「非 Cancelled」即全部顯示。
         not_shipment  = ~wip_upper.eq("SHIPMENT")
         not_cancelled = ~_is_cancelled(wip_raw)
-        cust_col = find_col(source_df, ["客戶下單日期"])
-        fact_col = find_col(source_df, ["工廠下單日期"])
-        ship_col = find_col(source_df, PLANNED_SHIP_DATE_CANDIDATES)
-        cust_d   = (parse_mixed_date_series(get_series_by_col(source_df, cust_col))
-                    if cust_col else pd.Series(pd.NaT, index=idx))
-        fact_d   = (parse_mixed_date_series(get_series_by_col(source_df, fact_col))
-                    if fact_col else pd.Series(pd.NaT, index=idx))
-        ship_d   = (parse_mixed_date_series(get_series_by_col(source_df, ship_col))
-                    if ship_col else pd.Series(pd.NaT, index=idx))
-        year_s   = (cust_d.dt.year
-                    .where(cust_d.notna(), fact_d.dt.year)
-                    .where(cust_d.notna() | fact_d.notna(), ship_d.dt.year))
-        year_ok  = year_s.isna() | year_s.eq(current_year)
-        return not_shipment & not_cancelled & year_ok
+        return not_shipment & not_cancelled
 
     if subset_mode == "shipment_only":
         is_ship    = wip_upper.eq("SHIPMENT")
