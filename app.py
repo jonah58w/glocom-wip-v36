@@ -657,7 +657,7 @@ def parse_xitop_workflow_report(uploaded_file) -> pd.DataFrame:
 # ================================
 # LOAD DATA
 # ================================
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=0)
 def load_orders():
     if not TEABLE_TOKEN:
         return pd.DataFrame(), "NO_TOKEN", "TEABLE_TOKEN is empty"
