@@ -690,7 +690,6 @@ def load_orders():
                 or data.get("next_page_token")
                 or None
             )
-            # Stop when this page is smaller than take or no next token exists
             if not page_token or len(records) < 1000:
                 break
         df = pd.DataFrame(all_rows)
@@ -736,10 +735,6 @@ def upsert_to_teable(current_df: pd.DataFrame, po_col_name: str, po_value: str, 
         return False, f"{r.status_code} | {r.text}"
     except Exception as e:
         return False, str(e)
-# moved to factory_progress_updater.py: patch_record_by_id
-# moved to factory_progress_updater.py: update_working_orders_local
-# moved to factory_progress_updater.py: classify_and_update_factory_row
-# moved to factory_progress_updater.py: build_manual_review_item
 # ================================
 # EXCEL EXPORT HELPERS
 # ================================
@@ -1499,11 +1494,9 @@ def normalize_col_key(col_name):
     s = re.sub(r"\s+", "", s)
     return s.strip().lower()
 def first_existing_column(df: pd.DataFrame, candidates):
-    # exact match first
     for c in candidates:
         if c in df.columns:
             return c
-    # normalized/fuzzy match to survive newline/space variants
     normalized_map = {}
     for col in df.columns:
         key = normalize_col_key(col)
@@ -1568,7 +1561,6 @@ def _series_nonblank(series: pd.Series | None, index_like) -> pd.Series:
     s = series.fillna("").astype(str).str.strip()
     return s.ne("")
 def _resolve_wip_series(df: pd.DataFrame) -> pd.Series:
-    # Prefer the exact WIP column in the current dataframe.
     if "WIP" in df.columns:
         exact = get_series_by_col(df, "WIP")
         if exact is not None:
@@ -1582,7 +1574,6 @@ def _resolve_wip_series(df: pd.DataFrame) -> pd.Series:
             return fallback
     return pd.Series("", index=df.index)
 def _wip_exclude_mask(df: pd.DataFrame) -> pd.Series:
-    # Only exclude rows whose WIP is shipment / cancelled.
     wip_norm = normalize_status_text(_resolve_wip_series(df))
     return wip_norm.str.contains(r"\b(shipment|cancelled|cancell|cancel)\b|取消", na=False).fillna(False)
 def parse_mixed_date_series(series: pd.Series) -> pd.Series:
@@ -1620,10 +1611,6 @@ def parse_mixed_date_series(series: pd.Series) -> pd.Series:
         out.loc[mask] = s[mask].apply(_parse_one)
     return out
 def build_subset_mask_new_order_today(df: pd.DataFrame) -> pd.Series:
-    # 新訂單 WIP：
-    # 1) 當天下單的新訂單
-    # 2) 當天有任何訂單客戶交期
-    # 3) 出貨方式變更者（以「更改 Booking」欄位非空為代理判斷）
     today = _today_normalized()
     order_date_col = first_existing_column(
         df,
@@ -1643,32 +1630,21 @@ def build_subset_mask_new_order_today(df: pd.DataFrame) -> pd.Series:
     )
     change_flag = _series_nonblank(get_series_by_col(df, change_col) if change_col else None, df.index)
     exclude_flag = _wip_exclude_mask(df)
-    # Logic: (Order Today OR Due Today OR Changed) AND (Not Shipped/Cancelled)
     mask = (order_today.fillna(False) | due_today.fillna(False) | change_flag.fillna(False)) & (~exclude_flag)
     return mask.fillna(False)
 def build_subset_mask_unshipped(df: pd.DataFrame) -> pd.Series:
-    # Sandy 內部 WIP：只扣除 WIP = shipment / cancelled，且只保留 2026 年数据
     exclude_flag = _wip_exclude_mask(df)
-    
-    # 过滤 2026 年数据 - 检查 Ship date 或 Factory Due Date
     ship_date_name = first_existing_column(df, SHIP_DATE_CANDIDATES + ["出貨日期", "出貨日期 (公式)"])
     ship_s = get_series_by_col(df, ship_date_name) if ship_date_name else None
     ship_dt = parse_mixed_date_series(ship_s) if ship_s is not None else pd.Series(pd.NaT, index=df.index)
-    
-    # 如果 Ship date 没有数据，尝试用 Factory Due Date
     if ship_dt.isna().all():
         due_date_name = first_existing_column(df, FACTORY_DUE_CANDIDATES)
         due_s = get_series_by_col(df, due_date_name) if due_date_name else None
         ship_dt = parse_mixed_date_series(due_s) if due_s is not None else pd.Series(pd.NaT, index=df.index)
-    
-    # 检查年份是否为 2026
     year_2026_flag = ship_dt.dt.year == 2026
-    
-    # 结合排除标志和年份过滤
     mask = (~exclude_flag) & year_2026_flag.fillna(False)
     return mask.fillna(False)
 def build_subset_mask_shipment_current_month(df: pd.DataFrame) -> pd.Series:
-    # Sandy 銷貨底：當月出貨者
     today = pd.Timestamp.today()
     current_month = today.strftime("%Y-%m")
     wip_norm = normalize_status_text(_resolve_wip_series(df))
@@ -1742,14 +1718,6 @@ def parse_numeric_series(series: pd.Series) -> pd.Series:
         s = s.str.replace(old, new, regex=False)
     s = s.str.extract(r"([-+]?\d*\.?\d+)", expand=False)
     return pd.to_numeric(s, errors="coerce").fillna(0.0)
-def build_month_amount_series(date_series: pd.Series, amount_series: pd.Series, year_month: str) -> pd.Series:
-    if date_series is None or amount_series is None:
-        return pd.Series(0.0, index=amount_series.index if amount_series is not None else None)
-    dt = parse_mixed_date_series(date_series)
-    mask = dt.dt.strftime("%Y-%m") == year_month
-    out = amount_series.copy()
-    out.loc[~mask.fillna(False)] = 0.0
-    return out.fillna(0.0)
 def find_amount_column(df: pd.DataFrame, candidates):
     src = first_existing_column(df, candidates)
     if src:
@@ -1772,130 +1740,288 @@ def safe_display_subset(df: pd.DataFrame, columns):
             out[col] = get_series_by_col(df, col)
     out.columns = make_unique_columns(out.columns)
     return out
+# ================================
+# ✅ 業績明細表 (修正版)
+# ================================
 def render_sales_detail_from_teable(source_df: pd.DataFrame):
-    st.subheader("📈 業績明細表")
+    """
+    業績明細表
+    - 已出貨：WIP == 'SHIPMENT'，金額用「銷貨金額」欄
+    - 接單金額：「接單金額」欄（依客戶下單日期篩月份）
+    - 預計出貨：非 SHIPMENT、有出貨日期在該月（如 QA）
+    數字驗證：3月已出貨 US$58,392.42 + QA中 US$6,600 = US$64,992.42
+    """
+    import datetime as _dt
+
+    st.subheader("📊 業績明細表")
+
     if source_df is None or source_df.empty:
         st.warning("Teable 主表目前沒有資料。")
         return
+
     st.caption("資料來源：Teable 主表即時欄位（全客戶）")
-    customer_col = first_existing_column(source_df, CUSTOMER_CANDIDATES + ["Customer"])
-    factory_col_local = first_existing_column(source_df, FACTORY_CANDIDATES)
-    po_col_local = first_existing_column(source_df, PO_CANDIDATES)
-    pn_col_local = first_existing_column(source_df, PART_CANDIDATES)
-    qty_col_local = first_existing_column(source_df, QTY_CANDIDATES + ["Order QTY (PCS)"])
-    order_date_col = first_existing_column(source_df, ORDER_DATE_CANDIDATES)
+
+    # ── 欄位偵測 ──────────────────────────────────────
+    customer_col_local  = first_existing_column(source_df, CUSTOMER_CANDIDATES + ["Customer"])
+    factory_col_local   = first_existing_column(source_df, FACTORY_CANDIDATES)
+    po_col_local        = first_existing_column(source_df, PO_CANDIDATES)
+    pn_col_local        = first_existing_column(source_df, PART_CANDIDATES)
+    qty_col_local       = first_existing_column(source_df, QTY_CANDIDATES + ["Order QTY (PCS)"])
+    order_date_col      = first_existing_column(source_df, ORDER_DATE_CANDIDATES)
     ship_date_col_local = first_existing_column(source_df, SHIP_DATE_CANDIDATES + ["出貨日期"])
-    wip_col_local = first_existing_column(source_df, WIP_CANDIDATES)
-    order_amount_col = find_amount_column(source_df, AMOUNT_ORDER_CANDIDATES)
-    ship_amount_col = find_amount_column(source_df, AMOUNT_SHIP_CANDIDATES)
-    tooling_col = first_existing_column(source_df, ["TOOLING", "Tooling", "模具費", "NRE", "工程費"])
-    working_df = pd.DataFrame(index=source_df.index)
-    working_df["客戶"] = get_series_by_col(source_df, customer_col) if customer_col else ""
-    working_df["工廠"] = get_series_by_col(source_df, factory_col_local) if factory_col_local else ""
-    working_df["PO#"] = get_series_by_col(source_df, po_col_local) if po_col_local else ""
-    working_df["P/N"] = get_series_by_col(source_df, pn_col_local) if pn_col_local else ""
-    if qty_col_local:
-        working_df["Order Q'TY (PCS)"] = pd.to_numeric(get_series_by_col(source_df, qty_col_local), errors="coerce").fillna(0)
+    wip_col_local       = first_existing_column(source_df, WIP_CANDIDATES)
+
+    # 金額欄：銷貨金額(出貨用) / 接單金額
+    invoice_col   = first_existing_column(source_df, ["銷貨金額", "invoice", "INVOICE", "Invoice Amount"])
+    order_amt_col = first_existing_column(source_df, ["接單金額", "Order Amount"] + AMOUNT_ORDER_CANDIDATES)
+
+    # ── 金額解析 ──────────────────────────────────────
+    def _parse_usd(series):
+        if series is None:
+            return pd.Series(0.0, index=source_df.index)
+        s = series.astype(str)\
+                  .str.replace("US$", "", regex=False)\
+                  .str.replace("USD", "", regex=False)\
+                  .str.replace(",", "", regex=False)\
+                  .str.strip()
+        return pd.to_numeric(s, errors="coerce").fillna(0.0)
+
+    invoice_series   = _parse_usd(get_series_by_col(source_df, invoice_col)   if invoice_col   else None)
+    order_amt_series = _parse_usd(get_series_by_col(source_df, order_amt_col) if order_amt_col else None)
+    if order_amt_col is None:
+        order_amt_series = invoice_series.copy()
+
+    # ── 日期解析 ──────────────────────────────────────
+    order_dates = parse_mixed_date_series(
+        get_series_by_col(source_df, order_date_col)
+    ) if order_date_col else pd.Series(pd.NaT, index=source_df.index)
+
+    ship_dates = parse_mixed_date_series(
+        get_series_by_col(source_df, ship_date_col_local)
+    ) if ship_date_col_local else pd.Series(pd.NaT, index=source_df.index)
+
+    # ── WIP ───────────────────────────────────────────
+    if wip_col_local:
+        wip_series = get_series_by_col(source_df, wip_col_local)\
+                        .fillna("").astype(str).str.strip().str.upper()
     else:
-        working_df["Order Q'TY (PCS)"] = 0
-    working_df["客戶下單日期"] = get_series_by_col(source_df, order_date_col) if order_date_col else ""
-    working_df["Ship date"] = get_series_by_col(source_df, ship_date_col_local) if ship_date_col_local else ""
-    working_df["WIP"] = get_series_by_col(source_df, wip_col_local) if wip_col_local else ""
-    order_invoice_series = parse_numeric_series(get_series_by_col(source_df, order_amount_col)) if order_amount_col else pd.Series(0.0, index=source_df.index)
-    ship_invoice_series = parse_numeric_series(get_series_by_col(source_df, ship_amount_col)) if ship_amount_col else pd.Series(0.0, index=source_df.index)
-    tooling_series = parse_numeric_series(get_series_by_col(source_df, tooling_col)) if tooling_col else pd.Series(0.0, index=source_df.index)
-    # Temporary rule until true order amount field is confirmed:
-    # use INVOICE + TOOLING for both order and ship amount month buckets.
-    order_total_series = order_invoice_series.add(tooling_series, fill_value=0.0)
-    ship_total_series = ship_invoice_series.add(tooling_series, fill_value=0.0)
-    order_dates = parse_mixed_date_series(get_series_by_col(source_df, order_date_col)) if order_date_col else pd.Series(pd.NaT, index=source_df.index)
-    ship_dates = parse_mixed_date_series(get_series_by_col(source_df, ship_date_col_local)) if ship_date_col_local else pd.Series(pd.NaT, index=source_df.index)
-    month_options = []
-    if not order_dates.empty:
-        month_options.extend([x for x in order_dates.dt.strftime("%Y-%m").dropna().tolist() if x])
-    if not ship_dates.empty:
-        month_options.extend([x for x in ship_dates.dt.strftime("%Y-%m").dropna().tolist() if x])
-    month_options = sorted(set(month_options))
-    current_month = pd.Timestamp.today().strftime("%Y-%m")
-    default_month = current_month if current_month in month_options else (month_options[-1] if month_options else current_month)
-    c1, c2, c3 = st.columns(3)
-    customer_values = sorted([str(x).strip() for x in working_df["客戶"].dropna().unique().tolist() if str(x).strip()])
-    selected_customer = c1.selectbox("客戶", ["全部"] + customer_values, index=0, key="sales_detail_customer_teable")
-    factory_values = sorted([str(x).strip() for x in working_df["工廠"].dropna().unique().tolist() if str(x).strip()])
-    selected_factory = c2.selectbox("工廠", ["全部"] + factory_values, index=0, key="sales_detail_factory_teable")
-    selected_month = c3.selectbox(
-        "統計月份",
-        month_options if month_options else [default_month],
-        index=(month_options.index(default_month) if default_month in month_options else 0),
+        wip_series = pd.Series("", index=source_df.index)
+
+    is_shipment = wip_series == "SHIPMENT"
+    is_cancelled = wip_series.str.contains("CANCEL", na=False)
+
+    # ── 月份選單 ──────────────────────────────────────
+    ship_months  = [m for m in ship_dates.dt.strftime("%Y-%m").dropna().tolist()  if m and m != "NaT"]
+    order_months = [m for m in order_dates.dt.strftime("%Y-%m").dropna().tolist() if m and m != "NaT"]
+    all_months   = sorted(set(ship_months + order_months), reverse=True)
+
+    if not all_months:
+        st.warning("找不到有效的日期資料。")
+        return
+
+    current_month = _dt.datetime.now().strftime("%Y-%m")
+    default_idx   = all_months.index(current_month) if current_month in all_months else 0
+
+    selected_month = st.selectbox(
+        "📅 選擇統計月份",
+        all_months,
+        index=default_idx,
+        format_func=lambda m: f"{m[:4]} 年 {int(m[5:7])} 月",
         key="sales_detail_month_teable",
     )
-    filter_mask = pd.Series(True, index=working_df.index)
-    if selected_customer != "全部":
-        filter_mask &= working_df["客戶"].astype(str).str.strip().str.lower() == selected_customer.strip().lower()
-    if selected_factory != "全部":
-        filter_mask &= working_df["工廠"].astype(str).str.strip().str.lower() == selected_factory.strip().lower()
+    mon_str = selected_month[5:7]
+
+    # ── 月份篩選 mask ─────────────────────────────────
+    ship_month_mask  = ship_dates.dt.strftime("%Y-%m") == selected_month
     order_month_mask = order_dates.dt.strftime("%Y-%m") == selected_month
-    ship_month_mask = ship_dates.dt.strftime("%Y-%m") == selected_month
-    working_df["當月接單金額"] = order_total_series.where(order_month_mask.fillna(False), 0.0)
-    working_df["當月出貨金額"] = ship_total_series.where(ship_month_mask.fillna(False), 0.0)
-    working_df["本月接單筆數"] = order_month_mask.fillna(False).astype(int)
-    working_df["本月出貨筆數"] = ship_month_mask.fillna(False).astype(int)
-    related_mask = filter_mask & (order_month_mask.fillna(False) | ship_month_mask.fillna(False))
-    month_df = working_df.loc[related_mask].copy()
-    st.caption(f"統計月份：{selected_month}（只統計當月下單 / 當月出貨；接單依下單日期；出貨依 Ship date）")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("本月相關筆數", len(month_df))
-    qty_total = int(pd.to_numeric(month_df["Order Q'TY (PCS)"], errors="coerce").fillna(0).sum()) if "Order Q'TY (PCS)" in month_df.columns else 0
-    m2.metric("本月相關數量", f"{qty_total:,}")
-    m3.metric("當月接單金額", f"{month_df['當月接單金額'].sum():,.2f}")
-    m4.metric("當月出貨金額", f"{month_df['當月出貨金額'].sum():,.2f}")
-    found_cols = []
-    if order_date_col:
-        found_cols.append(f"接單日期欄位：{order_date_col}")
-    if ship_date_col_local:
-        found_cols.append(f"出貨日期欄位：{ship_date_col_local}")
-    if order_amount_col:
-        found_cols.append(f"接單金額欄位：{order_amount_col}")
-    if ship_amount_col:
-        found_cols.append(f"出貨金額欄位：{ship_amount_col}")
-    if tooling_col:
-        found_cols.append(f"附加金額欄位：{tooling_col}")
-    if found_cols:
-        st.caption("；".join(found_cols))
-    if month_df.empty:
-        st.info("此篩選條件下，本月沒有接單或出貨資料。")
-        return
-    group_spec = {
-        "筆數": ("客戶", "size"),
-        "當月接單金額": ("當月接單金額", "sum"),
-        "當月出貨金額": ("當月出貨金額", "sum"),
-        "本月接單筆數": ("本月接單筆數", "sum"),
-        "本月出貨筆數": ("本月出貨筆數", "sum"),
-    }
-    if "Order Q'TY (PCS)" in month_df.columns:
-        group_spec["總數量"] = ("Order Q'TY (PCS)", "sum")
-    summary = month_df.groupby("客戶", dropna=False).agg(**group_spec).reset_index()
-    summary = summary[(summary["筆數"] > 0) | (summary["當月接單金額"] != 0) | (summary["當月出貨金額"] != 0)].copy()
-    st.markdown("**各客戶彙總**")
-    st.dataframe(summary, use_container_width=True, height=320)
-    st.download_button(
-        "下載 各客戶業績彙總 CSV",
-        data=summary.to_csv(index=False).encode("utf-8-sig"),
-        file_name="業績明細表_各客戶彙總.csv",
-        mime="text/csv",
-        key="download_sales_summary_csv_teable"
+
+    # 1) 已出貨：WIP=SHIPMENT + 出貨月份符合
+    shipped_mask = is_shipment & ship_month_mask.fillna(False)
+
+    # 2) 預計出貨：非SHIPMENT、非CANCELLED、出貨日期在該月
+    forecast_mask = (
+        (~is_shipment) &
+        (~is_cancelled) &
+        ship_month_mask.fillna(False) &
+        ~wip_series.str.contains("PO CANCELLED|PO Cancelled", na=False)
     )
-    detail_cols = [c for c in ["客戶", "PO#", "P/N", "Order Q'TY (PCS)", "客戶下單日期", "Ship date", "工廠", "WIP", "當月接單金額", "當月出貨金額"] if c in month_df.columns]
-    detail_df = safe_display_subset(month_df, detail_cols)
-    st.markdown("**明細資料**")
-    st.dataframe(detail_df, use_container_width=True, height=520)
-    st.download_button(
-        "下載 業績明細表 CSV",
-        data=detail_df.to_csv(index=False).encode("utf-8-sig"),
-        file_name="業績明細表.csv",
-        mime="text/csv",
-        key="download_sales_detail_csv_teable"
+
+    # 3) 接單：依客戶下單日期
+    order_mask = order_month_mask.fillna(False)
+
+    # ── 金額加總 ──────────────────────────────────────
+    shipped_usd  = invoice_series[shipped_mask].sum()
+    forecast_usd = invoice_series[forecast_mask].sum()
+    order_usd    = order_amt_series[order_mask].sum()
+    total_usd    = shipped_usd + forecast_usd
+
+    # ── 頁面標題 ──────────────────────────────────────
+    today_str = pd.Timestamp.now().strftime("%Y/%m/%d")
+    st.markdown(
+        f"<h3 style='text-align:center;margin-bottom:4px;'>"
+        f"{int(mon_str)}月 業績明細表</h3>"
+        f"<p style='text-align:right;color:gray;margin-top:0;'>{today_str}</p>",
+        unsafe_allow_html=True,
     )
+
+    # ── 四大指標卡 ────────────────────────────────────
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("📥 接單金額 (USD)",  f"${order_usd:,.2f}"    if order_usd   else "—")
+    c2.metric("✅ 已出貨 (USD)",    f"${shipped_usd:,.2f}"  if shipped_usd else "—")
+    c3.metric("🔜 預計出貨 (USD)",  f"${forecast_usd:,.2f}" if forecast_usd else "—")
+    c4.metric("📊 銷貨合計 (USD)",  f"${total_usd:,.2f}"    if total_usd   else "—")
+
+    # ── QA / 預計出貨提示 ─────────────────────────────
+    qa_mask = forecast_mask & wip_series.isin(["QA", "QC", "FQC", "INSPECTION"])
+    qa_sum  = invoice_series[qa_mask].sum()
+    if qa_sum > 0:
+        qa_names = ""
+        if customer_col_local:
+            names = [
+                str(n).split()[0] for n in
+                get_series_by_col(source_df, customer_col_local)[qa_mask].dropna().unique()
+            ]
+            qa_names = "、".join(names)
+        st.info(
+            f"💡 QA 中（預計近期出貨）：{qa_names}  |  US${qa_sum:,.2f}\n\n"
+            f"出貨後 WIP 更新為 SHIPMENT，{int(mon_str)}月銷貨合計將增至 **US${total_usd:,.2f}**"
+        )
+
+    st.markdown("---")
+
+    # ── 工廠別 & 客戶別 ───────────────────────────────
+    def _clean_factory(s):
+        return re.sub(r'\s+', '', str(s)) if s else ""
+
+    def _clean_customer(s):
+        m = re.match(r'^([A-Za-z0-9_\-]+)', str(s))
+        return m.group(1) if m else (str(s).split()[0] if str(s).split() else str(s))
+
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown(f"#### 🏭 工廠別（已出貨 {int(mon_str)}月）")
+        if shipped_mask.any() and factory_col_local:
+            fac_s = get_series_by_col(source_df, factory_col_local)[shipped_mask]
+            amt_s = invoice_series[shipped_mask]
+            fdf = pd.DataFrame({"工廠": fac_s.apply(_clean_factory), "金額": amt_s})
+            grp = fdf.groupby("工廠")["金額"].agg(訂單數="count", 銷貨金額_USD="sum").reset_index()
+            grp = grp.sort_values("銷貨金額_USD", ascending=False)
+            grp["銷貨金額_USD"] = grp["銷貨金額_USD"].apply(lambda x: f"${x:,.2f}")
+            total_row = pd.DataFrame([{"工廠": "合計", "訂單數": grp["訂單數"].sum(), "銷貨金額_USD": f"${shipped_usd:,.2f}"}])
+            grp = pd.concat([grp, total_row], ignore_index=True)
+            st.dataframe(grp, use_container_width=True, hide_index=True, height=260)
+        else:
+            st.info("本月無已出貨資料。")
+
+    with col_right:
+        st.markdown(f"#### 👥 客戶別（已出貨 {int(mon_str)}月）")
+        if shipped_mask.any() and customer_col_local:
+            cust_s = get_series_by_col(source_df, customer_col_local)[shipped_mask]
+            amt_s  = invoice_series[shipped_mask]
+            cdf = pd.DataFrame({"客戶": cust_s.apply(_clean_customer), "金額": amt_s})
+            grp2 = cdf.groupby("客戶")["金額"].agg(訂單數="count", 銷貨金額_USD="sum").reset_index()
+            grp2 = grp2.sort_values("銷貨金額_USD", ascending=False)
+            grp2["銷貨金額_USD"] = grp2["銷貨金額_USD"].apply(lambda x: f"${x:,.2f}")
+            total_row2 = pd.DataFrame([{"客戶": "合計", "訂單數": grp2["訂單數"].sum(), "銷貨金額_USD": f"${shipped_usd:,.2f}"}])
+            grp2 = pd.concat([grp2, total_row2], ignore_index=True)
+            st.dataframe(grp2, use_container_width=True, hide_index=True, height=260)
+        else:
+            st.info("本月無已出貨資料。")
+
+    # ── 累計出貨走勢 ──────────────────────────────────
+    st.markdown(f"#### 📈 出貨累計走勢（{int(mon_str)}月，USD）")
+    if shipped_mask.any():
+        daily_df = pd.DataFrame({
+            "日期": ship_dates[shipped_mask],
+            "金額": invoice_series[shipped_mask],
+        }).dropna(subset=["日期"]).sort_values("日期")
+        daily_df["累計出貨(USD)"] = daily_df["金額"].cumsum()
+        daily_df["日"] = daily_df["日期"].dt.strftime("%m/%d")
+        st.line_chart(daily_df.set_index("日")[["累計出貨(USD)"]], height=220)
+    else:
+        st.info("本月尚無出貨資料。")
+
+    # ── 已出貨明細 ────────────────────────────────────
+    st.markdown(f"#### ✅ 已出貨明細（SHIPMENT，{int(mon_str)}月）")
+    if shipped_mask.any():
+        show_cols = [c for c in [
+            customer_col_local, po_col_local, pn_col_local,
+            factory_col_local, ship_date_col_local, invoice_col
+        ] if c and c in source_df.columns]
+        view = source_df.loc[shipped_mask, show_cols].copy() if show_cols else source_df.loc[shipped_mask].copy()
+        if customer_col_local and customer_col_local in view.columns:
+            view[customer_col_local] = view[customer_col_local].apply(_clean_customer)
+        if factory_col_local and factory_col_local in view.columns:
+            view[factory_col_local] = view[factory_col_local].apply(_clean_factory)
+        if ship_date_col_local and ship_date_col_local in view.columns:
+            view = view.sort_values(ship_date_col_local, ascending=False, na_position="last")
+        st.dataframe(view, use_container_width=True, hide_index=True, height=320)
+        st.download_button(
+            f"⬇️ 下載已出貨明細 CSV ({selected_month})",
+            data=view.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"shipment_{selected_month}.csv",
+            mime="text/csv",
+            key="download_shipped_detail_csv",
+        )
+    else:
+        st.info("本月尚無已出貨（SHIPMENT）資料。")
+
+    # ── 預計出貨明細 ──────────────────────────────────
+    if forecast_mask.any():
+        st.markdown(f"#### 🔜 預計出貨（非 SHIPMENT，{int(mon_str)}月）")
+        show_cols2 = [c for c in [
+            customer_col_local, po_col_local, wip_col_local,
+            factory_col_local, ship_date_col_local, invoice_col
+        ] if c and c in source_df.columns]
+        view2 = source_df.loc[forecast_mask, show_cols2].copy() if show_cols2 else source_df.loc[forecast_mask].copy()
+        if customer_col_local and customer_col_local in view2.columns:
+            view2[customer_col_local] = view2[customer_col_local].apply(_clean_customer)
+        if factory_col_local and factory_col_local in view2.columns:
+            view2[factory_col_local] = view2[factory_col_local].apply(_clean_factory)
+        st.dataframe(view2, use_container_width=True, hide_index=True, height=220)
+
+    # ── 月度走勢（近 12 個月）─────────────────────────
+    st.markdown("---")
+    st.markdown("#### 📅 月度出貨走勢（近 12 個月，USD）")
+    monthly_mask = is_shipment & ship_dates.notna()
+    if monthly_mask.any():
+        monthly_df = pd.DataFrame({
+            "月份": ship_dates[monthly_mask].dt.strftime("%Y-%m"),
+            "金額": invoice_series[monthly_mask],
+        })
+        monthly_grp = (
+            monthly_df.groupby("月份")["金額"]
+            .sum().reset_index()
+            .sort_values("月份").tail(12)
+            .set_index("月份")
+        )
+        monthly_grp.columns = ["出貨金額(USD)"]
+        st.bar_chart(monthly_grp, height=240)
+    else:
+        st.info("無足夠歷史資料。")
+
+    # ── 接單明細（本月）──────────────────────────────
+    if order_mask.any():
+        st.markdown(f"#### 📥 接單明細（{int(mon_str)}月）")
+        show_cols3 = [c for c in [
+            customer_col_local, po_col_local, pn_col_local,
+            factory_col_local, order_date_col, order_amt_col
+        ] if c and c in source_df.columns]
+        view3 = source_df.loc[order_mask, show_cols3].copy() if show_cols3 else source_df.loc[order_mask].copy()
+        if customer_col_local and customer_col_local in view3.columns:
+            view3[customer_col_local] = view3[customer_col_local].apply(_clean_customer)
+        if factory_col_local and factory_col_local in view3.columns:
+            view3[factory_col_local] = view3[factory_col_local].apply(_clean_factory)
+        st.dataframe(view3, use_container_width=True, hide_index=True, height=220)
+        st.download_button(
+            f"⬇️ 下載接單明細 CSV ({selected_month})",
+            data=view3.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"order_{selected_month}.csv",
+            mime="text/csv",
+            key="download_sales_detail_csv_teable",
+        )
+
 # ================================
 # INTERNAL VIEWS
 # ================================
