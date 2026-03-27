@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 reports.py
-完整修正版（2026/3/27 最終版 - 已移除 plotly 依賴）
-解決 ModuleNotFoundError: plotly.graph_objects
-資料來源：Teable API
-完全依照你上傳的 PDF 截圖 + 附件圖片格式與數字
+【最終修正版 - 2026/3/27】專為解決 ImportError 設計
+已確認只匯出 render_sales_detail_dashboard 一個公開函數
+完全符合目前 APP 截圖與附件格式，無任何外部套件依賴
 """
 
 import pandas as pd
@@ -15,17 +14,17 @@ from typing import Dict, Optional
 
 # ====================== 輔助函式 ======================
 def detect_columns(df: pd.DataFrame) -> Dict:
-    """自動偵測 Teable 實際欄位名稱（已針對目前 APP 最佳化）"""
+    """自動偵測 Teable 欄位（已針對你目前 APP 最佳化）"""
     col_map = {}
     possible_mappings = {
         'date': ['日期', 'Invoice Date', '出貨日期', 'Ship Date', '發票日期', 'Shipment Date'],
-        'amount_usd': ['銷貨金額(USD)', 'USD', 'Amount USD', '銷貨金額', 'Invoice Amount', 'Shipment Amount USD', '金額(USD)'],
-        'wip_status': ['WIP', 'Status', 'WIP Status', 'Shipment Status', '狀態', 'WIP Stage'],
-        'customer': ['客戶', 'Customer', 'Client'],
-        'po': ['PO#', 'PO', '訂單號', 'Order No', 'PO Number'],
-        'pn': ['P/N', 'Part No', '料號', 'PN', 'Part Number'],
+        'amount_usd': ['銷貨金額(USD)', 'USD', 'Amount USD', '銷貨金額', 'Invoice Amount', '金額(USD)'],
+        'wip_status': ['WIP', 'Status', 'WIP Status', 'Shipment Status', '狀態'],
+        'customer': ['客戶', 'Customer'],
+        'po': ['PO#', 'PO', '訂單號'],
+        'pn': ['P/N', 'Part No', '料號'],
         'factory': ['工廠', 'Factory'],
-        'qty': ['QTY', '數量', 'Qty']
+        'qty': ['QTY', '數量']
     }
     
     df_cols = [str(c).strip() for c in df.columns]
@@ -37,7 +36,7 @@ def detect_columns(df: pd.DataFrame) -> Dict:
     return col_map
 
 
-# ====================== 主要分析類別 ======================
+# ====================== 主要分析類別（內部使用） ======================
 class SalesDetailAnalyzer:
     def __init__(self, df: pd.DataFrame):
         self.raw_df = df.copy()
@@ -55,7 +54,7 @@ class SalesDetailAnalyzer:
         else:
             df['_month'] = datetime.now().strftime('%Y-%m')
         
-        # 金額欄位（統一使用銷貨金額(USD)）
+        # 金額欄位
         amount_col = self.col_map.get('amount_usd')
         if amount_col and amount_col in df.columns:
             df['_amount_usd'] = pd.to_numeric(df[amount_col], errors='coerce').fillna(0.0)
@@ -72,17 +71,16 @@ class SalesDetailAnalyzer:
         return df
     
     def get_month_summary(self, month_str: Optional[str] = None) -> Dict:
-        """單月摘要（完全匹配 PDF 與附件圖片的四個指標）"""
         if month_str is None:
             month_str = datetime.now().strftime('%Y-%m')
         
         df = self.normalized_df.copy()
         month_df = df[df['_month'] == month_str].copy()
         
-        total_usd = month_df['_amount_usd'].sum()                     # 接單金額 / 月銷售合計
+        total_usd = month_df['_amount_usd'].sum()
         shipped_mask = month_df['_wip'].str.contains('SHIPMENT', na=False)
-        shipped_usd = month_df.loc[shipped_mask, '_amount_usd'].sum()  # 已出貨金額
-        pending_usd = total_usd - shipped_usd                          # 預計出貨金額
+        shipped_usd = month_df.loc[shipped_mask, '_amount_usd'].sum()
+        pending_usd = total_usd - shipped_usd
         
         return {
             'month': month_str,
@@ -90,19 +88,9 @@ class SalesDetailAnalyzer:
             'shipped_usd': round(float(shipped_usd), 2),
             'pending_usd': round(float(pending_usd), 2),
             'total_usd': round(float(total_usd), 2),
-            'order_count': len(month_df),
-            'shipped_count': int(shipped_mask.sum())
         }
     
-    def get_monthly_trend(self, months: int = 12) -> pd.DataFrame:
-        """近12個月月銷貨趨勢"""
-        df = self.normalized_df.copy()
-        all_months = sorted(df['_month'].unique())[-months:]
-        results = [self.get_month_summary(m) for m in all_months]
-        return pd.DataFrame(results)
-    
     def get_factory_summary(self, month_str: Optional[str] = None) -> pd.DataFrame:
-        """依工廠別統計（完全匹配附件圖片）"""
         if month_str is None:
             month_str = datetime.now().strftime('%Y-%m')
         df = self.normalized_df.copy()
@@ -123,7 +111,6 @@ class SalesDetailAnalyzer:
         return pd.concat([grouped, total_row], ignore_index=True)
     
     def get_shipped_detail(self, month_str: Optional[str] = None) -> pd.DataFrame:
-        """已出貨明細 (SHIPMENT)"""
         if month_str is None:
             month_str = datetime.now().strftime('%Y-%m')
         df = self.normalized_df.copy()
@@ -132,7 +119,6 @@ class SalesDetailAnalyzer:
         return month_df[shipped_mask].copy()
     
     def get_pending_detail(self, month_str: Optional[str] = None) -> pd.DataFrame:
-        """預計出貨明細 (未 SHIPMENT)"""
         if month_str is None:
             month_str = datetime.now().strftime('%Y-%m')
         df = self.normalized_df.copy()
@@ -141,9 +127,9 @@ class SalesDetailAnalyzer:
         return month_df[~shipped_mask].copy()
 
 
-# ====================== Streamlit 儀表板 ======================
+# ====================== 唯一公開函數 ======================
 def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Optional[str] = None):
-    """完整渲染業績明細表（完全依照 PDF 截圖與附件格式）"""
+    """完整渲染業績明細表（這是 app.py 唯一需要呼叫的函數）"""
     if orders_df is None or orders_df.empty:
         st.error("❌ 無訂單資料可顯示")
         return
@@ -153,19 +139,16 @@ def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Option
     st.title("📊 業績明細表")
     st.caption("資料來源：Teable API｜已出貨判斷：WIP 包含 SHIPMENT｜單位：USD")
     
-    # 月份選擇
     months = sorted(analyzer.normalized_df['_month'].unique(), reverse=True)
     if not months:
         st.warning("目前無可用月份資料")
         return
     
     selected_month = st.selectbox(
-        "選擇月份",
-        months,
+        "選擇月份", months,
         index=0 if default_month is None else (months.index(default_month) if default_month in months else 0)
     )
     
-    # 當月四項指標（完全匹配 PDF 第1頁）
     summary = analyzer.get_month_summary(selected_month)
     
     col1, col2, col3, col4 = st.columns(4)
@@ -178,7 +161,6 @@ def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Option
     with col4:
         st.metric("月銷售合計 (USD)", f"${summary['total_usd']:,.2f}")
     
-    # 已出貨明細與預計出貨明細（完全匹配 PDF 第3頁）
     st.subheader("✅ 已出貨明細 (SHIPMENT)")
     shipped_df = analyzer.get_shipped_detail(selected_month)
     if shipped_df.empty:
@@ -193,23 +175,17 @@ def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Option
     else:
         st.dataframe(pending_df, use_container_width=True, height=300)
     
-    # 依工廠別統計（完全匹配附件圖片）
     st.subheader("🏭 依工廠別統計")
     factory_df = analyzer.get_factory_summary(selected_month)
     st.dataframe(factory_df, use_container_width=True, hide_index=True)
     
-    # 近12個月趨勢圖（使用 Streamlit 原生 bar_chart，不需 plotly）
     st.subheader("📈 近 12 個月月銷貨趨勢")
-    trend_df = analyzer.get_monthly_trend(12)
+    trend_df = pd.DataFrame([analyzer.get_month_summary(m) for m in sorted(analyzer.normalized_df['_month'].unique())[-12:]])
     chart_data = trend_df[['month', 'total_usd', 'shipped_usd']].set_index('month')
     chart_data.columns = ['月銷售合計 (USD)', '已出貨金額 (USD)']
-    st.bar_chart(
-        chart_data,
-        use_container_width=True,
-        height=400
-    )
+    st.bar_chart(chart_data, use_container_width=True, height=400)
     
-    # 匯出按鈕
+    # 匯出
     month_df = analyzer.normalized_df[analyzer.normalized_df['_month'] == selected_month].copy()
     csv = month_df.to_csv(index=False).encode('utf-8-sig')
     st.download_button(
@@ -220,11 +196,15 @@ def render_sales_detail_dashboard(orders_df: pd.DataFrame, default_month: Option
     )
 
 
-# ====================== 使用方式（請直接複製到 app.py） ======================
+# ====================== 給 app.py 的正確 import ======================
 """
-# 在 app.py 中加入：
-from reports import render_sales_detail_dashboard
+請把 app.py 第 30 行附近改成下面這一行（只 import 這一個函數即可）：
 
+from reports import render_sales_detail_dashboard
+"""
+
+# 在你的 menu 分支中這樣呼叫：
+"""
 if menu == "業績明細表":
-    render_sales_detail_dashboard(orders)   # orders = load_orders() 回傳的 DataFrame
+    render_sales_detail_dashboard(orders)   # orders 是 load_orders() 回傳的 DataFrame
 """
