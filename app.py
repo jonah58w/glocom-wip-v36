@@ -27,12 +27,7 @@ from factory_progress_updater import (
     normalize_wip_value,
     patch_record_by_id,
 )
-from reports import (
-    show_new_orders_wip_report,
-    show_sandy_internal_wip_report,
-    show_sandy_sales_report,
-    render_sales_detail_from_teable,
-)
+from reports import render_sales_detail_dashboard
 # ================================
 # PAGE CONFIG
 # ================================
