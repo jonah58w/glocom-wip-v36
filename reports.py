@@ -590,6 +590,7 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
         "月份", periods, index=default_index,
         format_func=lambda p: f"{p.year}-{p.month:02d}"
     )
+    month_key = f"{selected.year}-{selected.month:02d}"  
     # ── Teable 資料過濾 ───────────────────────────────────────────────────────
     is_shipment   = wip.eq("SHIPMENT")
     actual_mask   = actual_dates.dt.to_period("M") == selected
