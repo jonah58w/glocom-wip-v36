@@ -8,9 +8,9 @@ v4：加入統計圖表
 
 [修正 v4.1]
   - build_subset_mask "unshipped" 模式移除 year_ok 年份篩選
-    原因：year_ok 只保留 current_year 的訂單，導致跨年舊訂單
-    （如 2025 年下單、尚未出貨）全部被濾掉，Sandy WIP 只剩 5 筆
-    修正後正確顯示全部 17 筆（非 SHIPMENT、非 Cancelled）
+
+[修正 v4.2]
+  - 業績明細表月份選單預設改為當月（原本預設清單最末項，導致顯示 12 月）
 """
 
 from __future__ import annotations
@@ -219,7 +219,6 @@ def _render_stacked_bar(month_key: str, shipped: float, forecast: float):
 
 def _render_pie_charts(fac_df: pd.DataFrame, cus_df: pd.DataFrame):
     """工廠 / 客戶 甜甜圈圓餅（並排）"""
-    # 排除合計列
     fac = fac_df[fac_df["工廠"] != "合計"].copy() if not fac_df.empty else pd.DataFrame()
     cus = cus_df[cus_df["客戶"] != "合計"].copy() if not cus_df.empty else pd.DataFrame()
 
@@ -471,8 +470,8 @@ def build_teable_view_df(source_df: pd.DataFrame, specs):
 # ================================
 
 def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
-    idx          = source_df.index
-    today        = pd.Timestamp.today().normalize()
+    idx   = source_df.index
+    today = pd.Timestamp.today().normalize()
 
     wip_col   = find_col(source_df, WIP_CANDIDATES)
     wip_raw   = (get_series_by_col(source_df, wip_col).astype(str).str.strip()
@@ -489,11 +488,6 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
         return cust_d.dt.normalize().eq(today).fillna(False) | fact_d.dt.normalize().eq(today).fillna(False)
 
     if subset_mode == "unshipped":
-        # ✅ 修正重點：移除 year_ok 年份篩選
-        # 原本的 year_ok = year_s.isna() | year_s.eq(current_year) 會把
-        # 跨年舊訂單（如 2025 年下單、尚未出貨）全部過濾掉，
-        # 導致 Sandy WIP 從 17 筆縮減為 5 筆。
-        # 正確邏輯：只要「非 SHIPMENT」且「非 Cancelled」即全部顯示。
         not_shipment  = ~wip_upper.eq("SHIPMENT")
         not_cancelled = ~_is_cancelled(wip_raw)
         return not_shipment & not_cancelled
@@ -571,7 +565,7 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     qtys      = (get_series_by_col(source_df, qty_col).astype(str).fillna("")
                  if qty_col else pd.Series("", index=source_df.index))
 
-    # ── 月份選單（近24個月 + 當月） ──────────────────────────────────────────
+    # ── 月份選單（近24個月 + 當月，預設當月） ────────────────────────────────
     today          = pd.Timestamp.today().normalize()
     current_period = today.to_period("M")
 
@@ -581,16 +575,20 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
             if (current_period - p).n <= 24:
                 valid_periods.add(p)
 
-    periods  = sorted(valid_periods)
+    periods = sorted(valid_periods)
+
+    # ✅ 修正 v4.2：預設選當月，不再用 len(periods)-1（會選到未來月份）
     default_index = next(
         (i for i, p in enumerate(periods) if p == current_period),
         len(periods) - 1
     )
+
     selected = st.selectbox(
         "月份", periods, index=default_index,
         format_func=lambda p: f"{p.year}-{p.month:02d}"
     )
-    month_key = f"{selected.year}-{selected.month:02d}"  
+    month_key = f"{selected.year}-{selected.month:02d}"
+
     # ── Teable 資料過濾 ───────────────────────────────────────────────────────
     is_shipment   = wip.eq("SHIPMENT")
     actual_mask   = actual_dates.dt.to_period("M") == selected
