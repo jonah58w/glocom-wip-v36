@@ -582,12 +582,14 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
                 valid_periods.add(p)
 
     periods  = sorted(valid_periods)
+    default_index = next(
+        (i for i, p in enumerate(periods) if p == current_period),
+        len(periods) - 1
+    )
     selected = st.selectbox(
-        "月份", periods, index=len(periods) - 1,
+        "月份", periods, index=default_index,
         format_func=lambda p: f"{p.year}-{p.month:02d}"
     )
-    month_key = f"{selected.year}-{selected.month:02d}"
-
     # ── Teable 資料過濾 ───────────────────────────────────────────────────────
     is_shipment   = wip.eq("SHIPMENT")
     actual_mask   = actual_dates.dt.to_period("M") == selected
