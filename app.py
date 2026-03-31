@@ -695,22 +695,22 @@ def load_orders():
                 fields["createdTime"]       = rec.get("createdTime", "")
                 all_rows.append(fields)
                 all_rows.append(fields)
-            next_token = (
+           next_token = (
                 data.get("pageToken")
                 or data.get("nextPageToken")
                 or data.get("next_page_token")
                 or None
             )
-# 避免重複：若 next_token 與目前 page_token 相同則停止
             if not next_token or next_token == page_token:
                 break
+            page_token = next_token
 page_token = next_token
         df = pd.DataFrame(all_rows)
         df = normalize_columns(df)
 # 以 _record_id 去重，避免重複抓取
-if "_record_id" in df.columns:
-    df = df.drop_duplicates(subset=["_record_id"]).reset_index(drop=True)
-        return df, last_status, last_text
+    if "_record_id" in df.columns:
+        df = df.drop_duplicates(subset=["_record_id"]).reset_index(drop=True)
+    return df, last_status, last_text
     except Exception as e:
         return pd.DataFrame(), "EXCEPTION", str(e)
 def find_record_id_by_po(df: pd.DataFrame, po_value: str, po_col: str | None):
