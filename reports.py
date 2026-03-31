@@ -131,17 +131,25 @@ def parse_mixed_date_series(series: pd.Series | None) -> pd.Series:
     s = s.replace({"": None, "nan": None, "NaT": None, "None": None})
     out = pd.Series(pd.NaT, index=s.index, dtype="datetime64[ns]")
 
+    # Excel 數值型日期
     nums = pd.to_numeric(s, errors="coerce")
     mask_num = nums.notna() & (nums > 20000) & (nums < 80000)
     if mask_num.any():
         out.loc[mask_num] = pd.to_datetime(
             nums.loc[mask_num], unit="D", origin="1899-12-30", errors="coerce")
 
+    # ISO 8601 含時區：2026-03-31T02:33:33.010Z
+    rem = out.isna() & s.notna()
+    if rem.any():
+        out.loc[rem] = pd.to_datetime(s.loc[rem], utc=True, errors="coerce").dt.tz_localize(None)
+
+    # ISO 格式 2026-03-31
     for fmt in ["%Y-%m-%d", "%y-%m-%d"]:
         rem = out.isna() & s.notna()
         if rem.any():
             out.loc[rem] = pd.to_datetime(s.loc[rem], format=fmt, errors="coerce")
 
+    # "Mar. 31, 26" 等英文格式
     rem = out.isna() & s.notna()
     if rem.any():
         cleaned = (s.loc[rem]
@@ -150,11 +158,15 @@ def parse_mixed_date_series(series: pd.Series | None) -> pd.Series:
                    .str.replace(r"\s+", " ", regex=True).str.strip())
         out.loc[rem] = pd.to_datetime(cleaned, format="%b %d %y", errors="coerce")
 
+    # 通用 fallback
     rem = out.isna() & s.notna()
     if rem.any():
         out.loc[rem] = pd.to_datetime(s.loc[rem], errors="coerce")
 
-    return out
+    # 確保回傳 datetime64[ns]（無時區）
+    if hasattr(out, "dt") and hasattr(out.dt, "tz") and out.dt.tz is not None:
+        out = out.dt.tz_localize(None)
+    return out.astype("datetime64[ns]")
 
 
 def _is_cancelled(wip_series: pd.Series) -> pd.Series:
