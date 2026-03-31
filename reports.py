@@ -10,7 +10,13 @@ v4：加入統計圖表
   - build_subset_mask "unshipped" 模式移除 year_ok 年份篩選
 
 [修正 v4.2]
-  - 業績明細表月份選單預設改為當月（原本預設清單最末項，導致顯示 12 月）
+  - 業績明細表月份選單預設改為當月
+
+[修正 v4.3]
+  - new_order_today 邏輯修正：
+      條件1：客戶下單日期 或 工廠下單日期 = 今天
+      條件2：lastModifiedTime = 今天，且有工廠交期或併貨日期（排除純 WIP 更新）
+  - 加強欄位偵測 debug 輸出
 """
 
 from __future__ import annotations
@@ -54,6 +60,8 @@ AMOUNT_SHIP_CANDIDATES  = ["銷貨金額", "出貨金額", "出貨總金額", "S
                             "Invoice Total", "出貨發票金額", "Invoice", "INVOICE"]
 ACTUAL_SHIP_DATE_CANDIDATES  = ["出貨日期_排序", "出貨日期", "Actual Ship Date", "Actual ship date"]
 PLANNED_SHIP_DATE_CANDIDATES = ["Ship date", "Ship Date", "Required Ship date", "confrimed DD"]
+LAST_MODIFIED_CANDIDATES     = ["lastModifiedTime", "最後修改時間", "Last Modified", "updatedTime"]
+CARGO_DATE_CANDIDATES        = ["併貨日期 (限內部使用)", "併貨日期\n (限內部使用)", "併貨日期"]
 
 CANCELLED_KEYWORDS = ["PO CANCELLED", "PO CANCELED", "CANCELLATION",
                       "CANCELLED", "CANCELED", "CANCEL"]
@@ -126,17 +134,20 @@ def parse_mixed_date_series(series: pd.Series | None) -> pd.Series:
     s = s.replace({"": None, "nan": None, "NaT": None, "None": None})
     out = pd.Series(pd.NaT, index=s.index, dtype="datetime64[ns]")
 
+    # Excel 數值型日期
     nums = pd.to_numeric(s, errors="coerce")
     mask_num = nums.notna() & (nums > 20000) & (nums < 80000)
     if mask_num.any():
         out.loc[mask_num] = pd.to_datetime(
             nums.loc[mask_num], unit="D", origin="1899-12-30", errors="coerce")
 
+    # ISO 格式
     for fmt in ["%Y-%m-%d", "%y-%m-%d"]:
         rem = out.isna() & s.notna()
         if rem.any():
             out.loc[rem] = pd.to_datetime(s.loc[rem], format=fmt, errors="coerce")
 
+    # "Jan 01 26" 等格式
     rem = out.isna() & s.notna()
     if rem.any():
         cleaned = (s.loc[rem]
@@ -145,6 +156,7 @@ def parse_mixed_date_series(series: pd.Series | None) -> pd.Series:
                    .str.replace(r"\s+", " ", regex=True).str.strip())
         out.loc[rem] = pd.to_datetime(cleaned, format="%b %d %y", errors="coerce")
 
+    # 通用 fallback
     rem = out.isna() & s.notna()
     if rem.any():
         out.loc[rem] = pd.to_datetime(s.loc[rem], errors="coerce")
@@ -170,7 +182,6 @@ def _chart_colors_js(n: int) -> str:
 
 
 def _render_stacked_bar(month_key: str, shipped: float, forecast: float):
-    """水平堆疊長條：已出貨 vs 預計出貨"""
     data = json.dumps({
         "shipped":  round(shipped, 2),
         "forecast": round(forecast, 2),
@@ -218,7 +229,6 @@ def _render_stacked_bar(month_key: str, shipped: float, forecast: float):
 
 
 def _render_pie_charts(fac_df: pd.DataFrame, cus_df: pd.DataFrame):
-    """工廠 / 客戶 甜甜圈圓餅（並排）"""
     fac = fac_df[fac_df["工廠"] != "合計"].copy() if not fac_df.empty else pd.DataFrame()
     cus = cus_df[cus_df["客戶"] != "合計"].copy() if not cus_df.empty else pd.DataFrame()
 
@@ -254,7 +264,7 @@ def _render_pie_charts(fac_df: pd.DataFrame, cus_df: pd.DataFrame):
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
 (function(){{
-  var COLORS = {CHART_COLORS};
+  var COLORS = {json.dumps(CHART_COLORS * 3)};
 
   function buildLegend(id, labels, data, colors) {{
     var total = data.reduce(function(a,b){{return a+b;}}, 0);
@@ -303,12 +313,11 @@ def _render_pie_charts(fac_df: pd.DataFrame, cus_df: pd.DataFrame):
   makeDoughnut('cusPie', cusLabels, cusData, cusColors);
 }})();
 </script>
-""".replace("{CHART_COLORS}", json.dumps(CHART_COLORS * 3))
+"""
     components.html(html, height=290)
 
 
 def _render_trend_chart(monthly: list[dict]):
-    """近12個月長條+折線組合圖"""
     labels   = json.dumps([r["月份"] for r in monthly])
     shipped  = json.dumps([round(r["已出貨"], 2)   for r in monthly])
     forecast = json.dumps([round(r["預計出貨"], 2)  for r in monthly])
@@ -478,8 +487,9 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
                  if wip_col else pd.Series("", index=idx))
     wip_upper = wip_raw.str.upper()
 
+    # ──────────────────────────────────────────────────────────────────────
     if subset_mode == "new_order_today":
-        # ── 條件 1：客戶下單日期 = 今天 ──────────────────────────────────
+        # 條件 1：客戶下單日期 或 工廠下單日期 = 今天
         cust_col = find_col(source_df, ["客戶下單日期"])
         fact_col = find_col(source_df, ["工廠下單日期"])
 
@@ -493,42 +503,42 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
             fact_d.dt.normalize().eq(today).fillna(False)
         )
 
-        # ── 條件 2：lastModifiedTime = 今天，且不是「只更新 WIP」 ──────────
-        # 判斷方式：lastModifiedTime = 今天，但 WIP 是空的
-        # （有填 WIP 的不一定是今天改的，但沒填 WIP 的被修改幾乎是其他欄位）
-        # 更精確做法：lastModifiedTime = 今天，且工廠交期或併貨日期有值
-        lmt_col = find_col(source_df, ["lastModifiedTime", "最後修改時間"])
+        # 條件 2：lastModifiedTime = 今天，且工廠交期或併貨日期有值（排除純 WIP 更新）
+        lmt_col = find_col(source_df, LAST_MODIFIED_CANDIDATES)
         if lmt_col:
             lmt_d = parse_mixed_date_series(get_series_by_col(source_df, lmt_col))
             modified_today = lmt_d.dt.normalize().eq(today).fillna(False)
 
-            # 排除「只有 WIP 更新」：要求工廠交期或併貨日期有值，才算非 WIP 更新
-            factory_due_col = find_col(source_df, FACTORY_DUE_CANDIDATES)
-            cargo_col       = find_col(source_df, ["併貨日期 (限內部使用)", "併貨日期\n (限內部使用)"])
+            fac_due_col = find_col(source_df, FACTORY_DUE_CANDIDATES)
+            cargo_col   = find_col(source_df, CARGO_DATE_CANDIDATES)
 
-            has_factory_due = (
-                get_series_by_col(source_df, factory_due_col)
-                .astype(str).str.strip().replace({"nan": "", "None": ""}).ne("")
-                if factory_due_col else pd.Series(False, index=idx)
-            )
-            has_cargo_date = (
-                get_series_by_col(source_df, cargo_col)
-                .astype(str).str.strip().replace({"nan": "", "None": ""}).ne("")
-                if cargo_col else pd.Series(False, index=idx)
-            )
+            def _has_value(col):
+                if not col:
+                    return pd.Series(False, index=idx)
+                s = get_series_by_col(source_df, col)
+                if s is None:
+                    return pd.Series(False, index=idx)
+                return s.astype(str).str.strip().replace(
+                    {"nan": "", "None": "", "NaT": ""}
+                ).ne("")
 
-            # 今天被修改，且有工廠交期或併貨日期（代表不只是 WIP 更新）
+            has_factory_due = _has_value(fac_due_col)
+            has_cargo_date  = _has_value(cargo_col)
+
+            # 今天被修改，且有工廠交期 或 併貨日期（代表不只是 WIP 更新）
             modified_non_wip = modified_today & (has_factory_due | has_cargo_date)
         else:
             modified_non_wip = pd.Series(False, index=idx)
 
         return order_today | modified_non_wip
 
+    # ──────────────────────────────────────────────────────────────────────
     if subset_mode == "unshipped":
         not_shipment  = ~wip_upper.eq("SHIPMENT")
         not_cancelled = ~_is_cancelled(wip_raw)
         return not_shipment & not_cancelled
 
+    # ──────────────────────────────────────────────────────────────────────
     if subset_mode == "shipment_only":
         is_ship    = wip_upper.eq("SHIPMENT")
         actual_col = find_col(source_df, ACTUAL_SHIP_DATE_CANDIDATES)
@@ -545,6 +555,50 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
 
 def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subset_mode: str):
     st.subheader(title)
+
+    # Debug：幫助確認欄位偵測是否正確
+    with st.expander("🔍 Debug：欄位偵測", expanded=False):
+        cust_col  = find_col(source_df, ["客戶下單日期"])
+        fact_col  = find_col(source_df, ["工廠下單日期"])
+        lmt_col   = find_col(source_df, LAST_MODIFIED_CANDIDATES)
+        fac_due   = find_col(source_df, FACTORY_DUE_CANDIDATES)
+        cargo_col = find_col(source_df, CARGO_DATE_CANDIDATES)
+        today     = pd.Timestamp.today().normalize()
+
+        st.write({
+            "客戶下單日期 欄位": cust_col,
+            "工廠下單日期 欄位": fact_col,
+            "lastModifiedTime 欄位": lmt_col,
+            "工廠交期 欄位": fac_due,
+            "併貨日期 欄位": cargo_col,
+            "今天": str(today.date()),
+            "總筆數": len(source_df),
+        })
+
+        if cust_col:
+            sample = parse_mixed_date_series(
+                get_series_by_col(source_df, cust_col)
+            ).dropna().dt.normalize()
+            today_count = sample.eq(today).sum()
+            st.write(f"客戶下單日期 = 今天：{today_count} 筆")
+            st.write("客戶下單日期 樣本（前5）：", sample.head(5).astype(str).tolist())
+
+        if fact_col:
+            sample2 = parse_mixed_date_series(
+                get_series_by_col(source_df, fact_col)
+            ).dropna().dt.normalize()
+            today_count2 = sample2.eq(today).sum()
+            st.write(f"工廠下單日期 = 今天：{today_count2} 筆")
+
+        if lmt_col:
+            sample3 = parse_mixed_date_series(
+                get_series_by_col(source_df, lmt_col)
+            ).dropna().dt.normalize()
+            today_count3 = sample3.eq(today).sum()
+            st.write(f"lastModifiedTime = 今天：{today_count3} 筆")
+            st.write("lastModifiedTime 樣本（前3）：",
+                     get_series_by_col(source_df, lmt_col).head(3).astype(str).tolist())
+
     mask     = build_subset_mask(source_df, subset_mode)
     filtered = source_df[mask].copy()
     view_df, _ = build_teable_view_df(filtered, specs)
@@ -562,7 +616,6 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
         st.info("目前沒有資料。")
         return
 
-    # ── 欄位偵測 ─────────────────────────────────────────────────────────────
     order_col     = find_col(source_df, ORDER_DATE_CANDIDATES)
     actual_col    = find_col(source_df, ACTUAL_SHIP_DATE_CANDIDATES)
     plan_col      = find_col(source_df, PLANNED_SHIP_DATE_CANDIDATES)
@@ -575,7 +628,6 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     qty_col       = find_col(source_df, QTY_CANDIDATES)
     wip_col       = find_col(source_df, WIP_CANDIDATES)
 
-    # ── 解析 ─────────────────────────────────────────────────────────────────
     order_dates  = parse_mixed_date_series(get_series_by_col(source_df, order_col))
     actual_dates = parse_mixed_date_series(get_series_by_col(source_df, actual_col))
     fallback_col = find_col(source_df, ["出貨日期"])
@@ -602,7 +654,6 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     qtys      = (get_series_by_col(source_df, qty_col).astype(str).fillna("")
                  if qty_col else pd.Series("", index=source_df.index))
 
-    # ── 月份選單（近24個月 + 當月，預設當月） ────────────────────────────────
     today          = pd.Timestamp.today().normalize()
     current_period = today.to_period("M")
 
@@ -613,8 +664,6 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
                 valid_periods.add(p)
 
     periods = sorted(valid_periods)
-
-    # ✅ 修正 v4.2：預設選當月，不再用 len(periods)-1（會選到未來月份）
     default_index = next(
         (i for i, p in enumerate(periods) if p == current_period),
         len(periods) - 1
@@ -626,7 +675,6 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     )
     month_key = f"{selected.year}-{selected.month:02d}"
 
-    # ── Teable 資料過濾 ───────────────────────────────────────────────────────
     is_shipment   = wip.eq("SHIPMENT")
     actual_mask   = actual_dates.dt.to_period("M") == selected
     plan_mask     = plan_dates.dt.to_period("M") == selected
@@ -663,7 +711,6 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     shipped_total += legacy_amt
     month_total    = shipped_total + forecast_total
 
-    # ── 指標卡 ────────────────────────────────────────────────────────────────
     st.markdown(f"### {selected.month}月 業績明細表")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("接單金額 (USD)",     f"${order_total:,.2f}",
@@ -691,13 +738,10 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
             f"出貨後 WIP 更新為 SHIPMENT，{selected.month}月銷貨合計將增至 US${month_total:,.2f}。"
         )
 
-    # ── ① 已出貨 vs 預計出貨 堆疊長條 ────────────────────────────────────────
     st.markdown("#### 本月出貨進度")
     _render_stacked_bar(month_key, shipped_total, forecast_total)
 
-    # ── 工廠 / 客戶 統計表 ────────────────────────────────────────────────────
     left, right = st.columns(2)
-
     with left:
         st.markdown(f"#### 🏭 依工廠別統計（{selected.month}月銷貨）")
         if shipped_df.empty:
@@ -734,12 +778,10 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
                 columns=cus_table.columns)], ignore_index=True)
             st.dataframe(cus_table, use_container_width=True, hide_index=True)
 
-    # ── ② 工廠 / 客戶 圓餅圖 ─────────────────────────────────────────────────
     if not shipped_df.empty:
         st.markdown("#### 本月銷貨佔比")
         _render_pie_charts(fac_table, cus_table)
 
-    # ── 明細 ──────────────────────────────────────────────────────────────────
     st.markdown("#### 已出貨明細")
     if shipped_df.empty:
         st.info("無 Teable 出貨明細。")
@@ -749,7 +791,6 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     st.markdown("#### 預計出貨明細")
     st.dataframe(forecast_df, use_container_width=True, hide_index=True)
 
-    # ── ③ 近12個月趨勢 ────────────────────────────────────────────────────────
     monthly = []
     for i in range(11, -1, -1):
         p     = current_period - i
@@ -764,7 +805,6 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
     _render_trend_chart(monthly)
     st.dataframe(pd.DataFrame(monthly), use_container_width=True, hide_index=True)
 
-    # ── Debug ─────────────────────────────────────────────────────────────────
     with st.expander("Debug：業績明細表欄位偵測"):
         st.json({
             "order_col": order_col, "actual_col": actual_col, "plan_col": plan_col,
