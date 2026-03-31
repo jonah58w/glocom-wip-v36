@@ -672,7 +672,7 @@ def load_orders():
                 "fieldKeyType": "name",
                 "cellFormat": "text",
                 "take": 1000,
-                   "viewId": "viwGqqwdvy5WkaqfQuJ",     
+                "viewId": "viwGqqwdvy5WkaqfQuJ",
             }
             if page_token:
                 params["pageToken"] = page_token
@@ -690,12 +690,11 @@ def load_orders():
             records = data.get("records", []) or []
             for rec in records:
                 fields = rec.get("fields", {}) or {}
-                fields["_record_id"] = rec.get("id", "")
-                fields["lastModifiedTime"]  = rec.get("lastModifiedTime", "")
-                fields["createdTime"]       = rec.get("createdTime", "")
-                all_rows.append(fields)
-                all_rows.append(fields)
-           next_token = (
+                fields["_record_id"]       = rec.get("id", "")
+                fields["lastModifiedTime"] = rec.get("lastModifiedTime", "")
+                fields["createdTime"]      = rec.get("createdTime", "")
+                all_rows.append(fields)          # ← 只 append 一次
+            next_token = (
                 data.get("pageToken")
                 or data.get("nextPageToken")
                 or data.get("next_page_token")
@@ -704,53 +703,13 @@ def load_orders():
             if not next_token or next_token == page_token:
                 break
             page_token = next_token
-page_token = next_token
         df = pd.DataFrame(all_rows)
         df = normalize_columns(df)
-# 以 _record_id 去重，避免重複抓取
-    if "_record_id" in df.columns:
-        df = df.drop_duplicates(subset=["_record_id"]).reset_index(drop=True)
-    return df, last_status, last_text
+        if "_record_id" in df.columns:
+            df = df.drop_duplicates(subset=["_record_id"]).reset_index(drop=True)
+        return df, last_status, last_text
     except Exception as e:
         return pd.DataFrame(), "EXCEPTION", str(e)
-def find_record_id_by_po(df: pd.DataFrame, po_value: str, po_col: str | None):
-    if df.empty or not po_col or po_col not in df.columns:
-        return None
-    po_series = get_series_by_col(df, po_col)
-    if po_series is None:
-        return None
-    matched = df[po_series.astype(str).str.strip().str.lower() == str(po_value).strip().lower()]
-    if matched.empty:
-        return None
-    if "_record_id" in matched.columns:
-        return matched.iloc[0]["_record_id"]
-    return None
-def upsert_to_teable(current_df: pd.DataFrame, po_col_name: str, po_value: str, updates: dict):
-    if not po_value:
-        return False, "PO is empty"
-    record_id = find_record_id_by_po(current_df, po_value=po_value, po_col=po_col_name)
-    payload_fields = dict(updates)
-    payload_fields[po_col_name] = po_value
-    try:
-        if record_id:
-            r = requests.patch(
-                f"{TABLE_URL}/{record_id}",
-                headers=HEADERS,
-                json={"record": {"fields": payload_fields}},
-                timeout=30
-            )
-        else:
-            r = requests.post(
-                TABLE_URL,
-                headers=HEADERS,
-                json={"records": [{"fields": payload_fields}]},
-                timeout=30
-            )
-        if r.status_code in (200, 201):
-            return True, r.text
-        return False, f"{r.status_code} | {r.text}"
-    except Exception as e:
-        return False, str(e)
 # ================================
 # EXCEL EXPORT HELPERS
 # ================================
