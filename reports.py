@@ -479,13 +479,50 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
     wip_upper = wip_raw.str.upper()
 
     if subset_mode == "new_order_today":
+        # ── 條件 1：客戶下單日期 = 今天 ──────────────────────────────────
         cust_col = find_col(source_df, ["客戶下單日期"])
         fact_col = find_col(source_df, ["工廠下單日期"])
-        cust_d   = (parse_mixed_date_series(get_series_by_col(source_df, cust_col))
-                    if cust_col else pd.Series(pd.NaT, index=idx))
-        fact_d   = (parse_mixed_date_series(get_series_by_col(source_df, fact_col))
-                    if fact_col else pd.Series(pd.NaT, index=idx))
-        return cust_d.dt.normalize().eq(today).fillna(False) | fact_d.dt.normalize().eq(today).fillna(False)
+
+        cust_d = (parse_mixed_date_series(get_series_by_col(source_df, cust_col))
+                  if cust_col else pd.Series(pd.NaT, index=idx))
+        fact_d = (parse_mixed_date_series(get_series_by_col(source_df, fact_col))
+                  if fact_col else pd.Series(pd.NaT, index=idx))
+
+        order_today = (
+            cust_d.dt.normalize().eq(today).fillna(False) |
+            fact_d.dt.normalize().eq(today).fillna(False)
+        )
+
+        # ── 條件 2：lastModifiedTime = 今天，且不是「只更新 WIP」 ──────────
+        # 判斷方式：lastModifiedTime = 今天，但 WIP 是空的
+        # （有填 WIP 的不一定是今天改的，但沒填 WIP 的被修改幾乎是其他欄位）
+        # 更精確做法：lastModifiedTime = 今天，且工廠交期或併貨日期有值
+        lmt_col = find_col(source_df, ["lastModifiedTime", "最後修改時間"])
+        if lmt_col:
+            lmt_d = parse_mixed_date_series(get_series_by_col(source_df, lmt_col))
+            modified_today = lmt_d.dt.normalize().eq(today).fillna(False)
+
+            # 排除「只有 WIP 更新」：要求工廠交期或併貨日期有值，才算非 WIP 更新
+            factory_due_col = find_col(source_df, FACTORY_DUE_CANDIDATES)
+            cargo_col       = find_col(source_df, ["併貨日期 (限內部使用)", "併貨日期\n (限內部使用)"])
+
+            has_factory_due = (
+                get_series_by_col(source_df, factory_due_col)
+                .astype(str).str.strip().replace({"nan": "", "None": ""}).ne("")
+                if factory_due_col else pd.Series(False, index=idx)
+            )
+            has_cargo_date = (
+                get_series_by_col(source_df, cargo_col)
+                .astype(str).str.strip().replace({"nan": "", "None": ""}).ne("")
+                if cargo_col else pd.Series(False, index=idx)
+            )
+
+            # 今天被修改，且有工廠交期或併貨日期（代表不只是 WIP 更新）
+            modified_non_wip = modified_today & (has_factory_due | has_cargo_date)
+        else:
+            modified_non_wip = pd.Series(False, index=idx)
+
+        return order_today | modified_non_wip
 
     if subset_mode == "unshipped":
         not_shipment  = ~wip_upper.eq("SHIPMENT")
