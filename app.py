@@ -691,6 +691,9 @@ def load_orders():
             for rec in records:
                 fields = rec.get("fields", {}) or {}
                 fields["_record_id"] = rec.get("id", "")
+                fields["lastModifiedTime"]  = rec.get("lastModifiedTime", "")
+                fields["createdTime"]       = rec.get("createdTime", "")
+                all_rows.append(fields)
                 all_rows.append(fields)
             page_token = (
                 data.get("pageToken")
