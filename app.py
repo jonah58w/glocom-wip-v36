@@ -1944,6 +1944,6 @@ elif menu == "Import / Update":
                                     st.error(msg)
             except Exception as e:
                 st.error(f"Image OCR failed: {e}")
-            elif menu == "SignFlow 簽核平台",:
+            elif menu == "SignFlow 簽核平台":
                 render_approval_page()
 # Excel Quote Export removed from menu.
