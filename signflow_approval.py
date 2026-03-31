@@ -16,7 +16,6 @@ signflow_approval.py  ──  GLOCOM 內部簽核平台 (SignFlow)
 
 from __future__ import annotations
 
-import json
 import os
 from datetime import date, datetime
 
@@ -724,28 +723,30 @@ def _view_create() -> None:
     st.divider()
 
     # figure out doc_id and customer from field_values
-    id_field  = next((v for k, v in field_values.items() if "*" in k and "編號" in k or "單號" in k), "")
-    cust_field = next((v for k, v in field_values.items() if "客戶" in k), "")
-    applicant  = next((v for k, v in field_values.items() if "業務" in k), "—")
+    # fix: add parens to avoid operator precedence bug
+    id_field   = next((v for k, v in field_values.items() if ("*" in k and ("編號" in k or "單號" in k))), "")
+    cust_field = next((v for k, v in field_values.items() if "客戶名稱" in k), "")
+    applicant  = next((v for k, v in field_values.items() if "負責業務" in k), "—")
     app_email  = field_values.get("Email", "")
 
     cok, ccancel, _ = st.columns([2, 1, 5])
     with cok:
-        if st.button("🚀 提交並啟動流程", type="primary", use_container_width=True):
+        if st.button("🚀 提交並啟動流程", type="primary", use_container_width=True,
+                     key=f"sf_submit_{tpl_key}"):
             if not id_field.strip():
                 st.error("請填寫文件編號（標 * 欄位）！")
             elif not cust_field.strip():
                 st.error("請填寫客戶名稱！")
             else:
+                tpl_label_clean = TEMPLATES[tpl_key]["label"].split(" ", 1)[1].replace(" 簽核", "")
                 new_doc = {
                     "id":        id_field.strip(),
-                    "title":     f"{TEMPLATES[tpl_key]['label'].split(' ',1)[1]} #{id_field.strip()}",
+                    "title":     f"{tpl_label_clean} #{id_field.strip()}",
                     "doc_type":  tpl_key,
                     "customer":  cust_field.strip(),
                     "applicant": applicant or "—",
                     "email":     app_email or "—",
-                    "fields":    {k.rstrip(" *"): v for k, v in field_values.items()
-                                  if "備註" not in k and "說明" not in k},
+                    "fields":    {k.rstrip(" *"): v for k, v in field_values.items()},
                     "date":      str(date.today()),
                     "status":    "pending",
                     "stations":  new_stations,
