@@ -345,6 +345,7 @@ SANDY_NEW_ORDER_SPECS = [
     ("工廠出貨事項",          col_candidates("工廠出貨事項", "工廠出貨注意事項")),
     ("新/舊料號",             col_candidates("新/舊料號", "新/舊\n料號", "新/舊 料號")),
     ("板層",                  col_candidates("板層", "板\n層", "板 層")),
+    ("西拓訂單編號",          col_candidates("西拓訂單編號")),
 ]
 
 SANDY_INTERNAL_WIP_SPECS = [
