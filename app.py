@@ -33,6 +33,7 @@ from reports import (
     show_sandy_sales_report,
     render_sales_detail_from_teable,
 )
+from signflow_approval import render_approval_page
 # ================================
 # PAGE CONFIG
 # ================================
@@ -1300,6 +1301,7 @@ menu = st.sidebar.radio(
         "業績明細表",
         "Customer Preview",
         "Import / Update",
+         "✍ 簽核平台",
     ]
 )
 if st.sidebar.button("Refresh"):
@@ -1942,4 +1944,6 @@ elif menu == "Import / Update":
                                     st.error(msg)
             except Exception as e:
                 st.error(f"Image OCR failed: {e}")
+            elif menu == "✍ 簽核平台":
+                render_approval_page()
 # Excel Quote Export removed from menu.
