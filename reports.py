@@ -489,45 +489,36 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
 # ================================
 
 def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subset_mode: str):
+    import io
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
+
     st.subheader(title)
-
-    with st.expander("🔍 Debug：欄位偵測", expanded=False):
-        today     = pd.Timestamp.today().normalize()
-        cust_col  = find_col(source_df, ["客戶下單日期"])
-        fact_col  = find_col(source_df, ["工廠下單日期"])
-        lmt_col   = find_col(source_df, LAST_MODIFIED_CANDIDATES)
-        fac_due   = find_col(source_df, FACTORY_DUE_CANDIDATES)
-        cargo_col = find_col(source_df, CARGO_DATE_CANDIDATES)
-
-        st.write({
-            "客戶下單日期 欄位": cust_col,
-            "工廠下單日期 欄位": fact_col,
-            "lastModifiedTime 欄位": lmt_col,
-            "工廠交期 欄位": fac_due,
-            "併貨日期 欄位": cargo_col,
-            "今天": str(today.date()),
-            "總筆數": len(source_df),
-        })
-        if cust_col:
-            s = parse_mixed_date_series(get_series_by_col(source_df, cust_col))
-            st.write(f"客戶下單日期 = 今天：{s.dt.normalize().eq(today).fillna(False).sum()} 筆")
-            st.write("客戶下單日期 樣本（前3）：", s.dropna().head(3).dt.strftime("%Y-%m-%d").tolist())
-        if fact_col:
-            s2 = parse_mixed_date_series(get_series_by_col(source_df, fact_col))
-            st.write(f"工廠下單日期 = 今天：{s2.dt.normalize().eq(today).fillna(False).sum()} 筆")
-        if lmt_col:
-            s3 = get_series_by_col(source_df, lmt_col)
-            s3p = parse_mixed_date_series(s3)
-            st.write(f"lastModifiedTime = 今天：{s3p.dt.normalize().eq(today).fillna(False).sum()} 筆")
-            st.write("lastModifiedTime 原始樣本（前3）：", s3.head(3).astype(str).tolist())
-        else:
-            st.warning("⚠️ 找不到 lastModifiedTime！請確認 app.py 的 load_orders() 已把它加入 DataFrame（見下方說明）。")
-
     mask     = build_subset_mask(source_df, subset_mode)
     filtered = source_df[mask].copy()
     view_df, _ = build_teable_view_df(filtered, specs)
     st.caption(f"共 {len(view_df)} 筆")
     st.dataframe(view_df, use_container_width=True, hide_index=True)
+
+    # Excel 下載（自動欄寬）
+    wb = Workbook()
+    ws = wb.active
+    ws.append(list(view_df.columns))
+    for row in view_df.itertuples(index=False):
+        ws.append(list(row))
+    for col_idx, col in enumerate(ws.columns, 1):
+        max_len = max((len(str(cell.value or "")) for cell in col), default=8)
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 4, 50)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    st.download_button(
+        "📥 下載 Excel",
+        data=buf,
+        file_name=f"{title}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 
 # ================================
