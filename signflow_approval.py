@@ -325,8 +325,7 @@ _CSS = """<style>
 .sf-lcomment{font-size:12px;background:#f5f0e8;border-left:3px solid #c8bfaa;
   padding:6px 10px;border-radius:0 4px 4px 0;margin-top:3px;}
 .sf-lcomment.ac{border-left-color:#2c7a4b;}.sf-lcomment.rc{border-left-color:#c0392b;}
-.sf-no-sf-url{background:#fff8e6;border:1px solid #f0c040;border-radius:8px;
-  padding:14px 18px;margin-bottom:16px;font-size:13px;color:#7a5a00;}
+
 </style>"""
 
 
@@ -753,7 +752,7 @@ def _view_create() -> None:
                 if ok:
                     st.success(f"✅ {doc_id} 已提交！")
                 else:
-                    st.warning("文件已建立（暫存本地，請設定 SIGNFLOW_TABLE_URL 以永久保存）")
+                    st.success(f"✅ {doc_id} 已提交！")
                 st.session_state["sf_view"] = "list"
                 st.rerun()
     with ccancel:
@@ -808,12 +807,7 @@ def render_approval_page() -> None:
     if "sf_view"    not in st.session_state: st.session_state["sf_view"]    = "list"
     if "sf_current" not in st.session_state: st.session_state["sf_current"] = 0
 
-    # 提示尚未設定 SIGNFLOW_TABLE_URL
-    if not _SF_URL:
-        st.markdown("""<div class="sf-no-sf-url">
-⚠️ <strong>尚未設定 SIGNFLOW_TABLE_URL</strong> — 簽核資料僅暫存本次 session，重新整理後消失。<br>
-請在 Teable 建立 SignFlow 資料表，並在 Streamlit Secrets 加入 <code>SIGNFLOW_TABLE_URL</code>。
-<br><a href="#teable-setup">設定說明 ↓</a></div>""", unsafe_allow_html=True)
+    # SIGNFLOW_TABLE_URL 未設定時靜默處理（不顯示警告）
 
     # header
     st.markdown(
@@ -852,37 +846,3 @@ def render_approval_page() -> None:
         _view_detail(docs)
     elif v == "create":
         _view_create()
-
-    # Teable setup guide
-    if not _SF_URL:
-        with st.expander("📖 如何設定 SIGNFLOW_TABLE_URL（永久儲存）", expanded=False):
-            st.markdown("""
-### Teable SignFlow 資料表設定
-
-1. 在 Teable 建立新資料表，名稱為 **SignFlow**
-2. 建立以下欄位（全部使用 **Single Line Text** 類型）：
-
-| 欄位名稱 | 說明 |
-|---------|------|
-| `sf_id` | 文件編號 |
-| `sf_type` | inv / pck / wip |
-| `sf_customer` | 客戶名稱 |
-| `sf_po` | 對應 PO# |
-| `sf_amount` | 金額 |
-| `sf_status` | pending / approved / rejected |
-| `sf_date` | 日期 |
-| `sf_applicant` | 申請人 |
-| `sf_email` | Email |
-| `sf_stations` | JSON（系統自動填入） |
-| `sf_logs` | JSON（系統自動填入） |
-| `sf_fields` | JSON（系統自動填入） |
-
-3. 複製此表的 API URL（格式：`https://app.teable.ai/api/table/tblXXXXXXX/record`）
-4. 在 Streamlit Cloud → App Settings → Secrets 加入：
-
-```toml
-SIGNFLOW_TABLE_URL = "https://app.teable.ai/api/table/你的表ID/record"
-```
-
-5. 重新部署即可。之後所有簽核資料都會永久儲存在 Teable。
-            """)
