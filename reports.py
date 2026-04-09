@@ -119,42 +119,66 @@ def parse_amount_series(series: pd.Series | None) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
 
 
+def _to_naive_ns(parsed: pd.Series) -> "np.ndarray":
+    """把 datetime Series 轉成 tz-naive datetime64[ns] numpy array，相容新版 pandas。"""
+    if parsed.empty:
+        return parsed.values.astype("datetime64[ns]")
+    try:
+        if getattr(parsed.dt, "tz", None) is not None:
+            parsed = parsed.dt.tz_convert("UTC").dt.tz_localize(None)
+    except Exception:
+        pass
+    return parsed.values.astype("datetime64[ns]")
+
+
 def parse_mixed_date_series(series: pd.Series | None) -> pd.Series:
+    """
+    混合格式日期解析，相容 Python 3.14 + 新版 pandas。
+    改用 numpy array 作底層，避免 .loc assign 時的 dtype upcast AssertionError。
+    """
+    import numpy as np
+
     if series is None:
         return pd.Series(dtype="datetime64[ns]")
+
     s = series.astype(str).fillna("").str.strip()
     s = s.replace({"": None, "nan": None, "NaT": None, "None": None})
-    out = pd.Series(pd.NaT, index=s.index, dtype="datetime64[ns]")
 
+    result = np.full(len(s), np.datetime64("NaT"), dtype="datetime64[ns]")
+    s_vals  = s.values          # numpy array，方便 boolean index
+    s_notna = s.notna().values
+
+    # ① Excel serial number
     nums = pd.to_numeric(s, errors="coerce")
-    mask_num = nums.notna() & (nums > 20000) & (nums < 80000)
+    mask_num = (nums.notna() & (nums > 20000) & (nums < 80000)).values
     if mask_num.any():
-        out.loc[mask_num] = pd.to_datetime(
-            nums.loc[mask_num], unit="D", origin="1899-12-30", errors="coerce")
+        parsed = pd.to_datetime(nums[mask_num], unit="D", origin="1899-12-30", errors="coerce")
+        result[mask_num] = _to_naive_ns(parsed)
 
+    # ② 固定格式
     for fmt in ["%Y-%m-%d", "%y-%m-%d"]:
-        rem = out.isna() & s.notna()
+        rem = np.isnat(result) & s_notna
         if rem.any():
-            out.loc[rem] = pd.to_datetime(s.loc[rem], format=fmt, errors="coerce")
+            parsed = pd.to_datetime(pd.Series(s_vals[rem]), format=fmt, errors="coerce")
+            result[rem] = _to_naive_ns(parsed)
 
-    rem = out.isna() & s.notna()
+    # ③ "Jan 01 26" 等英文月份
+    rem = np.isnat(result) & s_notna
     if rem.any():
-        cleaned = (s.loc[rem]
+        cleaned = (pd.Series(s_vals[rem])
                    .str.replace(".", "", regex=False)
                    .str.replace(",", "", regex=False)
                    .str.replace(r"\s+", " ", regex=True).str.strip())
-        out.loc[rem] = pd.to_datetime(cleaned, format="%b %d %y", errors="coerce")
+        parsed = pd.to_datetime(cleaned, format="%b %d %y", errors="coerce")
+        result[rem] = _to_naive_ns(parsed)
 
-    rem = out.isna() & s.notna()
+    # ④ 最後 fallback（inferring）
+    rem = np.isnat(result) & s_notna
     if rem.any():
-        parsed = pd.to_datetime(s.loc[rem], errors="coerce")
-        # 新版 pandas (2.x+) 若解析出帶 tz 的結果，直接 assign 到 tz-naive Series 會 AssertionError
-        # 統一轉成 tz-naive 再寫入
-        if getattr(parsed.dt, "tz", None) is not None:
-            parsed = parsed.dt.tz_convert("UTC").dt.tz_localize(None)
-        out.loc[rem] = parsed
+        parsed = pd.to_datetime(pd.Series(s_vals[rem]), errors="coerce")
+        result[rem] = _to_naive_ns(parsed)
 
-    return out
+    return pd.Series(result, index=series.index, dtype="datetime64[ns]")
 
 
 def _is_cancelled(wip_series: pd.Series) -> pd.Series:
