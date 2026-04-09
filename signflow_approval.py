@@ -18,6 +18,7 @@ GLOCOM 內部簽核平台 (SignFlow)
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from datetime import date, datetime
@@ -66,6 +67,8 @@ SF_FIELDS   = "sf_fields"    # JSON
 SF_DATE     = "sf_date"
 SF_APPLICANT= "sf_applicant"
 SF_EMAIL    = "sf_email"
+SF_FILENAME = "sf_filename"  # 上傳的原始檔名
+SF_FILEDATA = "sf_filedata"  # base64 檔案內容（≤ 500KB 存 Teable）
 
 
 # ════════════════════════════════════════════════════════════════
@@ -180,6 +183,8 @@ def _sf_load_all() -> list[dict]:
                     "date":       row.get(SF_DATE, ""),
                     "applicant":  row.get(SF_APPLICANT, ""),
                     "email":      row.get(SF_EMAIL, ""),
+                    "filename":   row.get(SF_FILENAME, ""),
+                    "filedata":   row.get(SF_FILEDATA, ""),
                     "stations":   json.loads(row.get(SF_STATIONS, "[]")),
                     "logs":       json.loads(row.get(SF_LOGS, "[]")),
                     "fields":     json.loads(row.get(SF_FIELDS, "{}")),
@@ -205,6 +210,8 @@ def _sf_save(doc: dict) -> bool:
         SF_DATE:     doc.get("date", _today()),
         SF_APPLICANT:doc.get("applicant", ""),
         SF_EMAIL:    doc.get("email", ""),
+        SF_FILENAME: doc.get("filename", ""),
+        SF_FILEDATA: doc.get("filedata", ""),
         SF_STATIONS: json.dumps(doc["stations"], ensure_ascii=False),
         SF_LOGS:     json.dumps(doc["logs"],     ensure_ascii=False),
         SF_FIELDS:   json.dumps(doc["fields"],   ensure_ascii=False),
@@ -244,7 +251,27 @@ def _sf_save(doc: dict) -> bool:
         return False
 
 
-def _sf_clear_cache():
+def _sf_delete(doc: dict) -> bool:
+    """從 Teable 刪除一筆簽核單"""
+    rec_id = doc.get("_record_id", "")
+    if not _SF_URL or not _TOKEN:
+        # fallback: session only
+        docs = st.session_state.get("sf_docs_fallback", [])
+        st.session_state["sf_docs_fallback"] = [
+            d for d in docs if d.get("_record_id") != rec_id
+        ]
+        return True
+    if not rec_id:
+        return False
+    try:
+        r = requests.delete(
+            f"{_SF_URL}/{rec_id}",
+            headers=_HEADERS,
+            timeout=15,
+        )
+        return r.status_code in (200, 204)
+    except Exception:
+        return False
     st.cache_data.clear()
 
 
@@ -410,6 +437,74 @@ def _do_reject(doc: dict, station: dict, comment: str) -> None:
 
 
 # ════════════════════════════════════════════════════════════════
+#  FILE PREVIEW
+# ════════════════════════════════════════════════════════════════
+def _show_file(doc: dict) -> None:
+    """顯示已上傳的文件"""
+    filename = doc.get("filename", "")
+    filedata = doc.get("filedata", "")
+
+    # 先檢查 session（大檔案）
+    session_key = f"sf_file_{doc['id']}"
+    if not filedata and session_key in st.session_state:
+        filedata = st.session_state[session_key]
+
+    if not filename:
+        st.caption("（此簽核單未上傳附件）")
+        return
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    st.markdown(f"📎 **附件：** {filename}")
+
+    if not filedata:
+        st.caption("⚠️ 檔案內容未儲存（檔案超過 500KB 或上傳後未重新整理）")
+        return
+
+    try:
+        file_bytes = base64.b64decode(filedata)
+    except Exception:
+        st.caption("⚠️ 檔案解碼失敗")
+        return
+
+    # 下載按鈕（所有格式都支援）
+    mime_map = {
+        "pdf":  "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "doc":  "application/msword",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xls":  "application/vnd.ms-excel",
+        "png":  "image/png",
+        "jpg":  "image/jpeg",
+        "jpeg": "image/jpeg",
+    }
+    mime = mime_map.get(ext, "application/octet-stream")
+    st.download_button(
+        label=f"⬇️ 下載 {filename}",
+        data=file_bytes,
+        file_name=filename,
+        mime=mime,
+        key=f"sf_dl_{doc['id']}",
+    )
+
+    # PDF → 直接預覽
+    if ext == "pdf":
+        b64 = base64.b64encode(file_bytes).decode()
+        st.markdown(
+            f'<iframe src="data:application/pdf;base64,{b64}" '
+            f'width="100%" height="600px" style="border:1px solid #ddd;border-radius:8px;"></iframe>',
+            unsafe_allow_html=True,
+        )
+
+    # 圖片 → 直接預覽
+    elif ext in ("png", "jpg", "jpeg"):
+        st.image(file_bytes, use_container_width=True)
+
+    # Word / Excel → 提示下載後開啟
+    elif ext in ("docx", "doc", "xlsx", "xls"):
+        st.info(f"📄 Word/Excel 檔案請點上方「⬇️ 下載」後在電腦開啟查看。")
+
+
+# ════════════════════════════════════════════════════════════════
 #  VIEW: LIST
 # ════════════════════════════════════════════════════════════════
 def _view_list(docs: list[dict]) -> None:
@@ -447,19 +542,48 @@ def _view_list(docs: list[dict]) -> None:
         })
 
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    st.caption("點擊下方按鈕進入詳情")
+    st.divider()
 
+    # ── 進入詳情 ──
+    st.caption("點擊下方按鈕進入詳情或刪除")
     n = min(len(docs), 5)
     cols = st.columns(n)
-    for i, d in enumerate(docs[:n * 4]):   # show up to 20
+    for i, d in enumerate(docs[:n * 4]):
         with cols[i % n]:
-            icon = {"inv": "🧾", "pck": "📦", "wip": "🏭"}.get(d["doc_type"], "📄")
+            icon    = {"inv": "🧾", "pck": "📦", "wip": "🏭"}.get(d["doc_type"], "📄")
             st_icon = {"pending": "🟡", "approved": "✅", "rejected": "❌"}[d["status"]]
-            label = f"{icon} {d['id']}\n{st_icon}"
-            if st.button(label, key=f"sf_open_{i}", use_container_width=True):
+            if st.button(f"{icon} {d['id']}\n{st_icon}",
+                         key=f"sf_open_{i}", use_container_width=True):
                 st.session_state["sf_view"]    = "detail"
                 st.session_state["sf_current"] = i
                 st.rerun()
+
+    # ── 刪除區 ──
+    st.divider()
+    with st.expander("🗑️ 刪除簽核單", expanded=False):
+        st.caption("選擇要刪除的文件，刪除後無法復原。")
+        del_options = {f"{d['id']} ｜ {d['customer']} ｜ {d['status']}": i
+                       for i, d in enumerate(docs)}
+        del_choice = st.selectbox("選擇要刪除的文件",
+                                  list(del_options.keys()),
+                                  key="sf_del_select")
+        col_confirm, col_btn, _ = st.columns([2, 1.5, 5])
+        confirm = col_confirm.checkbox("確認刪除", key="sf_del_confirm")
+        with col_btn:
+            if st.button("🗑️ 刪除", key="sf_del_btn",
+                         type="primary" if confirm else "secondary",
+                         use_container_width=True):
+                if not confirm:
+                    st.warning("請先勾選「確認刪除」")
+                else:
+                    idx = del_options[del_choice]
+                    ok  = _sf_delete(docs[idx])
+                    _sf_clear_cache()
+                    if ok:
+                        st.success(f"已刪除：{docs[idx]['id']}")
+                    else:
+                        st.error("刪除失敗，請稍後再試")
+                    st.rerun()
 
 
 # ════════════════════════════════════════════════════════════════
@@ -475,7 +599,7 @@ def _view_detail(docs: list[dict]) -> None:
     st.subheader(f"{tl}  ·  {doc['id']}")
     st.caption(f"**{doc['customer']}**  ·  PO: {doc.get('po','—')}  ·  {doc.get('date','')}")
 
-    ca, cb, _ = st.columns([1.2, 1.2, 7])
+    ca, cb, cc, _ = st.columns([1.2, 1.2, 1.2, 6])
     with ca:
         if st.button("← 返回", key="sf_back", use_container_width=True):
             st.session_state["sf_view"] = "list"
@@ -483,6 +607,28 @@ def _view_detail(docs: list[dict]) -> None:
     with cb:
         if st.button("📧 通知", key="sf_email_btn", use_container_width=True):
             _email_popup(doc)
+    with cc:
+        if st.button("🗑️ 刪除", key="sf_det_del", use_container_width=True):
+            st.session_state["sf_del_confirm_detail"] = True
+
+    # 刪除確認
+    if st.session_state.get("sf_del_confirm_detail"):
+        st.warning(f"確定要刪除 **{doc['id']}** 嗎？此動作無法復原。")
+        cy, cn, _ = st.columns([1, 1, 6])
+        with cy:
+            if st.button("確定刪除", key="sf_del_yes", type="primary",
+                         use_container_width=True):
+                ok = _sf_delete(doc)
+                _sf_clear_cache()
+                st.session_state.pop("sf_del_confirm_detail", None)
+                st.session_state["sf_view"] = "list"
+                if ok:
+                    st.success("已刪除！")
+                st.rerun()
+        with cn:
+            if st.button("取消", key="sf_del_no", use_container_width=True):
+                st.session_state.pop("sf_del_confirm_detail", None)
+                st.rerun()
 
     st.divider()
 
@@ -490,7 +636,10 @@ def _view_detail(docs: list[dict]) -> None:
     total = len(doc["stations"])
     st.progress(done / total, text=f"簽核進度：{done}/{total}（{int(done/total*100)}%）")
 
-    st.markdown("**簽核流程**")
+    # ── 附件預覽 ──
+    st.markdown("**📎 簽核文件**")
+    _show_file(doc)
+    st.divider()
     _pipeline(doc["stations"])
 
     st.markdown("**✍ 簽名欄**")
@@ -569,106 +718,129 @@ def _view_detail(docs: list[dict]) -> None:
 def _view_create() -> None:
     st.subheader("新增簽核文件")
 
-    # ── STEP 1: 類型 ──────────────────────────────────────────
-    st.markdown("**STEP 1 · 選擇類型**")
-    tpl_key = st.radio(
-        "類型", ["inv", "pck", "wip"],
-        format_func=lambda x: {"inv": "🧾 Invoice 簽核",
-                               "pck": "📦 Packing List 簽核",
-                               "wip": "🏭 新訂單 WIP 簽核"}[x],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="sf_tpl_sel",
+    # ── STEP 1: 上傳文件 ─────────────────────────────────────
+    st.markdown("**STEP 1 · 上傳要簽核的文件**")
+    uploaded = st.file_uploader(
+        "支援 PDF、Word（.docx/.doc）、Excel（.xlsx）、圖片（.png/.jpg）",
+        type=["pdf", "docx", "doc", "xlsx", "xls", "png", "jpg", "jpeg"],
+        key="sf_upload",
     )
+
+    filename  = ""
+    filedata  = ""   # base64
+    file_bytes_preview = None
+
+    if uploaded:
+        filename    = uploaded.name
+        raw_bytes   = uploaded.getvalue()
+        file_size   = len(raw_bytes)
+        st.success(f"✅ 已選取：{filename}（{file_size/1024:.1f} KB）")
+
+        # 預覽
+        ext = filename.rsplit(".", 1)[-1].lower()
+        if ext == "pdf":
+            b64_preview = base64.b64encode(raw_bytes).decode()
+            st.markdown(
+                f'<iframe src="data:application/pdf;base64,{b64_preview}" '
+                f'width="100%" height="500px" '
+                f'style="border:1px solid #ddd;border-radius:8px;margin-bottom:8px;"></iframe>',
+                unsafe_allow_html=True,
+            )
+        elif ext in ("png", "jpg", "jpeg"):
+            st.image(raw_bytes, use_container_width=True)
+        elif ext in ("docx", "doc", "xlsx", "xls"):
+            st.info("📄 Word/Excel 提交後可下載查看。")
+
+        # 500KB 以下存 Teable，否則只存 session
+        if file_size <= 500 * 1024:
+            filedata = base64.b64encode(raw_bytes).decode()
+        else:
+            st.warning(f"⚠️ 檔案 {file_size/1024:.0f} KB > 500 KB，"
+                       f"將暫存本次 session。建議壓縮後再上傳，或改用 Google Drive 連結。")
+            # 暫存 session，之後在 detail 可讀取
+            st.session_state[f"sf_file_pending"] = base64.b64encode(raw_bytes).decode()
+
     st.divider()
 
-    # ── STEP 2: 從訂單搜尋帶入 ────────────────────────────────
-    st.markdown("**STEP 2 · 從現有訂單搜尋帶入（或直接手動填寫）**")
+    # ── STEP 2: 基本資訊 ─────────────────────────────────────
+    st.markdown("**STEP 2 · 基本資訊**（可從訂單帶入）")
 
-    orders_df = _load_orders()
-    sel_po = sel_customer = sel_amount = sel_part = sel_qty = ""
+    # 訂單搜尋帶入
+    with st.expander("🔍 從現有訂單搜尋帶入", expanded=False):
+        orders_df = _load_orders()
+        if not orders_df.empty:
+            search = st.text_input("輸入 PO#、客戶名、料號",
+                                   placeholder="例：G1150022",
+                                   key="sf_search")
+            if search.strip():
+                mask = orders_df.astype(str).apply(
+                    lambda col: col.str.contains(search.strip(), case=False, na=False)
+                ).any(axis=1)
+                results = orders_df[mask].head(8)
+                if not results.empty:
+                    def fc(df, cands):
+                        for c in cands:
+                            if c in df.columns: return c
+                        return None
+                    po_c = fc(results, ["PO#","PO","P/O"])
+                    cu_c = fc(results, ["Customer","客戶"])
+                    pt_c = fc(results, ["Part No","P/N","料號"])
+                    qt_c = fc(results, ["Order Q'TY (PCS)","Qty"])
+                    am_c = fc(results, ["INVOICE","Invoice","接單金額"])
+                    show_cols = [c for c in [po_c,cu_c,pt_c,qt_c,am_c] if c]
+                    st.dataframe(results[show_cols].reset_index(drop=True),
+                                 use_container_width=True, hide_index=False)
+                    pick = st.number_input("選擇列號", 0, len(results)-1, 0, key="sf_pick")
+                    if st.button("⬇ 帶入", key="sf_import_row"):
+                        row = results.iloc[pick]
+                        st.session_state["sf_import"] = {
+                            "po":       str(row.get(po_c,"")) if po_c else "",
+                            "customer": str(row.get(cu_c,"")) if cu_c else "",
+                            "amount":   str(row.get(am_c,"")) if am_c else "",
+                            "part":     str(row.get(pt_c,"")) if pt_c else "",
+                            "qty":      str(row.get(qt_c,"")) if qt_c else "",
+                        }
+                        st.rerun()
+                else:
+                    st.warning("找不到符合的訂單")
+        else:
+            st.caption("無法連線 Teable，請手動填寫")
 
-    if not orders_df.empty:
-        # 搜尋框
-        search = st.text_input("搜尋訂單（輸入 PO#、客戶名、料號任一關鍵字）",
-                               placeholder="例：G1150022 或 TechCorp 或 TC-X500",
-                               key="sf_search")
-        if search.strip():
-            # 全欄位模糊搜尋
-            mask = orders_df.astype(str).apply(
-                lambda col: col.str.contains(search.strip(), case=False, na=False)
-            ).any(axis=1)
-            results = orders_df[mask].head(10)
-
-            if not results.empty:
-                # 找欄位
-                def fc(df, candidates):
-                    for c in candidates:
-                        if c in df.columns:
-                            return c
-                    return None
-                po_c  = fc(results, ["PO#","PO","P/O","訂單編號"])
-                cu_c  = fc(results, ["Customer","客戶","客戶名稱"])
-                pt_c  = fc(results, ["Part No","Part No.","P/N","料號"])
-                qt_c  = fc(results, ["Order Q'TY (PCS)","Qty","數量"])
-                am_c  = fc(results, ["INVOICE","Invoice","接單金額","Amount"])
-
-                display_cols = [c for c in [po_c, cu_c, pt_c, qt_c, am_c] if c]
-                show_df = results[display_cols].reset_index(drop=True)
-                st.dataframe(show_df, use_container_width=True, hide_index=False)
-
-                pick = st.number_input("選擇列號帶入（從 0 開始）",
-                                       min_value=0, max_value=len(results)-1,
-                                       value=0, step=1, key="sf_pick_row")
-                if st.button("⬇ 帶入此訂單", key="sf_import_row"):
-                    row = results.iloc[pick]
-                    st.session_state["sf_import"] = {
-                        "po":       str(row.get(po_c, ""))  if po_c  else "",
-                        "customer": str(row.get(cu_c, ""))  if cu_c  else "",
-                        "amount":   str(row.get(am_c, ""))  if am_c  else "",
-                        "part":     str(row.get(pt_c, ""))  if pt_c  else "",
-                        "qty":      str(row.get(qt_c, ""))  if qt_c  else "",
-                    }
-                    st.rerun()
-            else:
-                st.warning("找不到符合的訂單，請直接手動填寫下方欄位。")
-    else:
-        st.caption("（Teable 連線中或無資料，請直接手動填寫）")
-
-    # 帶入值（若有）
     imp = st.session_state.get("sf_import", {})
 
-    st.divider()
-    st.markdown("**文件資訊**")
+    # 類型選擇
+    tpl_key = st.radio(
+        "簽核類型", ["inv", "pck", "wip"],
+        format_func=lambda x: {"inv": "🧾 Invoice",
+                               "pck": "📦 Packing List",
+                               "wip": "🏭 新訂單 WIP"}[x],
+        horizontal=True,
+        key="sf_tpl_sel",
+    )
+
+    t = tpl_key
+    po_ref = ""
+
     c1, c2 = st.columns(2)
-
-    t = tpl_key   # short alias for key prefix
-    po_ref = ""   # initialise so all branches define it
-
     if tpl_key == "inv":
         with c1:
             doc_id   = st.text_input("Invoice 編號 *", value=imp.get("po",""), key=f"sf_doc_id_{t}")
-            customer = st.text_input("客戶名稱 *",     value=imp.get("customer",""), key=f"sf_cust_{t}")
-            amount   = st.text_input("金額",           value=imp.get("amount",""), key=f"sf_amt_{t}")
+            customer = st.text_input("客戶名稱 *", value=imp.get("customer",""), key=f"sf_cust_{t}")
         with c2:
+            amount   = st.text_input("金額", value=imp.get("amount",""), key=f"sf_amt_{t}")
             terms    = st.selectbox("付款條件", ["Net 30","Net 60","Net 90","T/T in advance","L/C"], key=f"sf_terms_{t}")
-            inv_date = st.date_input("日期", value=date.today(), key=f"sf_invdate_{t}")
-            note     = st.text_input("備註", key=f"sf_note_{t}")
-        extra_fields = {"付款條件": terms, "日期": str(inv_date), "備註": note}
+        extra_fields = {"付款條件": terms}
 
     elif tpl_key == "pck":
         with c1:
-            doc_id   = st.text_input("Packing List 編號 *", value="PL-"+_today().replace("-","")[:6]+"-", key=f"sf_doc_id_{t}")
+            doc_id   = st.text_input("PL 編號 *", value="PL-"+_today().replace("-","")[:6]+"-", key=f"sf_doc_id_{t}")
             po_ref   = st.text_input("對應 PO#", value=imp.get("po",""), key=f"sf_poref_{t}")
             customer = st.text_input("客戶名稱 *", value=imp.get("customer",""), key=f"sf_cust_{t}")
-            amount   = st.text_input("金額", value=imp.get("amount",""), key=f"sf_amt_{t}")
         with c2:
+            amount   = st.text_input("金額", value=imp.get("amount",""), key=f"sf_amt_{t}")
             dest     = st.text_input("目的地", key=f"sf_dest_{t}")
-            ctns     = st.text_input("箱數 (CTN)", key=f"sf_ctns_{t}")
-            weight   = st.text_input("重量 (KG)", key=f"sf_weight_{t}")
             ship_m   = st.selectbox("運輸方式", ["Sea Freight","Air Freight","Express"], key=f"sf_ship_{t}")
-        extra_fields = {"對應PO": po_ref, "目的地": dest, "箱數": ctns,
-                        "重量": weight, "運輸": ship_m}
+        extra_fields = {"對應PO": po_ref, "目的地": dest, "運輸": ship_m}
 
     else:  # wip
         with c1:
@@ -678,30 +850,24 @@ def _view_create() -> None:
             po_ref   = st.text_input("客戶 PO# / 西拓訂單編號",
                                      value=imp.get("po",""), key=f"sf_poref_{t}")
             customer = st.text_input("客戶名稱 *", value=imp.get("customer",""), key=f"sf_cust_{t}")
-            amount   = st.text_input("金額", value=imp.get("amount",""), key=f"sf_amt_{t}")
         with c2:
+            amount   = st.text_input("金額", value=imp.get("amount",""), key=f"sf_amt_{t}")
             model    = st.text_input("產品型號 / 料號", value=imp.get("part",""), key=f"sf_model_{t}")
-            qty      = st.text_input("訂單數量", value=imp.get("qty",""), key=f"sf_qty_{t}")
             etd      = st.date_input("交貨期 ETD", key=f"sf_etd_{t}")
-            prod_type= st.selectbox("生產類別",
-                                    ["標準品","客製化","樣品","試產"], key=f"sf_prodtype_{t}")
-        extra_fields = {"對應PO": po_ref, "料號": model, "數量": qty,
-                        "ETD": str(etd), "類別": prod_type}
+        extra_fields = {"對應PO": po_ref, "料號": model, "ETD": str(etd)}
 
     st.divider()
 
     # ── STEP 3: 簽核人員 ─────────────────────────────────────
     st.markdown("**STEP 3 · 簽核人員**")
-    st.caption("直接修改姓名和 Email，角色自動帶入預設流程")
-
     defaults = DEFAULT_APPROVERS[tpl_key]
     new_stations = []
     for i, d in enumerate(defaults):
         ca, cb, cc = st.columns([2, 3, 2])
-        name   = ca.text_input(f"第{i+1}關 姓名",  value=d["person"], key=f"sf_ap_n_{i}")
-        email  = cb.text_input(f"Email",            value=d["email"],  key=f"sf_ap_e_{i}")
-        ridx   = ALL_ROLES.index(d["role"]) if d["role"] in ALL_ROLES else 0
-        role   = cc.selectbox(f"職責", ALL_ROLES, index=ridx,         key=f"sf_ap_r_{i}")
+        name  = ca.text_input(f"第{i+1}關 姓名", value=d["person"], key=f"sf_ap_n_{i}")
+        email = cb.text_input("Email",            value=d["email"],  key=f"sf_ap_e_{i}")
+        ridx  = ALL_ROLES.index(d["role"]) if d["role"] in ALL_ROLES else 0
+        role  = cc.selectbox("職責", ALL_ROLES, index=ridx,         key=f"sf_ap_r_{i}")
         new_stations.append({
             "name": role, "person": name, "role": role, "email": email,
             "status": "current" if i == 0 else "pending",
@@ -722,6 +888,10 @@ def _view_create() -> None:
             elif not customer.strip():
                 st.error("請填寫客戶名稱！")
             else:
+                # 若大檔存在 pending session，移到正式 key
+                pending_file = st.session_state.pop("sf_file_pending", "")
+                final_filedata = filedata or pending_file
+
                 new_doc = {
                     "_record_id": "",
                     "id":         doc_id.strip(),
@@ -734,33 +904,37 @@ def _view_create() -> None:
                     "date":       _today(),
                     "applicant":  applicant,
                     "email":      app_email,
+                    "filename":   filename,
+                    "filedata":   final_filedata,
                     "fields":     {"金額": amount.strip(), **extra_fields},
                     "stations":   new_stations,
                     "logs": [{
                         "person":  applicant,
                         "action":  "提交簽核申請",
-                        "comment": f"{DOC_LABEL[tpl_key]} {doc_id.strip()} 已提交，請依序審核。",
+                        "comment": f"{DOC_LABEL[tpl_key]} {doc_id.strip()}（附件：{filename or '無'}）",
                         "time":    _now(),
                         "type":    "submitted",
                     }],
                 }
+
+                # 大檔另存 session
+                if final_filedata and not filedata:
+                    st.session_state[f"sf_file_{doc_id.strip()}"] = final_filedata
+
                 ok = _sf_save(new_doc)
                 _sf_clear_cache()
-                # clear import state
                 if "sf_import" in st.session_state:
                     del st.session_state["sf_import"]
-                if ok:
-                    st.success(f"✅ {doc_id} 已提交！")
-                else:
-                    st.success(f"✅ {doc_id} 已提交！")
+                st.success(f"✅ {doc_id} 已提交！")
                 st.session_state["sf_view"] = "list"
                 st.rerun()
     with ccancel:
         if st.button("取消", use_container_width=True, key="sf_cancel"):
-            if "sf_import" in st.session_state:
-                del st.session_state["sf_import"]
+            for k in ["sf_import","sf_file_pending"]:
+                st.session_state.pop(k, None)
             st.session_state["sf_view"] = "list"
             st.rerun()
+
 
 
 # ════════════════════════════════════════════════════════════════
