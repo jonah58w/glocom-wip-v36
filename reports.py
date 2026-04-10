@@ -412,6 +412,7 @@ SANDY_NEW_ORDER_SPECS = [
     ("交期 (更改)",           col_candidates("交期 (更改)", "交期\n (更改)")),
     ("出貨日期",              ACTUAL_SHIP_DATE_CANDIDATES),
     ("工廠",                  FACTORY_CANDIDATES),
+    ("西拓訂單編號",          col_candidates("西拓訂單編號")),
     ("工廠提醒事項",          col_candidates("工廠提醒事項")),
     ("併貨日期 (限內部使用)", col_candidates("併貨日期 (限內部使用)", "併貨日期\n (限內部使用)")),
     ("情況",                  REMARK_CANDIDATES),
@@ -421,13 +422,13 @@ SANDY_NEW_ORDER_SPECS = [
     ("箱數",                  col_candidates("箱數", "CTNS", "CTN")),
     ("重量",                  col_candidates("重量", "Weight", "KGs")),
     ("重貨優惠",              col_candidates("重貨優惠")),
-    ("Pricing & Qty issue",   col_candidates("Pricing & Qty issue")),
-    ("T/T",                   col_candidates("T/T")),
     ("工廠出貨事項",          col_candidates("工廠出貨事項", "工廠出貨注意事項")),
     ("新/舊料號",             col_candidates("新/舊料號")),
     ("板層",                  col_candidates("板層")),
     ("Working Gerber Approval", col_candidates("Working Gerber Approval", "Working\nGerber\nApproval", "WorkingGerberApproval")),
     ("Engineering Question",    col_candidates("Engineering Question", "Engineering\nQuestion", "EngineeringQuestion")),
+    ("Pricing & Qty issue",     col_candidates("Pricing & Qty issue")),
+    ("T/T",                     col_candidates("T/T")),
 ]
 
 SANDY_INTERNAL_WIP_SPECS = [
@@ -453,13 +454,13 @@ SANDY_INTERNAL_WIP_SPECS = [
     ("客戶要求注意事項",      col_candidates("客戶要求注意事項")),
     ("Ship to",               col_candidates("Ship to")),
     ("Ship via",              col_candidates("Ship via")),
-    ("CTN",                   col_candidates("CTN", "CTNS", "箱數")),
-    ("KGs",                   col_candidates("KGs", "重量")),
-    ("Pricing & Qty issue",   col_candidates("Pricing & Qty issue")),
-    ("T/T",                   col_candidates("T/T")),
+    ("CTN",                     col_candidates("CTN", "CTNS", "箱數")),
+    ("KGs",                     col_candidates("KGs", "重量")),
+    ("Note",                    REMARK_CANDIDATES),
     ("Working Gerber Approval", col_candidates("Working Gerber Approval", "Working\nGerber\nApproval", "WorkingGerberApproval")),
     ("Engineering Question",    col_candidates("Engineering Question", "Engineering\nQuestion", "EngineeringQuestion")),
-    ("Note",                  REMARK_CANDIDATES),
+    ("Pricing & Qty issue",     col_candidates("Pricing & Qty issue")),
+    ("T/T",                     col_candidates("T/T")),
 ]
 
 SANDY_SALES_SPECS = [
