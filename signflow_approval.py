@@ -272,7 +272,14 @@ def _sf_delete(doc: dict) -> bool:
         return r.status_code in (200, 204)
     except Exception:
         return False
-    st.cache_data.clear()
+
+
+def _sf_clear_cache() -> None:
+    """清除 Teable 資料快取，強制下次重新載入"""
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
 
 
 # ════════════════════════════════════════════════════════════════
