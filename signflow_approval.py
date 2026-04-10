@@ -567,23 +567,18 @@ def _view_list(docs: list[dict]) -> None:
         del_choice = st.selectbox("選擇要刪除的文件",
                                   list(del_options.keys()),
                                   key="sf_del_select")
-        col_confirm, col_btn, _ = st.columns([2, 1.5, 5])
-        confirm = col_confirm.checkbox("確認刪除", key="sf_del_confirm")
-        with col_btn:
-            if st.button("🗑️ 刪除", key="sf_del_btn",
-                         type="primary" if confirm else "secondary",
-                         use_container_width=True):
-                if not confirm:
-                    st.warning("請先勾選「確認刪除」")
-                else:
-                    idx = del_options[del_choice]
-                    ok  = _sf_delete(docs[idx])
-                    _sf_clear_cache()
-                    if ok:
-                        st.success(f"已刪除：{docs[idx]['id']}")
-                    else:
-                        st.error("刪除失敗，請稍後再試")
-                    st.rerun()
+        confirm  = st.checkbox("確認刪除", key="sf_del_confirm")
+        do_del_btn = st.button("🗑️ 確定刪除",
+                               key="sf_del_btn",
+                               type="primary" if confirm else "secondary")
+        if do_del_btn:
+            if not confirm:
+                st.warning("請先勾選「確認刪除」")
+            else:
+                idx = del_options[del_choice]
+                _sf_delete(docs[idx])
+                _sf_clear_cache()
+                st.rerun()
 
 
 # ════════════════════════════════════════════════════════════════
@@ -599,36 +594,38 @@ def _view_detail(docs: list[dict]) -> None:
     st.subheader(f"{tl}  ·  {doc['id']}")
     st.caption(f"**{doc['customer']}**  ·  PO: {doc.get('po','—')}  ·  {doc.get('date','')}")
 
+    # ── 頂部按鈕（不在 columns 內呼叫 rerun，改用 flag）──
     ca, cb, cc, _ = st.columns([1.2, 1.2, 1.2, 6])
-    with ca:
-        if st.button("← 返回", key="sf_back", use_container_width=True):
-            st.session_state["sf_view"] = "list"
-            st.rerun()
-    with cb:
-        if st.button("📧 通知", key="sf_email_btn", use_container_width=True):
-            _email_popup(doc)
-    with cc:
-        if st.button("🗑️ 刪除", key="sf_det_del", use_container_width=True):
-            st.session_state["sf_del_confirm_detail"] = True
+    do_back   = ca.button("← 返回",   key="sf_back",    use_container_width=True)
+    do_email  = cb.button("📧 通知",   key="sf_email_btn", use_container_width=True)
+    do_del    = cc.button("🗑️ 刪除",  key="sf_det_del", use_container_width=True)
 
-    # 刪除確認
+    if do_back:
+        st.session_state["sf_view"] = "list"
+        st.session_state.pop("sf_del_confirm_detail", None)
+        st.rerun()
+
+    if do_email:
+        _email_popup(doc)
+
+    if do_del:
+        st.session_state["sf_del_confirm_detail"] = True
+
+    # ── 刪除確認 ──
     if st.session_state.get("sf_del_confirm_detail"):
         st.warning(f"確定要刪除 **{doc['id']}** 嗎？此動作無法復原。")
         cy, cn, _ = st.columns([1, 1, 6])
-        with cy:
-            if st.button("確定刪除", key="sf_del_yes", type="primary",
-                         use_container_width=True):
-                ok = _sf_delete(doc)
-                _sf_clear_cache()
-                st.session_state.pop("sf_del_confirm_detail", None)
-                st.session_state["sf_view"] = "list"
-                if ok:
-                    st.success("已刪除！")
-                st.rerun()
-        with cn:
-            if st.button("取消", key="sf_del_no", use_container_width=True):
-                st.session_state.pop("sf_del_confirm_detail", None)
-                st.rerun()
+        do_yes = cy.button("確定刪除", key="sf_del_yes", type="primary", use_container_width=True)
+        do_no  = cn.button("取消",     key="sf_del_no",  use_container_width=True)
+        if do_yes:
+            _sf_delete(doc)
+            _sf_clear_cache()
+            st.session_state.pop("sf_del_confirm_detail", None)
+            st.session_state["sf_view"] = "list"
+            st.rerun()
+        if do_no:
+            st.session_state.pop("sf_del_confirm_detail", None)
+            st.rerun()
 
     st.divider()
 
@@ -640,12 +637,14 @@ def _view_detail(docs: list[dict]) -> None:
     st.markdown("**📎 簽核文件**")
     _show_file(doc)
     st.divider()
+
+    st.markdown("**簽核流程**")
     _pipeline(doc["stations"])
 
     st.markdown("**✍ 簽名欄**")
     _sig_board(doc["stations"])
 
-    # info
+    # ── 文件資訊 ──
     info = {**doc.get("fields", {}),
             "申請人": doc.get("applicant", ""),
             "提交日期": doc.get("date", "")}
@@ -656,7 +655,7 @@ def _view_detail(docs: list[dict]) -> None:
 
     st.divider()
 
-    # action panel
+    # ── 審核動作 ──
     cur = next((s for s in doc["stations"] if s["status"] == "current"), None)
     if cur and doc["status"] == "pending":
         with st.container(border=True):
@@ -664,43 +663,48 @@ def _view_detail(docs: list[dict]) -> None:
 
             if HAS_CANVAS:
                 st.markdown("**請在下方空白區域手寫簽名**")
-                result = st_canvas(
+                canvas_result = st_canvas(
                     fill_color="rgba(255,255,255,0)",
                     stroke_width=2, stroke_color="#1a1410",
                     background_color="#ffffff",
                     height=130, width=460,
                     drawing_mode="freedraw",
-                    key=f"sf_cv_{idx}_{cur['role']}",
+                    key=f"sf_cv_{doc['id']}_{cur['role']}",
                 )
-                has_sig = (result.image_data is not None
-                           and result.image_data.sum() > 0)
+                has_sig = (canvas_result.image_data is not None
+                           and canvas_result.image_data.sum() > 0)
             else:
-                st.info("安裝 `streamlit-drawable-canvas` 可啟用手寫簽名功能。\n\n"
+                st.info("安裝 `streamlit-drawable-canvas` 可啟用手寫簽名。\n\n"
                         "```\npip install streamlit-drawable-canvas\n```")
                 has_sig = st.checkbox("☑ 確認以數位方式簽署",
-                                      key=f"sf_chk_{idx}_{cur['role']}")
+                                      key=f"sf_chk_{doc['id']}_{cur['role']}")
 
-            comment = st.text_area("審核意見（選填）", key=f"sf_cmt_{idx}_{cur['role']}")
+            comment = st.text_area("審核意見（選填）",
+                                   key=f"sf_cmt_{doc['id']}_{cur['role']}")
 
+            # 按鈕用 flag 方式，不在 columns 內直接 rerun
             cok, crej, _ = st.columns([2, 2, 6])
-            with cok:
-                if st.button("✅ 核准", type="primary",
-                             use_container_width=True, key=f"sf_ok_{idx}"):
-                    if not has_sig:
-                        st.error("請先完成簽名！")
-                    else:
-                        _do_approve(doc, cur, comment or "核准。")
-                        ok = _sf_save(doc)
-                        _sf_clear_cache()
-                        st.success("✅ 已核准，文件已儲存！")
-                        st.rerun()
-            with crej:
-                if st.button("❌ 退回", use_container_width=True, key=f"sf_rej_{idx}"):
-                    _do_reject(doc, cur, comment or "退回，請修改後重新提交。")
+            do_approve = cok.button("✅ 核准", type="primary",
+                                    use_container_width=True,
+                                    key=f"sf_ok_{doc['id']}")
+            do_reject  = crej.button("❌ 退回",
+                                     use_container_width=True,
+                                     key=f"sf_rej_{doc['id']}")
+
+            if do_approve:
+                if not has_sig:
+                    st.error("請先完成簽名！")
+                else:
+                    _do_approve(doc, cur, comment or "核准。")
                     _sf_save(doc)
                     _sf_clear_cache()
-                    st.warning("已退回。")
                     st.rerun()
+
+            if do_reject:
+                _do_reject(doc, cur, comment or "退回，請修改後重新提交。")
+                _sf_save(doc)
+                _sf_clear_cache()
+                st.rerun()
 
     elif doc["status"] == "approved":
         st.success("🎉 此文件已全部簽核通過！")
@@ -879,59 +883,56 @@ def _view_create() -> None:
 
     st.divider()
 
-    cok, ccancel, _ = st.columns([2, 1, 5])
-    with cok:
-        if st.button("🚀 提交並啟動流程", type="primary",
-                     use_container_width=True, key="sf_submit"):
-            if not doc_id.strip():
-                st.error("請填寫文件編號！")
-            elif not customer.strip():
-                st.error("請填寫客戶名稱！")
-            else:
-                # 若大檔存在 pending session，移到正式 key
-                pending_file = st.session_state.pop("sf_file_pending", "")
-                final_filedata = filedata or pending_file
+    # ── 提交 / 取消（不用 columns 包，避免 rerun 在 columns 內崩潰）──
+    do_submit = st.button("🚀 提交並啟動流程", type="primary", key="sf_submit")
+    do_cancel = st.button("取消", key="sf_cancel")
 
-                new_doc = {
-                    "_record_id": "",
-                    "id":         doc_id.strip(),
-                    "title":      f"{DOC_LABEL[tpl_key]} #{doc_id.strip()}",
-                    "doc_type":   tpl_key,
-                    "customer":   customer.strip(),
-                    "po":         po_ref.strip() if tpl_key != "inv" else doc_id.strip(),
-                    "amount":     amount.strip(),
-                    "status":     "pending",
-                    "date":       _today(),
-                    "applicant":  applicant,
-                    "email":      app_email,
-                    "filename":   filename,
-                    "filedata":   final_filedata,
-                    "fields":     {"金額": amount.strip(), **extra_fields},
-                    "stations":   new_stations,
-                    "logs": [{
-                        "person":  applicant,
-                        "action":  "提交簽核申請",
-                        "comment": f"{DOC_LABEL[tpl_key]} {doc_id.strip()}（附件：{filename or '無'}）",
-                        "time":    _now(),
-                        "type":    "submitted",
-                    }],
-                }
+    if do_cancel:
+        for k in ["sf_import", "sf_file_pending"]:
+            st.session_state.pop(k, None)
+        st.session_state["sf_view"] = "list"
+        st.rerun()
 
-                # 大檔另存 session
-                if final_filedata and not filedata:
-                    st.session_state[f"sf_file_{doc_id.strip()}"] = final_filedata
+    if do_submit:
+        if not doc_id.strip():
+            st.error("請填寫文件編號！")
+        elif not customer.strip():
+            st.error("請填寫客戶名稱！")
+        else:
+            pending_file   = st.session_state.pop("sf_file_pending", "")
+            final_filedata = filedata or pending_file
 
-                ok = _sf_save(new_doc)
-                _sf_clear_cache()
-                if "sf_import" in st.session_state:
-                    del st.session_state["sf_import"]
-                st.success(f"✅ {doc_id} 已提交！")
-                st.session_state["sf_view"] = "list"
-                st.rerun()
-    with ccancel:
-        if st.button("取消", use_container_width=True, key="sf_cancel"):
-            for k in ["sf_import","sf_file_pending"]:
-                st.session_state.pop(k, None)
+            new_doc = {
+                "_record_id": "",
+                "id":         doc_id.strip(),
+                "title":      f"{DOC_LABEL[tpl_key]} #{doc_id.strip()}",
+                "doc_type":   tpl_key,
+                "customer":   customer.strip(),
+                "po":         po_ref.strip() if tpl_key != "inv" else doc_id.strip(),
+                "amount":     amount.strip(),
+                "status":     "pending",
+                "date":       _today(),
+                "applicant":  applicant,
+                "email":      app_email,
+                "filename":   filename,
+                "filedata":   final_filedata,
+                "fields":     {"金額": amount.strip(), **extra_fields},
+                "stations":   new_stations,
+                "logs": [{
+                    "person":  applicant,
+                    "action":  "提交簽核申請",
+                    "comment": f"{DOC_LABEL[tpl_key]} {doc_id.strip()}（附件：{filename or '無'}）",
+                    "time":    _now(),
+                    "type":    "submitted",
+                }],
+            }
+
+            if final_filedata and not filedata:
+                st.session_state[f"sf_file_{doc_id.strip()}"] = final_filedata
+
+            _sf_save(new_doc)
+            _sf_clear_cache()
+            st.session_state.pop("sf_import", None)
             st.session_state["sf_view"] = "list"
             st.rerun()
 
@@ -1020,6 +1021,3 @@ def render_approval_page() -> None:
         _view_detail(docs)
     elif v == "create":
         _view_create()
-
-
-
