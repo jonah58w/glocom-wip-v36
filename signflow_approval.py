@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-signflow_approval.py  v2.0
+signflow_approval.py  v2.1
 ==========================
 GLOCOM 內部簽核平台 (SignFlow)
 
-改進：
-  - 用 Teable 獨立資料表儲存簽核資料，重新整理不消失，多人共用
-  - 新增簽核時可直接從現有訂單搜尋帶入，不需手動輸入
-  - 簡化欄位，減少人工輸入
+v2.1 修復：
+  - 所有 st.columns() 改用直接變數存取（cols[0].widget()），
+    避免 with 區塊殘留導致 st.rerun() 靜默失敗
+  - 「提交並啟動流程」與「確定刪除」按鈕無反應問題已修正
 
 部署：
   1. 把此檔放到 repo 根目錄
@@ -43,32 +43,26 @@ def _secret(key: str, default: str = "") -> str:
     except Exception:
         return os.environ.get(key, default)
 
-# 主訂單表（已有，用來查訂單帶入）
 _ORDERS_URL   = _secret("TEABLE_TABLE_URL",
     "https://app.teable.ai/api/table/tbl6c05EPXYtJcZfeir/record")
-
-# SignFlow 專用表（新建，用來儲存簽核單）
-# 若尚未建立，資料暫存 session（功能仍可用，但重整消失）
 _SF_URL = _secret("SIGNFLOW_TABLE_URL", "")
-
 _TOKEN   = _secret("TEABLE_TOKEN", "")
 _HEADERS = {"Authorization": f"Bearer {_TOKEN}", "Content-Type": "application/json"}
 
-# ── SignFlow Teable 表欄位名 ──────────────────────────────────────
-SF_ID       = "sf_id"        # 文件編號
-SF_TYPE     = "sf_type"      # inv / pck / wip
+SF_ID       = "sf_id"
+SF_TYPE     = "sf_type"
 SF_CUSTOMER = "sf_customer"
-SF_PO       = "sf_po"        # 對應訂單 PO#
+SF_PO       = "sf_po"
 SF_AMOUNT   = "sf_amount"
-SF_STATUS   = "sf_status"    # pending / approved / rejected
-SF_STATIONS = "sf_stations"  # JSON
-SF_LOGS     = "sf_logs"      # JSON
-SF_FIELDS   = "sf_fields"    # JSON
+SF_STATUS   = "sf_status"
+SF_STATIONS = "sf_stations"
+SF_LOGS     = "sf_logs"
+SF_FIELDS   = "sf_fields"
 SF_DATE     = "sf_date"
 SF_APPLICANT= "sf_applicant"
 SF_EMAIL    = "sf_email"
-SF_FILENAME = "sf_filename"  # 上傳的原始檔名
-SF_FILEDATA = "sf_filedata"  # base64 檔案內容（≤ 500KB 存 Teable）
+SF_FILENAME = "sf_filename"
+SF_FILEDATA = "sf_filedata"
 
 
 # ════════════════════════════════════════════════════════════════
@@ -79,7 +73,6 @@ STATUS_LABEL = {"approved": "已核准", "current": "審核中",
                 "pending": "待審核", "rejected": "已退回"}
 DOC_LABEL    = {"inv": "🧾 Invoice", "pck": "📦 Packing List", "wip": "🏭 WIP"}
 
-# 預設簽核人（可自行修改）
 DEFAULT_APPROVERS = {
     "inv": [
         {"person": "業務",   "email": "", "role": "業務確認"},
@@ -89,11 +82,11 @@ DEFAULT_APPROVERS = {
         {"person": "總經理", "email": "", "role": "總經理核定"},
     ],
     "pck": [
-        {"person": "業務",   "email": "", "role": "業務確認"},
-        {"person": "倉儲",   "email": "", "role": "倉儲核對"},
-        {"person": "品管",   "email": "", "role": "品管放行"},
+        {"person": "業務",    "email": "", "role": "業務確認"},
+        {"person": "倉儲",    "email": "", "role": "倉儲核對"},
+        {"person": "品管",    "email": "", "role": "品管放行"},
         {"person": "出貨主管","email": "", "role": "出貨主管"},
-        {"person": "總監",   "email": "", "role": "總監核定"},
+        {"person": "總監",    "email": "", "role": "總監核定"},
     ],
     "wip": [
         {"person": "業務",   "email": "", "role": "業務接單確認"},
@@ -122,7 +115,6 @@ def _today() -> str:
 
 @st.cache_data(ttl=30)
 def _load_orders() -> pd.DataFrame:
-    """載入主訂單表，用來搜尋帶入"""
     if not _TOKEN:
         return pd.DataFrame()
     try:
@@ -148,9 +140,7 @@ def _load_orders() -> pd.DataFrame:
 
 
 def _sf_load_all() -> list[dict]:
-    """從 SignFlow 表讀取所有簽核單"""
     if not _SF_URL or not _TOKEN:
-        # fallback: session only
         return st.session_state.get("sf_docs_fallback", _demo_docs())
     try:
         rows, page_token = [], None
@@ -199,7 +189,6 @@ def _sf_load_all() -> list[dict]:
 
 
 def _sf_save(doc: dict) -> bool:
-    """新增或更新一筆簽核單到 Teable"""
     payload = {
         SF_ID:       doc["id"],
         SF_TYPE:     doc["doc_type"],
@@ -217,7 +206,6 @@ def _sf_save(doc: dict) -> bool:
         SF_FIELDS:   json.dumps(doc["fields"],   ensure_ascii=False),
     }
     if not _SF_URL or not _TOKEN:
-        # fallback: session only
         docs = st.session_state.get("sf_docs_fallback", [])
         rec_id = doc.get("_record_id", "")
         if rec_id:
@@ -252,10 +240,8 @@ def _sf_save(doc: dict) -> bool:
 
 
 def _sf_delete(doc: dict) -> bool:
-    """從 Teable 刪除一筆簽核單"""
     rec_id = doc.get("_record_id", "")
     if not _SF_URL or not _TOKEN:
-        # fallback: session only
         docs = st.session_state.get("sf_docs_fallback", [])
         st.session_state["sf_docs_fallback"] = [
             d for d in docs if d.get("_record_id") != rec_id
@@ -275,7 +261,6 @@ def _sf_delete(doc: dict) -> bool:
 
 
 def _sf_clear_cache() -> None:
-    """清除 Teable 資料快取，強制下次重新載入"""
     try:
         st.cache_data.clear()
     except Exception:
@@ -283,7 +268,7 @@ def _sf_clear_cache() -> None:
 
 
 # ════════════════════════════════════════════════════════════════
-#  DEMO DATA（只在 SignFlow 表空的時候顯示）
+#  DEMO DATA
 # ════════════════════════════════════════════════════════════════
 def _demo_docs() -> list[dict]:
     def s(role, person, status, time=None):
@@ -359,7 +344,6 @@ _CSS = """<style>
 .sf-lcomment{font-size:12px;background:#f5f0e8;border-left:3px solid #c8bfaa;
   padding:6px 10px;border-radius:0 4px 4px 0;margin-top:3px;}
 .sf-lcomment.ac{border-left-color:#2c7a4b;}.sf-lcomment.rc{border-left-color:#c0392b;}
-
 </style>"""
 
 
@@ -369,9 +353,9 @@ _CSS = """<style>
 def _pipeline(stations: list[dict]) -> None:
     html = '<div class="sf-pipeline">'
     for i, s in enumerate(stations):
-        sc = s["status"]
-        t  = f'<div class="sf-stime">{s["time"]}</div>' if s.get("time") else ""
-        sg = '<div class="sf-ssig">✍ 已簽名</div>'     if s.get("signed") else ""
+        sc  = s["status"]
+        t   = f'<div class="sf-stime">{s["time"]}</div>' if s.get("time") else ""
+        sg  = '<div class="sf-ssig">✍ 已簽名</div>'     if s.get("signed") else ""
         arr = "" if i == len(stations) - 1 else '<div class="sf-arrow">›</div>'
         html += f"""
 <div class="sf-station">
@@ -447,11 +431,9 @@ def _do_reject(doc: dict, station: dict, comment: str) -> None:
 #  FILE PREVIEW
 # ════════════════════════════════════════════════════════════════
 def _show_file(doc: dict) -> None:
-    """顯示已上傳的文件"""
     filename = doc.get("filename", "")
     filedata = doc.get("filedata", "")
 
-    # 先檢查 session（大檔案）
     session_key = f"sf_file_{doc['id']}"
     if not filedata and session_key in st.session_state:
         filedata = st.session_state[session_key]
@@ -473,7 +455,6 @@ def _show_file(doc: dict) -> None:
         st.caption("⚠️ 檔案解碼失敗")
         return
 
-    # 下載按鈕（所有格式都支援）
     mime_map = {
         "pdf":  "application/pdf",
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -493,7 +474,6 @@ def _show_file(doc: dict) -> None:
         key=f"sf_dl_{doc['id']}",
     )
 
-    # PDF → 直接預覽
     if ext == "pdf":
         b64 = base64.b64encode(file_bytes).decode()
         st.markdown(
@@ -501,14 +481,10 @@ def _show_file(doc: dict) -> None:
             f'width="100%" height="600px" style="border:1px solid #ddd;border-radius:8px;"></iframe>',
             unsafe_allow_html=True,
         )
-
-    # 圖片 → 直接預覽
     elif ext in ("png", "jpg", "jpeg"):
         st.image(file_bytes, use_container_width=True)
-
-    # Word / Excel → 提示下載後開啟
     elif ext in ("docx", "doc", "xlsx", "xls"):
-        st.info(f"📄 Word/Excel 檔案請點上方「⬇️ 下載」後在電腦開啟查看。")
+        st.info("📄 Word/Excel 檔案請點上方「⬇️ 下載」後在電腦開啟查看。")
 
 
 # ════════════════════════════════════════════════════════════════
@@ -551,21 +527,20 @@ def _view_list(docs: list[dict]) -> None:
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     st.divider()
 
-    # ── 進入詳情 ──
     st.caption("點擊下方按鈕進入詳情或刪除")
-    n = min(len(docs), 5)
+    n    = min(len(docs), 5)
     cols = st.columns(n)
     for i, d in enumerate(docs[:n * 4]):
-        with cols[i % n]:
-            icon    = {"inv": "🧾", "pck": "📦", "wip": "🏭"}.get(d["doc_type"], "📄")
-            st_icon = {"pending": "🟡", "approved": "✅", "rejected": "❌"}[d["status"]]
-            if st.button(f"{icon} {d['id']}\n{st_icon}",
-                         key=f"sf_open_{i}", use_container_width=True):
-                st.session_state["sf_view"]    = "detail"
-                st.session_state["sf_current"] = i
-                st.rerun()
+        icon    = {"inv": "🧾", "pck": "📦", "wip": "🏭"}.get(d["doc_type"], "📄")
+        st_icon = {"pending": "🟡", "approved": "✅", "rejected": "❌"}[d["status"]]
+        # ★ 修復：直接用 cols[i%n].button，不用 with 區塊
+        if cols[i % n].button(f"{icon} {d['id']}\n{st_icon}",
+                              key=f"sf_open_{i}", use_container_width=True):
+            st.session_state["sf_view"]    = "detail"
+            st.session_state["sf_current"] = i
+            st.rerun()
 
-    # ── 刪除區 ──
+    # ── 刪除區 ──────────────────────────────────────────────
     st.divider()
     with st.expander("🗑️ 刪除簽核單", expanded=False):
         st.caption("選擇要刪除的文件，刪除後無法復原。")
@@ -574,10 +549,14 @@ def _view_list(docs: list[dict]) -> None:
         del_choice = st.selectbox("選擇要刪除的文件",
                                   list(del_options.keys()),
                                   key="sf_del_select")
-        confirm  = st.checkbox("確認刪除", key="sf_del_confirm")
-        do_del_btn = st.button("🗑️ 確定刪除",
-                               key="sf_del_btn",
-                               type="primary" if confirm else "secondary")
+        confirm = st.checkbox("確認刪除", key="sf_del_confirm")
+
+        # ★ 修復：確定刪除按鈕直接在 expander 最外層，不包在 columns 內
+        do_del_btn = st.button(
+            "🗑️ 確定刪除",
+            key="sf_del_btn",
+            type="primary" if confirm else "secondary",
+        )
         if do_del_btn:
             if not confirm:
                 st.warning("請先勾選「確認刪除」")
@@ -585,6 +564,7 @@ def _view_list(docs: list[dict]) -> None:
                 idx = del_options[del_choice]
                 _sf_delete(docs[idx])
                 _sf_clear_cache()
+                st.session_state["sf_del_confirm"] = False
                 st.rerun()
 
 
@@ -601,11 +581,11 @@ def _view_detail(docs: list[dict]) -> None:
     st.subheader(f"{tl}  ·  {doc['id']}")
     st.caption(f"**{doc['customer']}**  ·  PO: {doc.get('po','—')}  ·  {doc.get('date','')}")
 
-    # ── 頂部按鈕（不在 columns 內呼叫 rerun，改用 flag）──
-    ca, cb, cc, _ = st.columns([1.2, 1.2, 1.2, 6])
-    do_back   = ca.button("← 返回",   key="sf_back",    use_container_width=True)
-    do_email  = cb.button("📧 通知",   key="sf_email_btn", use_container_width=True)
-    do_del    = cc.button("🗑️ 刪除",  key="sf_det_del", use_container_width=True)
+    # ★ 修復：使用直接變數存取，不用 with 區塊
+    nav_cols = st.columns([1.2, 1.2, 1.2, 6])
+    do_back  = nav_cols[0].button("← 返回",  key="sf_back",      use_container_width=True)
+    do_email = nav_cols[1].button("📧 通知",  key="sf_email_btn", use_container_width=True)
+    do_del   = nav_cols[2].button("🗑️ 刪除", key="sf_det_del",   use_container_width=True)
 
     if do_back:
         st.session_state["sf_view"] = "list"
@@ -618,12 +598,13 @@ def _view_detail(docs: list[dict]) -> None:
     if do_del:
         st.session_state["sf_del_confirm_detail"] = True
 
-    # ── 刪除確認 ──
+    # ── 刪除確認 ────────────────────────────────────────────
     if st.session_state.get("sf_del_confirm_detail"):
         st.warning(f"確定要刪除 **{doc['id']}** 嗎？此動作無法復原。")
-        cy, cn, _ = st.columns([1, 1, 6])
-        do_yes = cy.button("確定刪除", key="sf_del_yes", type="primary", use_container_width=True)
-        do_no  = cn.button("取消",     key="sf_del_no",  use_container_width=True)
+        # ★ 修復：使用直接變數存取
+        del_cols = st.columns([1, 1, 6])
+        do_yes = del_cols[0].button("確定刪除", key="sf_del_yes", type="primary", use_container_width=True)
+        do_no  = del_cols[1].button("取消",     key="sf_del_no",  use_container_width=True)
         if do_yes:
             _sf_delete(doc)
             _sf_clear_cache()
@@ -640,7 +621,6 @@ def _view_detail(docs: list[dict]) -> None:
     total = len(doc["stations"])
     st.progress(done / total, text=f"簽核進度：{done}/{total}（{int(done/total*100)}%）")
 
-    # ── 附件預覽 ──
     st.markdown("**📎 簽核文件**")
     _show_file(doc)
     st.divider()
@@ -651,18 +631,16 @@ def _view_detail(docs: list[dict]) -> None:
     st.markdown("**✍ 簽名欄**")
     _sig_board(doc["stations"])
 
-    # ── 文件資訊 ──
     info = {**doc.get("fields", {}),
             "申請人": doc.get("applicant", ""),
             "提交日期": doc.get("date", "")}
-    cols3 = st.columns(3)
+    info_cols = st.columns(3)
     for i, (k, v) in enumerate(info.items()):
-        with cols3[i % 3]:
-            st.metric(k, v or "—")
+        info_cols[i % 3].metric(k, v or "—")
 
     st.divider()
 
-    # ── 審核動作 ──
+    # ── 審核動作 ──────────────────────────────────────────────
     cur = next((s for s in doc["stations"] if s["status"] == "current"), None)
     if cur and doc["status"] == "pending":
         with st.container(border=True):
@@ -689,14 +667,14 @@ def _view_detail(docs: list[dict]) -> None:
             comment = st.text_area("審核意見（選填）",
                                    key=f"sf_cmt_{doc['id']}_{cur['role']}")
 
-            # 按鈕用 flag 方式，不在 columns 內直接 rerun
-            cok, crej, _ = st.columns([2, 2, 6])
-            do_approve = cok.button("✅ 核准", type="primary",
-                                    use_container_width=True,
-                                    key=f"sf_ok_{doc['id']}")
-            do_reject  = crej.button("❌ 退回",
-                                     use_container_width=True,
-                                     key=f"sf_rej_{doc['id']}")
+            # ★ 修復：使用直接變數存取
+            act_cols   = st.columns([2, 2, 6])
+            do_approve = act_cols[0].button("✅ 核准", type="primary",
+                                            use_container_width=True,
+                                            key=f"sf_ok_{doc['id']}")
+            do_reject  = act_cols[1].button("❌ 退回",
+                                            use_container_width=True,
+                                            key=f"sf_rej_{doc['id']}")
 
             if do_approve:
                 if not has_sig:
@@ -724,7 +702,7 @@ def _view_detail(docs: list[dict]) -> None:
 
 
 # ════════════════════════════════════════════════════════════════
-#  VIEW: CREATE  ── 從訂單帶入，簡化輸入
+#  VIEW: CREATE
 # ════════════════════════════════════════════════════════════════
 def _view_create() -> None:
     st.subheader("新增簽核文件")
@@ -738,16 +716,14 @@ def _view_create() -> None:
     )
 
     filename  = ""
-    filedata  = ""   # base64
-    file_bytes_preview = None
+    filedata  = ""
 
     if uploaded:
-        filename    = uploaded.name
-        raw_bytes   = uploaded.getvalue()
-        file_size   = len(raw_bytes)
+        filename  = uploaded.name
+        raw_bytes = uploaded.getvalue()
+        file_size = len(raw_bytes)
         st.success(f"✅ 已選取：{filename}（{file_size/1024:.1f} KB）")
 
-        # 預覽
         ext = filename.rsplit(".", 1)[-1].lower()
         if ext == "pdf":
             b64_preview = base64.b64encode(raw_bytes).decode()
@@ -762,21 +738,18 @@ def _view_create() -> None:
         elif ext in ("docx", "doc", "xlsx", "xls"):
             st.info("📄 Word/Excel 提交後可下載查看。")
 
-        # 500KB 以下存 Teable，否則只存 session
         if file_size <= 500 * 1024:
             filedata = base64.b64encode(raw_bytes).decode()
         else:
             st.warning(f"⚠️ 檔案 {file_size/1024:.0f} KB > 500 KB，"
                        f"將暫存本次 session。建議壓縮後再上傳，或改用 Google Drive 連結。")
-            # 暫存 session，之後在 detail 可讀取
-            st.session_state[f"sf_file_pending"] = base64.b64encode(raw_bytes).decode()
+            st.session_state["sf_file_pending"] = base64.b64encode(raw_bytes).decode()
 
     st.divider()
 
     # ── STEP 2: 基本資訊 ─────────────────────────────────────
     st.markdown("**STEP 2 · 基本資訊**（可從訂單帶入）")
 
-    # 訂單搜尋帶入
     with st.expander("🔍 從現有訂單搜尋帶入", expanded=False):
         orders_df = _load_orders()
         if not orders_df.empty:
@@ -819,7 +792,6 @@ def _view_create() -> None:
 
     imp = st.session_state.get("sf_import", {})
 
-    # 類型選擇
     tpl_key = st.radio(
         "簽核類型", ["inv", "pck", "wip"],
         format_func=lambda x: {"inv": "🧾 Invoice",
@@ -829,56 +801,60 @@ def _view_create() -> None:
         key="sf_tpl_sel",
     )
 
-    t = tpl_key
+    t      = tpl_key
     po_ref = ""
 
-    c1, c2 = st.columns(2)
+    # ★ 修復：所有 columns 改用直接變數存取，完全移除 with c1: / with c2: 區塊
     if tpl_key == "inv":
-        with c1:
-            doc_id   = st.text_input("Invoice 編號 *", value=imp.get("po",""), key=f"sf_doc_id_{t}")
-            customer = st.text_input("客戶名稱 *", value=imp.get("customer",""), key=f"sf_cust_{t}")
-        with c2:
-            amount   = st.text_input("金額", value=imp.get("amount",""), key=f"sf_amt_{t}")
-            terms    = st.selectbox("付款條件", ["Net 30","Net 60","Net 90","T/T in advance","L/C"], key=f"sf_terms_{t}")
+        row1     = st.columns(2)
+        doc_id   = row1[0].text_input("Invoice 編號 *", value=imp.get("po",""),       key=f"sf_doc_id_{t}")
+        customer = row1[0].text_input("客戶名稱 *",     value=imp.get("customer",""), key=f"sf_cust_{t}")
+        amount   = row1[1].text_input("金額",            value=imp.get("amount",""),   key=f"sf_amt_{t}")
+        terms    = row1[1].selectbox("付款條件",
+                                     ["Net 30","Net 60","Net 90","T/T in advance","L/C"],
+                                     key=f"sf_terms_{t}")
         extra_fields = {"付款條件": terms}
 
     elif tpl_key == "pck":
-        with c1:
-            doc_id   = st.text_input("PL 編號 *", value="PL-"+_today().replace("-","")[:6]+"-", key=f"sf_doc_id_{t}")
-            po_ref   = st.text_input("對應 PO#", value=imp.get("po",""), key=f"sf_poref_{t}")
-            customer = st.text_input("客戶名稱 *", value=imp.get("customer",""), key=f"sf_cust_{t}")
-        with c2:
-            amount   = st.text_input("金額", value=imp.get("amount",""), key=f"sf_amt_{t}")
-            dest     = st.text_input("目的地", key=f"sf_dest_{t}")
-            ship_m   = st.selectbox("運輸方式", ["Sea Freight","Air Freight","Express"], key=f"sf_ship_{t}")
+        row1     = st.columns(2)
+        doc_id   = row1[0].text_input("PL 編號 *",
+                                      value="PL-"+_today().replace("-","")[:6]+"-",
+                                      key=f"sf_doc_id_{t}")
+        po_ref   = row1[0].text_input("對應 PO#",   value=imp.get("po",""),       key=f"sf_poref_{t}")
+        customer = row1[0].text_input("客戶名稱 *", value=imp.get("customer",""), key=f"sf_cust_{t}")
+        amount   = row1[1].text_input("金額",        value=imp.get("amount",""),   key=f"sf_amt_{t}")
+        dest     = row1[1].text_input("目的地",                                    key=f"sf_dest_{t}")
+        ship_m   = row1[1].selectbox("運輸方式",
+                                     ["Sea Freight","Air Freight","Express"],
+                                     key=f"sf_ship_{t}")
         extra_fields = {"對應PO": po_ref, "目的地": dest, "運輸": ship_m}
 
     else:  # wip
-        with c1:
-            doc_id   = st.text_input("WIP 單號 *",
-                                     value=imp.get("po", f"WIP-{_today()[:7]}-"),
-                                     key=f"sf_doc_id_{t}")
-            po_ref   = st.text_input("客戶 PO# / 西拓訂單編號",
-                                     value=imp.get("po",""), key=f"sf_poref_{t}")
-            customer = st.text_input("客戶名稱 *", value=imp.get("customer",""), key=f"sf_cust_{t}")
-        with c2:
-            amount   = st.text_input("金額", value=imp.get("amount",""), key=f"sf_amt_{t}")
-            model    = st.text_input("產品型號 / 料號", value=imp.get("part",""), key=f"sf_model_{t}")
-            etd      = st.date_input("交貨期 ETD", key=f"sf_etd_{t}")
+        row1     = st.columns(2)
+        doc_id   = row1[0].text_input("WIP 單號 *",
+                                      value=imp.get("po", f"WIP-{_today()[:7]}-"),
+                                      key=f"sf_doc_id_{t}")
+        po_ref   = row1[0].text_input("客戶 PO# / 西拓訂單編號",
+                                      value=imp.get("po",""), key=f"sf_poref_{t}")
+        customer = row1[0].text_input("客戶名稱 *", value=imp.get("customer",""), key=f"sf_cust_{t}")
+        amount   = row1[1].text_input("金額",        value=imp.get("amount",""),   key=f"sf_amt_{t}")
+        model    = row1[1].text_input("產品型號 / 料號", value=imp.get("part",""), key=f"sf_model_{t}")
+        etd      = row1[1].date_input("交貨期 ETD",                                key=f"sf_etd_{t}")
         extra_fields = {"對應PO": po_ref, "料號": model, "ETD": str(etd)}
 
     st.divider()
 
     # ── STEP 3: 簽核人員 ─────────────────────────────────────
     st.markdown("**STEP 3 · 簽核人員**")
-    defaults = DEFAULT_APPROVERS[tpl_key]
+    defaults     = DEFAULT_APPROVERS[tpl_key]
     new_stations = []
     for i, d in enumerate(defaults):
-        ca, cb, cc = st.columns([2, 3, 2])
-        name  = ca.text_input(f"第{i+1}關 姓名", value=d["person"], key=f"sf_ap_n_{i}")
-        email = cb.text_input("Email",            value=d["email"],  key=f"sf_ap_e_{i}")
+        # ★ 修復：使用直接變數存取，不用 with 區塊
+        ap_cols = st.columns([2, 3, 2])
+        name  = ap_cols[0].text_input(f"第{i+1}關 姓名", value=d["person"], key=f"sf_ap_n_{i}")
+        email = ap_cols[1].text_input("Email",            value=d["email"],  key=f"sf_ap_e_{i}")
         ridx  = ALL_ROLES.index(d["role"]) if d["role"] in ALL_ROLES else 0
-        role  = cc.selectbox("職責", ALL_ROLES, index=ridx,         key=f"sf_ap_r_{i}")
+        role  = ap_cols[2].selectbox("職責", ALL_ROLES, index=ridx,         key=f"sf_ap_r_{i}")
         new_stations.append({
             "name": role, "person": name, "role": role, "email": email,
             "status": "current" if i == 0 else "pending",
@@ -890,7 +866,7 @@ def _view_create() -> None:
 
     st.divider()
 
-    # ── 提交 / 取消（不用 columns 包，避免 rerun 在 columns 內崩潰）──
+    # ★ 修復：提交 / 取消 按鈕完全在最外層，不在任何 columns / with 區塊內
     do_submit = st.button("🚀 提交並啟動流程", type="primary", key="sf_submit")
     do_cancel = st.button("取消", key="sf_cancel")
 
@@ -944,7 +920,6 @@ def _view_create() -> None:
             st.rerun()
 
 
-
 # ════════════════════════════════════════════════════════════════
 #  EMAIL POPUP
 # ════════════════════════════════════════════════════════════════
@@ -985,13 +960,9 @@ def _email_popup(doc: dict) -> None:
 def render_approval_page() -> None:
     st.markdown(_CSS, unsafe_allow_html=True)
 
-    # init session
     if "sf_view"    not in st.session_state: st.session_state["sf_view"]    = "list"
     if "sf_current" not in st.session_state: st.session_state["sf_current"] = 0
 
-    # SIGNFLOW_TABLE_URL 未設定時靜默處理（不顯示警告）
-
-    # header
     st.markdown(
         "## SignFlow 簽核平台 "
         "<span style='font-size:14px;color:#c8973a;font-weight:400'>"
@@ -1000,28 +971,23 @@ def render_approval_page() -> None:
     )
     st.caption("Invoice  /  Packing List  /  新訂單 WIP  —  5～6 人簽核 + 手寫電子簽名")
 
-    # nav
-    c1, c2, c3, _ = st.columns([1.4, 1.4, 1.2, 6])
-    v = st.session_state["sf_view"]
-    with c1:
-        if st.button("📋 總覽", use_container_width=True,
-                     type="primary" if v == "list" else "secondary", key="sf_nl"):
-            st.session_state["sf_view"] = "list"; st.rerun()
-    with c2:
-        if st.button("🔍 詳情", use_container_width=True,
-                     type="primary" if v == "detail" else "secondary", key="sf_nd"):
-            st.session_state["sf_view"] = "detail"; st.rerun()
-    with c3:
-        if st.button("＋ 新增", use_container_width=True,
-                     type="primary" if v == "create" else "secondary", key="sf_nc"):
-            st.session_state["sf_view"] = "create"; st.rerun()
+    # ★ 修復：nav 也改用直接變數存取
+    v        = st.session_state["sf_view"]
+    nav_cols = st.columns([1.4, 1.4, 1.2, 6])
+    if nav_cols[0].button("📋 總覽", use_container_width=True,
+                          type="primary" if v == "list"   else "secondary", key="sf_nl"):
+        st.session_state["sf_view"] = "list";   st.rerun()
+    if nav_cols[1].button("🔍 詳情", use_container_width=True,
+                          type="primary" if v == "detail" else "secondary", key="sf_nd"):
+        st.session_state["sf_view"] = "detail"; st.rerun()
+    if nav_cols[2].button("＋ 新增", use_container_width=True,
+                          type="primary" if v == "create" else "secondary", key="sf_nc"):
+        st.session_state["sf_view"] = "create"; st.rerun()
 
     st.divider()
 
-    # load docs
     docs = _sf_load_all()
 
-    # route
     if v == "list":
         _view_list(docs)
     elif v == "detail":
