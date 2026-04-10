@@ -10,11 +10,17 @@ v4：加入統計圖表
   - build_subset_mask "unshipped" 模式移除 year_ok 年份篩選
 
 [修正 v4.2]
-  - 業績明細表月份選單預設改為當月（原本預設清單最末項，導致顯示 12 月）
+  - 業績明細表月份選單預設改為當月
+
+[修正 v4.3]
+  - SANDY_NEW_ORDER_SPECS 加入 Working Gerber Approval、Engineering Question
+  - SANDY_INTERNAL_WIP_SPECS 加入 Working Gerber Approval、Engineering Question
+  - render_teable_subset_table 加入 Excel 下載（自動欄寬）
 """
 
 from __future__ import annotations
 
+import io
 import re
 import json
 
@@ -134,7 +140,6 @@ def _to_naive_ns(parsed: pd.Series) -> "np.ndarray":
 def parse_mixed_date_series(series: pd.Series | None) -> pd.Series:
     """
     混合格式日期解析，相容 Python 3.14 + 新版 pandas。
-    改用 numpy array 作底層，避免 .loc assign 時的 dtype upcast AssertionError。
     """
     import numpy as np
 
@@ -145,7 +150,7 @@ def parse_mixed_date_series(series: pd.Series | None) -> pd.Series:
     s = s.replace({"": None, "nan": None, "NaT": None, "None": None})
 
     result = np.full(len(s), np.datetime64("NaT"), dtype="datetime64[ns]")
-    s_vals  = s.values          # numpy array，方便 boolean index
+    s_vals  = s.values
     s_notna = s.notna().values
 
     # ① Excel serial number
@@ -162,7 +167,7 @@ def parse_mixed_date_series(series: pd.Series | None) -> pd.Series:
             parsed = pd.to_datetime(pd.Series(s_vals[rem]), format=fmt, errors="coerce")
             result[rem] = _to_naive_ns(parsed)
 
-    # ③ "Jan 01 26" 等英文月份
+    # ③ 英文月份
     rem = np.isnat(result) & s_notna
     if rem.any():
         cleaned = (pd.Series(s_vals[rem])
@@ -172,7 +177,7 @@ def parse_mixed_date_series(series: pd.Series | None) -> pd.Series:
         parsed = pd.to_datetime(cleaned, format="%b %d %y", errors="coerce")
         result[rem] = _to_naive_ns(parsed)
 
-    # ④ 最後 fallback（inferring）
+    # ④ fallback
     rem = np.isnat(result) & s_notna
     if rem.any():
         parsed = pd.to_datetime(pd.Series(s_vals[rem]), errors="coerce")
@@ -421,6 +426,8 @@ SANDY_NEW_ORDER_SPECS = [
     ("工廠出貨事項",          col_candidates("工廠出貨事項", "工廠出貨注意事項")),
     ("新/舊料號",             col_candidates("新/舊料號")),
     ("板層",                  col_candidates("板層")),
+    ("Working Gerber Approval", col_candidates("Working Gerber Approval", "Working\nGerber\nApproval", "WorkingGerberApproval")),
+    ("Engineering Question",    col_candidates("Engineering Question", "Engineering\nQuestion", "EngineeringQuestion")),
 ]
 
 SANDY_INTERNAL_WIP_SPECS = [
@@ -450,6 +457,8 @@ SANDY_INTERNAL_WIP_SPECS = [
     ("KGs",                   col_candidates("KGs", "重量")),
     ("Pricing & Qty issue",   col_candidates("Pricing & Qty issue")),
     ("T/T",                   col_candidates("T/T")),
+    ("Working Gerber Approval", col_candidates("Working Gerber Approval", "Working\nGerber\nApproval", "WorkingGerberApproval")),
+    ("Engineering Question",    col_candidates("Engineering Question", "Engineering\nQuestion", "EngineeringQuestion")),
     ("Note",                  REMARK_CANDIDATES),
 ]
 
@@ -536,12 +545,35 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
 # ================================
 
 def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subset_mode: str):
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
+
     st.subheader(title)
     mask     = build_subset_mask(source_df, subset_mode)
     filtered = source_df[mask].copy()
     view_df, _ = build_teable_view_df(filtered, specs)
     st.caption(f"共 {len(view_df)} 筆")
     st.dataframe(view_df, use_container_width=True, hide_index=True)
+
+    # ── Excel 下載（自動欄寬）────────────────────────────────────────────────
+    wb = Workbook()
+    ws = wb.active
+    ws.append(list(view_df.columns))
+    for row in view_df.itertuples(index=False):
+        ws.append(list(row))
+    for col_idx, col in enumerate(ws.columns, 1):
+        max_len = max((len(str(cell.value or "")) for cell in col), default=8)
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 4, 50)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    st.download_button(
+        "📥 下載 Excel",
+        data=buf,
+        file_name=f"{title}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 
 # ================================
@@ -605,8 +637,6 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
                 valid_periods.add(p)
 
     periods = sorted(valid_periods)
-
-    # ✅ 修正 v4.2：預設選當月，不再用 len(periods)-1（會選到未來月份）
     default_index = next(
         (i for i, p in enumerate(periods) if p == current_period),
         len(periods) - 1
