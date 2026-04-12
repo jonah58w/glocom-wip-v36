@@ -16,6 +16,10 @@ v4：加入統計圖表
   - SANDY_NEW_ORDER_SPECS 加入 Working Gerber Approval、Engineering Question
   - SANDY_INTERNAL_WIP_SPECS 加入 Working Gerber Approval、Engineering Question
   - render_teable_subset_table 加入 Excel 下載（自動欄寬）
+
+[修正 v5.0]
+  - render_sales_detail_from_teable 加入三個 Tab：
+      業績明細 / 報關單價 / 匯 HK OBU 金額
 """
 
 from __future__ import annotations
@@ -27,6 +31,13 @@ import json
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+
+# ── 報關單價 & OBU 模組（新增）──────────────────────────────────────────────
+try:
+    from obu_page import render_customs_price_tab, render_obu_calc_tab
+    _OBU_AVAILABLE = True
+except ImportError:
+    _OBU_AVAILABLE = False
 
 # ================================
 # 歷史移轉金額（一次性，寫死）
@@ -578,7 +589,8 @@ def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subse
 
 
 # ================================
-# 業績明細表
+# 業績明細表（主函式）
+# v5.0：加入三個 Tab
 # ================================
 
 def render_sales_detail_from_teable(source_df: pd.DataFrame):
@@ -587,6 +599,43 @@ def render_sales_detail_from_teable(source_df: pd.DataFrame):
         st.info("目前沒有資料。")
         return
 
+    # ── Tab 結構 ─────────────────────────────────────────────────────────────
+    if _OBU_AVAILABLE:
+        tab1, tab2, tab3 = st.tabs([
+            "📊 業績明細",
+            "🏷️ 報關單價",
+            "🏦 匯 HK OBU 金額",
+        ])
+    else:
+        tab1 = st.container()
+        tab2 = tab3 = None
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 1：原有業績明細邏輯（完全保留）
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab1:
+        _render_sales_detail_body(source_df)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 2：報關單價核算
+    # ══════════════════════════════════════════════════════════════════════════
+    if _OBU_AVAILABLE and tab2 is not None:
+        with tab2:
+            render_customs_price_tab()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 3：匯 HK OBU 金額
+    # ══════════════════════════════════════════════════════════════════════════
+    if _OBU_AVAILABLE and tab3 is not None:
+        with tab3:
+            render_obu_calc_tab()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 原有業績明細邏輯（抽成獨立函式，邏輯零修改）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _render_sales_detail_body(source_df: pd.DataFrame):
     # ── 欄位偵測 ─────────────────────────────────────────────────────────────
     order_col     = find_col(source_df, ORDER_DATE_CANDIDATES)
     actual_col    = find_col(source_df, ACTUAL_SHIP_DATE_CANDIDATES)
