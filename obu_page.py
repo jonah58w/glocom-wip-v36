@@ -140,37 +140,64 @@ def _fetch_obu_table(token: str) -> pd.DataFrame:
 # 月份篩選
 # ─────────────────────────────────────────
 
+def _normalize_ym(v: str) -> str:
+    """把各種月份格式統一成 YYYY-MM，失敗回傳空字串。"""
+    v = str(v).strip()
+    if not v or v in ("nan", "None", "NaT"):
+        return ""
+    # 已是 YYYY-MM
+    import re
+    m = re.match(r"^(\d{4})[/-](\d{1,2})$", v)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}"
+    # YYYY-MM-DD → take first 7
+    m = re.match(r"^(\d{4})[/-](\d{1,2})[/-]\d", v)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}"
+    # YYYY年MM月
+    m = re.match(r"^(\d{4})年(\d{1,2})月", v)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}"
+    # 前7字符 fallback
+    if len(v) >= 7 and v[4] in "-/":
+        return v[:7]
+    return ""
+
+
 def _month_filtered(df: pd.DataFrame, key_suffix: str = "") -> tuple:
-    """Returns (filtered_df, selected_month_str)"""
+    """Returns (filtered_df, selected_month_str).
+    預設永遠選目前年月；若當月無資料則仍顯示當月（空資料）。
+    """
     month_col = _pick(df, "month_col")
     date_col  = _pick(df, "ship_date")
+    today_ym  = pd.Timestamp.today().strftime("%Y-%m")
 
     months_set: set = set()
 
     if month_col:
         for v in df[month_col].dropna().astype(str):
-            v = v.strip()
-            if v and v != "nan" and len(v) >= 7:
-                months_set.add(v[:7])
+            ym = _normalize_ym(v)
+            if ym:
+                months_set.add(ym)
 
     if not months_set and date_col:
         parsed = pd.to_datetime(df[date_col], errors="coerce")
         for p in parsed.dropna().dt.to_period("M").unique():
             months_set.add(str(p))
 
-    if not months_set:
-        st.caption("⚠️ 找不到月份資訊，顯示全部")
-        return df, ""
+    # 無論如何，確保當月永遠在選單裡
+    months_set.add(today_ym)
 
     months  = sorted(months_set, reverse=True)
-    today_ym = pd.Timestamp.today().strftime("%Y-%m")
-    default  = months.index(today_ym) if today_ym in months else 0
+    default = months.index(today_ym)   # 一定存在
 
     sel = st.selectbox("📅 選擇月份", months, index=default,
                        key=f"obu_month_{key_suffix}")
 
     if month_col:
-        filtered = df[df[month_col].astype(str).str[:7] == sel].copy()
+        # 先 normalize 再比對
+        norm_series = df[month_col].astype(str).apply(_normalize_ym)
+        filtered = df[norm_series == sel].copy()
     elif date_col:
         parsed = pd.to_datetime(df[date_col], errors="coerce")
         filtered = df[parsed.dt.to_period("M").astype(str) == sel].copy()
@@ -275,10 +302,7 @@ def render_customs_price_tab():
 
 def render_obu_calc_tab():
     st.markdown("##### 🏦 匯 HK OBU 金額統計")
-    st.caption(
-        "只計算 ET 帳戶出貨。"
-        "報關金額直接使用 Teable「報關金額USD」欄（已計算好的數值）。"
-    )
+    st.caption("只計算 ET 帳戶出貨。報關金額直接使用 Teable「報關金額USD」欄。")
 
     token = _get_token()
     if not token:
@@ -292,24 +316,10 @@ def render_obu_calc_tab():
         st.warning("業績明細表無資料")
         return
 
+    # ── 月份選擇（預設當月）─────────────────
     df, sel_month = _month_filtered(df_raw, "obu")
 
-    # 前期補差
-    col_a, col_b = st.columns([1, 2])
-    with col_a:
-        carryover = st.number_input(
-            "前期少匯補差 (USD，正=需補匯，負=可折抵)",
-            value=0.0, step=0.5, format="%.2f", key="obu_carryover"
-        )
-    with col_b:
-        carryover_note = st.text_input(
-            "補差說明",
-            placeholder="例：3月匯$11,050 - 應付$777 - 應付$10,416.5 = -$143.5",
-            key="obu_carryover_note"
-        )
-
-    st.divider()
-
+    # ── 欄位偵測 ─────────────────────────
     inv_col   = _pick(df, "invoice")
     date_col  = _pick(df, "ship_date")
     cust_col  = _pick(df, "customer")
@@ -327,7 +337,7 @@ def render_obu_calc_tab():
         )
         return
 
-    # ET 篩選
+    # ── ET 篩選 & 計算總額 ───────────────
     if inv_col:
         is_et = df[inv_col].astype(str).str.upper().str.startswith("ET")
         et_df = df[is_et].copy()
@@ -336,12 +346,88 @@ def render_obu_calc_tab():
         et_df = df.copy()
 
     et_df["_customs"] = et_df[cust_amt].apply(_to_float)
+    et_total = float(et_df["_customs"].sum()) if not et_df.empty else 0.0
+
+    # ══════════════════════════════════════
+    # 頂部：本月 HK OBU 匯款總覽（置頂顯示）
+    # ══════════════════════════════════════
+    st.markdown(
+        f"""
+        <div style="
+            background:linear-gradient(135deg,#1a2744,#162035);
+            border:1px solid #2e4070;border-radius:14px;
+            padding:20px 24px;margin-bottom:16px;">
+          <div style="font-size:.85rem;color:#7a9cc8;letter-spacing:.06em;
+                      text-transform:uppercase;margin-bottom:10px;">
+            🏦 {sel_month} HK OBU 匯款總覽
+          </div>
+          <div style="display:grid;grid-template-columns:1fr auto 1fr auto 1fr;
+                      align-items:center;gap:8px;">
+            <div>
+              <div style="font-size:.75rem;color:#6b8ab0;margin-bottom:4px;">
+                EUSWAY 報關總金額（ET）
+              </div>
+              <div style="font-size:1.7rem;font-weight:700;color:#e8f0ff;">
+                {_fmt(et_total)}
+              </div>
+            </div>
+            <div style="font-size:1.5rem;color:#4a6a9a;padding:0 4px;">+</div>
+            <div id="carryover-display">
+              <div style="font-size:.75rem;color:#6b8ab0;margin-bottom:4px;">
+                前期補差
+              </div>
+              <div style="font-size:1.7rem;font-weight:700;color:#a8c0e8;">
+                ✏️ 見下方輸入
+              </div>
+            </div>
+            <div style="font-size:1.5rem;color:#4a6a9a;padding:0 4px;">=</div>
+            <div>
+              <div style="font-size:.75rem;color:#6b8ab0;margin-bottom:4px;">
+                ✅ 最終應匯 HK OBU
+              </div>
+              <div style="font-size:1.7rem;font-weight:700;color:#f0c040;">
+                ✏️ 見下方
+              </div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ── 前期補差輸入 ──────────────────────
+    col_a, col_b = st.columns([1, 2])
+    with col_a:
+        carryover = st.number_input(
+            "前期少匯補差 (USD，正=需補匯，負=可折抵)",
+            value=0.0, step=0.5, format="%.2f", key="obu_carryover"
+        )
+    with col_b:
+        carryover_note = st.text_input(
+            "補差說明",
+            placeholder="例：3月匯$11,050 - 應付$777 - 應付$10,416.5 = -$143.5",
+            key="obu_carryover_note"
+        )
+
+    # ── 確認後的最終總計（大字顯示） ─────
+    final = round(et_total + carryover, 2)
+    sign  = "+" if carryover >= 0 else ""
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("EUSWAY 報關總金額（ET）", _fmt(et_total),
+              delta=f"{len(et_df)} 筆" if not et_df.empty else "0 筆")
+    c2.metric("前期補差", f"{sign}{_fmt(carryover)}",
+              help=carryover_note or "尚未填寫")
+    c3.metric("✅ 最終應匯 HK OBU 金額", _fmt(final))
+    if carryover_note:
+        st.caption(f"📝 {carryover_note}")
+
+    st.divider()
 
     # ── ① 各發票明細 ─────────────────────
     st.markdown("**① 各發票出貨金額（ET 帳戶）**")
     if et_df.empty:
         st.info(f"本期（{sel_month}）無 ET 出貨")
-        et_total = 0.0
     else:
         show_cols = list(dict.fromkeys(c for c in [
             date_col, inv_col, cust_col, rand_col, tool_col, cust_amt, er_col
@@ -362,9 +448,10 @@ def render_obu_calc_tab():
 
         zero_inv = et_df[et_df["_customs"] == 0][inv_col].tolist() if inv_col else []
         if zero_inv:
-            st.caption(f"ℹ️ 報關金額為 0 的發票（{len(zero_inv)} 筆）：{', '.join(str(x) for x in zero_inv[:6])}")
-
-        et_total = float(et_df["_customs"].sum())
+            st.caption(
+                f"ℹ️ 報關金額為 0 的發票（{len(zero_inv)} 筆）："
+                f"{', '.join(str(x) for x in zero_inv[:6])}"
+            )
 
     # ── ② 依日期分組 ─────────────────────
     st.markdown("**② 依出貨日期分組 — 各批次報關金額合計**")
@@ -385,19 +472,6 @@ def render_obu_calc_tab():
         )
     elif not et_df.empty:
         st.caption("找不到日期欄，略過分組")
-
-    # ── ③ 最終應匯金額 ────────────────────
-    st.markdown("**③ 本次需匯 HK OBU 總金額計算**")
-    final = round(et_total + carryover, 2)
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("EUSWAY 報關總金額（ET）", _fmt(et_total))
-    sign = "+" if carryover >= 0 else ""
-    c2.metric("前期補差", f"{sign}{_fmt(carryover)}",
-              help=carryover_note or "尚未填寫")
-    c3.metric("✅ 最終應匯 HK OBU 金額", _fmt(final))
-    if carryover_note:
-        st.caption(f"📝 {carryover_note}")
 
     # ── 附：帳戶分類統計 ──────────────────
     if inv_col and rand_col and rand_col in df.columns and not df.empty:
