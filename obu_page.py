@@ -143,7 +143,9 @@ def _get_token() -> str:
 def _month_filtered(df: pd.DataFrame, key_suffix: str = "") -> pd.DataFrame:
     date_col = _pick(df, "ship_date")
     if not date_col:
-        st.caption("⚠️ 找不到「併貨日期」欄，顯示全部")
+        # show a hint about what columns exist
+        avail = [c for c in df.columns if not c.startswith("_")]
+        st.caption(f"⚠️ 找不到「併貨日期」欄，顯示全部。現有欄位前10個：{avail[:10]}")
         return df
 
     df = df.copy()
@@ -333,6 +335,26 @@ def render_obu_calc_tab():
     cust_col   = _pick(df, "customer")
     rand_col   = _pick(df, "random_usd")
     er_col     = _pick(df, "exrate")
+
+    # ── Debug：欄位對應 ───────────────────
+    with st.expander("🔍 Debug — 欄位對應（無資料時展開查看）", expanded=(inv_col is None or pn_col is None)):
+        st.markdown("**Teable 實際欄位清單：**")
+        cols_display = [c for c in df.columns if not c.startswith("_")]
+        st.code("\n".join(cols_display))
+        st.markdown("**目前比對結果：**")
+        st.json({
+            "invoice (ET/EW/GC)": inv_col,
+            "P/N":                pn_col,
+            "出貨數量":           qty_col,
+            "併貨/出貨日期":      date_col,
+            "客戶":               cust_col,
+            "隨機金額(USD)":      rand_col,
+            "海關匯率":           er_col,
+        })
+        st.caption("若 invoice 欄為 None，ET 篩選會失效；若 date_col 為 None，月份篩選會失效。")
+        if not df.empty:
+            st.markdown("**前 3 筆原始資料：**")
+            st.dataframe(df.head(3), use_container_width=True)
 
     db = load_price_db()
 
