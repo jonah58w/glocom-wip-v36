@@ -75,6 +75,20 @@ def _to_float(v) -> float:
         return 0.0
 
 
+def _dedup_cols(cols: list) -> list:
+    """Rename duplicate column names: col, col_2, col_3 …"""
+    seen: dict = {}
+    out = []
+    for c in cols:
+        if c not in seen:
+            seen[c] = 0
+            out.append(c)
+        else:
+            seen[c] += 1
+            out.append(f"{c}_{seen[c] + 1}")
+    return out
+
+
 def _fmt(v: float) -> str:
     return f"${v:,.2f}" if v else "—"
 
@@ -112,7 +126,7 @@ def _fetch_obu_table(token: str) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     if not df.empty:
-        df.columns = [str(c).strip() for c in df.columns]
+        df.columns = _dedup_cols([str(c).strip() for c in df.columns])
     return df
 
 
@@ -346,11 +360,16 @@ def render_obu_calc_tab():
 
     # ── ① 各料號出貨明細 ──────────────────
     st.markdown("**① 各料號出貨金額（報關單價 × 出貨數量）**")
-    show_cols_i = [c for c in [date_col, inv_col, cust_col, pn_col,
-                               qty_col, rand_col, "報關單價", "報關金額", er_col]
-                   if c and c in et_df.columns]
+    # deduplicate: keep first occurrence of each column name
+    show_cols_i = list(dict.fromkeys(
+        c for c in [date_col, inv_col, cust_col, pn_col,
+                    qty_col, rand_col, "報關單價", "報關金額", er_col]
+        if c and c in et_df.columns
+    ))
     if not et_df.empty:
         display_i = et_df[show_cols_i].copy()
+        # reset any duplicate column names that may exist in the raw Teable data
+        display_i.columns = _dedup_cols(list(display_i.columns))
         if date_col and date_col in display_i.columns:
             display_i = display_i.sort_values(date_col, ascending=False)
         st.dataframe(
