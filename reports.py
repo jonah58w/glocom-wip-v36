@@ -26,6 +26,13 @@ v4：加入統計圖表
 
 [修正 v5.2]
   - show_sandy_internal_wip_report 按出貨日期升序排序（空值放最後）
+
+[修正 v5.3]
+  - render_teable_subset_table Excel 下載加入儲存格置中對齊 + 自動換行
+
+[修正 v5.4]
+  - render_teable_subset_table Excel 下載：讀 變更欄位 (逗號分隔字串)
+    將對應欄位塗為黃色底 (FFFF00)
 """
 
 from __future__ import annotations
@@ -565,17 +572,51 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
 def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subset_mode: str):
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
-    from openpyxl.styles import Border, Side, Alignment
+    from openpyxl.styles import Border, Side, Alignment, PatternFill
 
     st.subheader(title)
-    st.caption("🔧 DEBUG v5.3 對齊+換行 已啟用")
+    st.caption("🔧 DEBUG v5.4 對齊+換行+黃色 已啟用")
     mask     = build_subset_mask(source_df, subset_mode)
     filtered = source_df[mask].copy()
     view_df, _ = build_teable_view_df(filtered, specs)
     st.caption(f"共 {len(view_df)} 筆")
     st.dataframe(view_df, use_container_width=True, hide_index=True)
 
-    # ── Excel 下載（自動欄寬 + 全表框線 + 置中 + 自動換行）──────────────────
+    # ── 準備每筆紀錄的「要塗黃的欄位名稱集合」─────────────────────────────
+    # 變更欄位 由 Teable cellFormat=text 回傳為逗號分隔字串，例如 "Dock" 或 "箱數, 重量"
+    change_col = find_col(source_df, ["變更欄位"])
+    if change_col:
+        change_series = get_series_by_col(filtered, change_col)
+    else:
+        change_series = None
+
+    highlights_per_row = []
+    for idx in view_df.index:
+        if change_series is None:
+            highlights_per_row.append(set())
+            continue
+        raw = change_series.get(idx, None)
+        if raw is None:
+            highlights_per_row.append(set())
+            continue
+        try:
+            if isinstance(raw, float) and pd.isna(raw):
+                highlights_per_row.append(set())
+                continue
+        except Exception:
+            pass
+        # 兼容 list 格式以防未來 cellFormat 改動
+        if isinstance(raw, list):
+            labels = {str(x).strip() for x in raw if str(x).strip()}
+        else:
+            text = str(raw).strip()
+            if not text or text in ("nan", "[]", "None"):
+                highlights_per_row.append(set())
+                continue
+            labels = {s.strip() for s in text.split(",") if s.strip()}
+        highlights_per_row.append(labels)
+
+    # ── Excel 下載（自動欄寬 + 框線 + 置中 + 自動換行 + 變更欄位塗黃）──────
     wb = Workbook()
     ws = wb.active
     ws.append(list(view_df.columns))
@@ -597,6 +638,19 @@ def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subse
             cell.border = border
             cell.alignment = alignment
 
+    # 變更欄位塗黃：依 highlights_per_row 對應 view_df 的欄名，套 PatternFill
+    yellow = PatternFill("solid", fgColor="FFFF00")
+    col_name_to_letter = {
+        col_name: get_column_letter(i + 1)
+        for i, col_name in enumerate(view_df.columns)
+    }
+    # data row 從 Excel row 2 開始（row 1 是 header）
+    for data_row_idx, highlights in enumerate(highlights_per_row, start=2):
+        for label in highlights:
+            letter = col_name_to_letter.get(label)
+            if letter:
+                ws[f"{letter}{data_row_idx}"].fill = yellow
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -606,7 +660,8 @@ def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subse
         file_name=f"{title}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-    
+
+
 # ================================
 # 業績明細表（主函式）
 # v5.0：加入三個 Tab
