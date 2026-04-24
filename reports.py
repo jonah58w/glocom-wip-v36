@@ -2,9 +2,9 @@
 """
 reports.py  ── GLOCOM Control Tower 業績明細表
 v4：加入統計圖表
-  - 已出貨 vs 預計出貨（水平堆疊長條）
-  - 依工廠 / 依客戶銷貨佔比（甜甜圈圓餅）
-  - 近12個月銷貨趨勢（長條 + 折線）
+  - 已出貨 vs 預計出貨（水平堆疊長條)
+  - 依工廠 / 依客戶銷貨佔比（甜甜圈圓餅)
+  - 近12個月銷貨趨勢（長條 + 折線)
 
 [修正 v4.1]
   - build_subset_mask "unshipped" 模式移除 year_ok 年份篩選
@@ -15,7 +15,7 @@ v4：加入統計圖表
 [修正 v4.3]
   - SANDY_NEW_ORDER_SPECS 加入 Working Gerber Approval、Engineering Question
   - SANDY_INTERNAL_WIP_SPECS 加入 Working Gerber Approval、Engineering Question
-  - render_teable_subset_table 加入 Excel 下載（自動欄寬）
+  - render_teable_subset_table 加入 Excel 下載（自動欄寬)
 
 [修正 v5.0]
   - render_sales_detail_from_teable 加入三個 Tab：
@@ -23,6 +23,9 @@ v4：加入統計圖表
 
 [修正 v5.1]
   - render_teable_subset_table Excel 下載加入全表細黑線框
+
+[修正 v5.2]
+  - show_sandy_internal_wip_report 按出貨日期升序排序（空值放最後）
 """
 
 from __future__ import annotations
@@ -874,7 +877,17 @@ def show_new_orders_wip_report(source_df: pd.DataFrame):
 
 
 def show_sandy_internal_wip_report(source_df: pd.DataFrame):
-    render_teable_subset_table("📄 Sandy 內部 WIP", source_df, SANDY_INTERNAL_WIP_SPECS, "unshipped")
+    """Sandy 內部 WIP：按出貨日期升序排序（空值放最後），其他報表不受影響。"""
+    sort_col = find_col(source_df, ACTUAL_SHIP_DATE_CANDIDATES)
+    if sort_col:
+        sorted_df = source_df.copy()
+        sorted_df["_sort_key"] = parse_mixed_date_series(get_series_by_col(sorted_df, sort_col))
+        sorted_df = sorted_df.sort_values(
+            "_sort_key", ascending=True, na_position="last"
+        ).drop(columns=["_sort_key"]).reset_index(drop=True)
+    else:
+        sorted_df = source_df
+    render_teable_subset_table("📄 Sandy 內部 WIP", sorted_df, SANDY_INTERNAL_WIP_SPECS, "unshipped")
 
 
 def show_sandy_sales_report(source_df: pd.DataFrame):
