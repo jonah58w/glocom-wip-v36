@@ -20,6 +20,9 @@ v4：加入統計圖表
 [修正 v5.0]
   - render_sales_detail_from_teable 加入三個 Tab：
       業績明細 / 報關單價 / 匯 HK OBU 金額
+
+[修正 v5.1]
+  - render_teable_subset_table Excel 下載加入全表細黑線框
 """
 
 from __future__ import annotations
@@ -559,6 +562,7 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
 def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subset_mode: str):
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
+    from openpyxl.styles import Border, Side
 
     st.subheader(title)
     mask     = build_subset_mask(source_df, subset_mode)
@@ -567,15 +571,25 @@ def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subse
     st.caption(f"共 {len(view_df)} 筆")
     st.dataframe(view_df, use_container_width=True, hide_index=True)
 
-    # ── Excel 下載（自動欄寬）────────────────────────────────────────────────
+    # ── Excel 下載（自動欄寬 + 全表框線）────────────────────────────────────
     wb = Workbook()
     ws = wb.active
     ws.append(list(view_df.columns))
     for row in view_df.itertuples(index=False):
         ws.append(list(row))
+
+    # 欄寬
     for col_idx, col in enumerate(ws.columns, 1):
         max_len = max((len(str(cell.value or "")) for cell in col), default=8)
         ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 4, 50)
+
+    # 全表加 thin 黑線框（header + data）
+    thin = Side(border_style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row,
+                            min_col=1, max_col=ws.max_column):
+        for cell in row:
+            cell.border = border
 
     buf = io.BytesIO()
     wb.save(buf)
