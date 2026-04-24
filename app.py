@@ -1245,11 +1245,31 @@ with st.expander("Debug"):
     st.write("API Status:", api_status)
     st.write("TABLE_URL:", TABLE_URL)
     st.write("Token loaded:", bool(TEABLE_TOKEN))
-    st.write("總筆數:", len(orders))  # ← 加這行
-    st.write("WIP分布:", orders["WIP"].value_counts().to_dict() if "WIP" in orders.columns else {})  # ← 加這行
     st.write("總筆數:", len(orders))
     st.write("WIP分布:", orders["WIP"].value_counts().to_dict() if "WIP" in orders.columns else {})
     st.write("Columns:", list(orders.columns) if not orders.empty else [])
+
+    # 暫時：探 變更欄位 實際樣貌（加黃色 Step 2 完成後可移除）
+    if "變更欄位" in orders.columns:
+        bg_col = orders["變更欄位"]
+        # multipleSelect 可能是 list / str / NaN，一律轉 str 做過濾
+        non_empty_mask = (
+            bg_col.notna()
+            & bg_col.astype(str).str.strip().ne("")
+            & bg_col.astype(str).str.strip().ne("[]")
+            & bg_col.astype(str).str.strip().ne("nan")
+        )
+        non_empty = orders[non_empty_mask]
+        st.write("變更欄位 non-empty 筆數:", len(non_empty))
+        st.write("變更欄位 樣本 (前 5 筆):", non_empty["變更欄位"].head(5).tolist())
+        st.write("變更欄位 dtype:", str(bg_col.dtype))
+        if len(non_empty) > 0:
+            first_val = non_empty["變更欄位"].iloc[0]
+            st.write("變更欄位 第一筆 type:", type(first_val).__name__)
+            st.write("變更欄位 第一筆 repr:", repr(first_val))
+    else:
+        st.write("變更欄位: 欄位不存在於 orders")
+
     if isinstance(api_text, str):
         st.text(api_text[:1200])
 st.sidebar.title("GLOCOM Internal")
