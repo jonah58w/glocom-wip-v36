@@ -565,7 +565,7 @@ def build_subset_mask(source_df: pd.DataFrame, subset_mode: str) -> pd.Series:
 def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subset_mode: str):
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
-    from openpyxl.styles import Border, Side
+    from openpyxl.styles import Border, Side, Alignment
 
     st.subheader(title)
     mask     = build_subset_mask(source_df, subset_mode)
@@ -574,7 +574,7 @@ def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subse
     st.caption(f"共 {len(view_df)} 筆")
     st.dataframe(view_df, use_container_width=True, hide_index=True)
 
-    # ── Excel 下載（自動欄寬 + 全表框線）────────────────────────────────────
+    # ── Excel 下載（自動欄寬 + 全表框線 + 置中 + 自動換行）──────────────────
     wb = Workbook()
     ws = wb.active
     ws.append(list(view_df.columns))
@@ -586,13 +586,15 @@ def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subse
         max_len = max((len(str(cell.value or "")) for cell in col), default=8)
         ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 4, 50)
 
-    # 全表加 thin 黑線框（header + data）
+    # 全表樣式：thin 黑線框 + 水平垂直置中 + 自動換行
     thin = Side(border_style="thin", color="000000")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row,
                             min_col=1, max_col=ws.max_column):
         for cell in row:
             cell.border = border
+            cell.alignment = alignment
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -603,8 +605,7 @@ def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subse
         file_name=f"{title}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-
-
+    
 # ================================
 # 業績明細表（主函式）
 # v5.0：加入三個 Tab
