@@ -575,7 +575,6 @@ def render_teable_subset_table(title: str, source_df: pd.DataFrame, specs, subse
     from openpyxl.styles import Border, Side, Alignment, PatternFill
 
     st.subheader(title)
-    st.caption("🔧 DEBUG v5.4 對齊+換行+黃色 已啟用")
     mask     = build_subset_mask(source_df, subset_mode)
     filtered = source_df[mask].copy()
     view_df, _ = build_teable_view_df(filtered, specs)
