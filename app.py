@@ -1288,6 +1288,7 @@ menu = st.sidebar.radio(
         "業績明細表",
         "Customer Preview",
         "Import / Update",
+        "Factory PO",
         "SignFlow",
     ]
 )
@@ -1931,6 +1932,10 @@ elif menu == "Import / Update":
                                     st.error(msg)
             except Exception as e:
                 st.error(f"Image OCR failed: {e}")
+elif menu == "Factory PO":
+    from factory_po_page import render_factory_po_page
+    render_factory_po_page(orders, TABLE_URL, HEADERS)
+
 elif menu == "SignFlow":
     render_approval_page()
 # Excel Quote Export removed from menu.
