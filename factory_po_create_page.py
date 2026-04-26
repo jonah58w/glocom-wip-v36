@@ -1,19 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO(新流程)頁面 - 完整版。
+建立工廠 PO 頁面 v2。
 
-完整流程:
-  1. 上傳客戶 PO PDF
-  2. 自動解析(WESCO / TIETO / GUDE / KCS / VORNE)
-  3. 選工廠 → 自動算字首 → 自動產生新訂單編號
-  4. 填工廠單價 / 出貨日(每品項)
-  5. 選特殊規格(多分類選項 + 自由文字)
-  6. 確認 → 產 PDF + 寫回 Teable
-
-呼叫方式(在 app.py menu 加上 "建立工廠 PO" 後):
-    elif menu == "建立工廠 PO":
-        from factory_po_create_page import render_factory_po_create_page
-        render_factory_po_create_page(orders, TABLE_URL, HEADERS)
+主要更新(v2):
+- Step 5 規格改成「新料號完整規格」+「舊料號簡短規格」雙模式
+- 規格輸出改為「一列」(用分號 ; 串接,不換行),不再拉長頁面
+- Step 6 確認鍵拆成兩個獨立按鈕:【產 PDF】+【寫回 Teable】
 """
 
 from __future__ import annotations
@@ -44,16 +36,15 @@ HERE = Path(__file__).parent
 FACTORIES_JSON = HERE / "data" / "factories.json"
 
 
-# 特殊規格選項
-SPEC_OPTIONS = {
-    "防焊顏色 (S/M)": ["Green", "Red", "Blue", "Black", "White", "Matte Green", "Matte Black"],
-    "文字顏色 (S/L)": ["White", "Black", "Yellow"],
-    "表面處理": ["ENIG (化金)", "HASL Lead-free (無鉛噴錫)", "Immersion Gold", "OSP", "Hard Gold", "Immersion Silver"],
-    "板厚": ["0.6mm", "0.8mm", "1.0mm", "1.2mm", "1.6mm", "2.0mm"],
-    "銅厚": ["0.5oz", "1oz", "2oz", "3oz"],
-    "Tg 等級": ["Tg130", "Tg150", "Tg170", "Tg180"],
-    "包裝要求": ["真空包裝", "加乾燥劑", "加濕度指示卡", "10 panels 一包", "15 panels 一包"],
-    "其他要求": ["UL Logo", "Date Code (YYWW)", "No X-outs", "X-outs ≤ 5%", "Net List Test", "100% E-Test"],
+# 新料號完整規格的選項
+SPEC_OPTIONS_FULL = {
+    "Material": ["2L", "4L", "6L", "8L", "10L", "Aluminum", "FR4", "Rogers"],
+    "Tg": ["Tg130", "Tg150", "Tg170", "Tg180"],
+    "Board thickness": ["0.4mm", "0.6mm", "0.8mm", "1.0mm", "1.2mm", "1.6mm", "2.0mm", "2.4mm", "3.2mm"],
+    "Copper": ["1oz/1oz", "1/2oz/1/2oz", "2oz/2oz", "3oz/3oz", "Ext: 1oz all layers"],
+    "Surface Finish": ["ENIG", "Lead-free HASL", "HASL", "Immersion Gold", "OSP", "Hard Gold", "Immersion Silver"],
+    "S/M": ["Green", "Matte Green", "Red", "Blue", "Black", "Matte Black", "White"],
+    "S/L": ["White", "Black", "Yellow"],
 }
 
 
@@ -144,16 +135,18 @@ def create_teable_records(table_url: str, headers: dict, fields_list: list) -> d
 
 def build_po_context_from_new_order(
     new_po_no, parsed, factory_data, factory_short, issuing_company,
-    factory_unit_prices, factory_due_dates, special_spec_text,
+    factory_unit_prices, factory_due_dates, item_specs,
     purchase_responsible, order_date, is_revised,
 ):
+    """item_specs: dict {part_no: spec_text} 每品項各自的規格(一列字串)"""
     items = []
     for it in parsed.items:
         f_price = float(factory_unit_prices.get(it.part_number, 0.0))
         f_due = factory_due_dates.get(it.part_number)
+        spec_text = item_specs.get(it.part_number, "") or it.description
         items.append({
             "part_number": it.part_number,
-            "spec_text": special_spec_text or it.description,
+            "spec_text": spec_text,
             "quantity": it.quantity,
             "panel_qty": None,
             "unit_price": f_price,
@@ -192,9 +185,26 @@ def _reset_form():
             pass
 
 
+def build_full_spec_oneline(selections: dict, extra_text: str) -> str:
+    """新料號完整規格 → 一列字串 (用 ; 串接)
+    例: Material: 4L; Tg170; Board thickness: 1.6mm; ...
+    """
+    parts = []
+    for cat, val in selections.items():
+        if val:
+            if cat in ("Tg",):
+                parts.append(val)
+            else:
+                parts.append(f"{cat}: {val}")
+    if extra_text and extra_text.strip():
+        parts.append(extra_text.strip())
+    return "; ".join(parts)
+
+
+# ─── 主入口 ───────────────────────────────────────
 def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers: dict):
     st.subheader("📝 建立工廠 PO(新流程)")
-    st.caption("上傳客戶 PO PDF → 自動解析 → 選工廠/規格 → 產出工廠 PO PDF + 寫回 Teable")
+    st.caption("上傳客戶 PO PDF → 自動解析 → 選工廠/規格 → 產出工廠 PO PDF / 寫回 Teable")
 
     factories = load_factories()
     if not factories:
@@ -286,7 +296,6 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     with s3_cols[0]:
         factory_short = st.selectbox(
             "工廠 *", factory_keys, key="fpo_factory_short",
-            help="從 data/factories.json 載入,is_active=true 的工廠",
         )
     factory_data = factories[factory_short]
     factory_region = factory_data.get("region", "Taiwan")
@@ -297,8 +306,7 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
         if not v or "[請補]" in str(v):
             missing_fields.append(k)
     if missing_fields:
-        st.warning(f"⚠️ 工廠「{factory_short}」資料不完整,缺:{', '.join(missing_fields)}。"
-                   f"PDF 仍會產生,但這些欄位會印 [請補]。")
+        st.warning(f"⚠️ 工廠「{factory_short}」資料不完整,缺:{', '.join(missing_fields)}")
 
     with s3_cols[1]:
         default_issuing = parsed.issuing_company_detected or "GLOCOM"
@@ -306,7 +314,6 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
         issuing_idx = issuing_options.index(default_issuing) if default_issuing in issuing_options else 0
         issuing_company = st.selectbox(
             "發出公司 *", issuing_options, index=issuing_idx, key="fpo_issuing",
-            help=f"PDF 上偵測到:{parsed.issuing_company_detected}(可改)",
         )
 
     auto_internal_prefix = derive_prefix(issuing_company, factory_region)
@@ -316,7 +323,6 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
         prefix_idx = prefix_options.index(auto_display) if auto_display in prefix_options else 0
         prefix_chosen = st.selectbox(
             "字首", prefix_options, index=prefix_idx, key="fpo_prefix",
-            help=f"工廠地區:{factory_region}|自動推算:{auto_display}",
         )
 
     chosen_internal = internal_prefix(prefix_chosen)
@@ -365,140 +371,138 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     )
     st.metric("工廠總金額", f"{factory_data.get('default_currency', 'NT$')} {factory_total:,.2f}")
 
-    # ─── Step 5: 特殊規格 ─
-    st.markdown("### Step 5. 特殊規格")
-    st.caption("勾選常用規格 + 自由文字補充。會印在工廠 PO 上。")
+    # ─── Step 5: 每品項規格(雙模式)─
+    st.markdown("### Step 5. 每品項產品規格")
+    st.caption("規格會印成「一列」放在工廠 PO 的『產品規格』欄。請選擇填寫模式。")
 
-    selected_specs_lines = []
-    spec_cols = st.columns(2)
-    cat_idx = 0
-    for cat_name, opts in SPEC_OPTIONS.items():
-        with spec_cols[cat_idx % 2]:
-            chosen = st.multiselect(cat_name, opts, key=f"fpo_spec_{cat_name}")
-            if chosen:
-                selected_specs_lines.append(f"{cat_name}: {', '.join(chosen)}")
-        cat_idx += 1
+    item_specs = {}  # {part_no: spec_text}
 
-    extra_notes = st.text_area(
-        "其他規格 / 備註(自由輸入)", value="", height=100, key="fpo_extra_notes",
-        placeholder="例如:Working Gerber 承認後才可生產 / 須距出貨交期一個月內才可發料 / ...",
-    )
+    for idx, it in enumerate(parsed.items):
+        with st.container(border=True):
+            st.markdown(f"**品項 {idx + 1}:`{it.part_number}`**(數量 {it.quantity})")
 
-    full_spec = "\n".join(selected_specs_lines)
-    if extra_notes.strip():
-        if full_spec:
-            full_spec += "\n\n" + extra_notes.strip()
-        else:
-            full_spec = extra_notes.strip()
+            mode = st.radio(
+                "規格類型",
+                ["新料號(完整規格)", "舊料號(簡短規格)"],
+                horizontal=True,
+                key=f"fpo_spec_mode_{idx}",
+            )
 
-    if full_spec:
-        with st.expander("📋 預覽特殊規格"):
-            st.text(full_spec)
+            if mode == "新料號(完整規格)":
+                cols_a = st.columns(4)
+                cols_b = st.columns(4)
+                selections = {}
+                cats = list(SPEC_OPTIONS_FULL.keys())
+                for i, cat in enumerate(cats):
+                    target_col = cols_a[i] if i < 4 else cols_b[i - 4]
+                    with target_col:
+                        selections[cat] = st.selectbox(
+                            cat, [""] + SPEC_OPTIONS_FULL[cat],
+                            key=f"fpo_spec_full_{idx}_{cat}",
+                        )
 
-    # ─── 確認區 ─
+                extra = st.text_input(
+                    "其他規格 / 補充(會接在後面,可空)",
+                    placeholder="例如: 排版 4up panel; 須加西拓 UL Logo + Date Code (YYWW)",
+                    key=f"fpo_spec_full_extra_{idx}",
+                )
+                spec_text = build_full_spec_oneline(selections, extra)
+
+            else:  # 舊料號模式
+                spec_text = st.text_input(
+                    "舊料號規格(直接輸入一列)",
+                    placeholder="例如: 舊料號;4up, 但規格須改為 Tg170; ENIG: 2u\"",
+                    key=f"fpo_spec_short_{idx}",
+                )
+
+            if spec_text:
+                st.success(f"📋 印在 PO 上:`{spec_text}`")
+            else:
+                st.info("⚠️ 規格還沒填,印出來會是空的(或 fallback 客戶描述)")
+
+            item_specs[it.part_number] = spec_text
+
+    # ─── Step 6: 兩個獨立按鈕 ─
     st.divider()
-    st.markdown("### Step 6. 確認 → 產 PDF + 寫回 Teable")
-    btn_cols = st.columns([3, 1])
+    st.markdown("### Step 6. 產出 / 寫回")
+    st.caption("**產 PDF** 和 **寫回 Teable** 是分開的,可以分別執行。建議先按產 PDF 預覽 → OK 再按寫回 Teable。")
+
+    btn_cols = st.columns([2, 2, 1])
     with btn_cols[0]:
-        confirm = st.button(
-            "✅ 確認 → 產 PDF + 寫回 Teable",
-            type="primary", use_container_width=True, key="fpo_confirm",
+        do_pdf = st.button(
+            "📄 產 PDF",
+            type="primary",
+            use_container_width=True,
+            key="fpo_do_pdf",
         )
     with btn_cols[1]:
+        do_writeback = st.button(
+            "💾 寫回 Teable",
+            type="secondary",
+            use_container_width=True,
+            key="fpo_do_writeback",
+        )
+    with btn_cols[2]:
         if st.button("🗑️ 全部清除", use_container_width=True, key="fpo_clear_bottom"):
             _reset_form()
             st.rerun()
 
-    if not confirm:
+    if not (do_pdf or do_writeback):
         st.stop()
 
-    # ─── 確認流程 ─
     zero_price_pns = [pn for pn, price in factory_unit_prices.items() if price == 0]
     if zero_price_pns:
-        st.warning(f"⚠️ 工廠單價為 0 的品項:{', '.join(zero_price_pns)}(仍繼續產生)")
+        st.warning(f"⚠️ 工廠單價為 0 的品項:{', '.join(zero_price_pns)}")
 
-    po_ctx = build_po_context_from_new_order(
-        new_po_no=new_po_no, parsed=parsed, factory_data=factory_data,
-        factory_short=factory_short, issuing_company=issuing_company,
-        factory_unit_prices=factory_unit_prices, factory_due_dates=factory_due_dates,
-        special_spec_text=full_spec, purchase_responsible=purchase_responsible,
-        order_date=order_date_input, is_revised=is_revised,
-    )
+    empty_spec_pns = [pn for pn, sp in item_specs.items() if not sp.strip()]
+    if empty_spec_pns:
+        st.warning(f"⚠️ 規格沒填的品項:{', '.join(empty_spec_pns)}(會用客戶 PO 描述當 fallback)")
 
-    # 產 PDF
-    docx_path = None
-    pdf_path = None
-    try:
-        from core.pdf_generator import generate_po_files
-        with st.spinner("產生 docx + PDF..."):
-            result = generate_po_files(po_ctx)
-        docx_path = result.get("docx_path")
-        pdf_path = result.get("pdf_path")
-        if result.get("error"):
-            st.warning(result["error"])
-    except FileNotFoundError as e:
-        if "PO_EUSWAY" in str(e):
-            st.error(
-                "❌ EUSWAY 模板未上傳:`templates/PO_EUSWAY.docx` 不存在。"
-                "目前只能產 GLOCOM 抬頭的 PO(GC / ET 字首)。"
-                "如需產 EW 字首 PO,請先建立並上傳 PO_EUSWAY.docx。"
-            )
-        else:
-            st.error(f"❌ 產 PDF 失敗:{e}")
-    except Exception as e:
-        st.error(f"❌ 產 PDF 失敗:{e}")
-        with st.expander("錯誤詳情"):
-            st.code(traceback.format_exc())
+    # ─── 產 PDF 流程 ─
+    if do_pdf:
+        po_ctx = build_po_context_from_new_order(
+            new_po_no=new_po_no, parsed=parsed, factory_data=factory_data,
+            factory_short=factory_short, issuing_company=issuing_company,
+            factory_unit_prices=factory_unit_prices, factory_due_dates=factory_due_dates,
+            item_specs=item_specs, purchase_responsible=purchase_responsible,
+            order_date=order_date_input, is_revised=is_revised,
+        )
 
-    # 寫回 Teable
-    st.markdown("#### 寫回 Teable")
-    records_fields = []
-    for it in parsed.items:
-        f_price = factory_unit_prices.get(it.part_number, 0.0)
-        f_due = factory_due_dates.get(it.part_number)
-        f_due_str = f_due.strftime("%Y/%m/%d") if f_due else ""
-        order_date_str = order_date_input.strftime("%Y/%m/%d")
-        cust_date_str = parsed.po_date or order_date_str
-
-        records_fields.append({
-            COL_GLOCOM_PO: new_po_no,
-            "客戶": parsed.customer_name,
-            "PO#": parsed.customer_po_no,
-            "P/N": it.part_number,
-            "Order Q'TY\n (PCS)": it.quantity,
-            "工廠": factory_short,
-            "工廠交期": f_due_str,
-            "Ship date": f_due_str,
-            "銷貨金額": round(f_price * it.quantity, 2),
-            "接單金額": round(it.amount, 2),
-            "客戶要求注意事項": full_spec,
-            "工廠下單日期": order_date_str,
-            "客戶下單日期": cust_date_str,
-        })
-
-    with st.spinner(f"寫入 {len(records_fields)} 筆 Teable record..."):
-        wb_result = create_teable_records(table_url, headers, records_fields)
-
-    if wb_result["success"] > 0:
-        st.success(f"✅ 已寫入 Teable {wb_result['success']} 筆 record(訂單編號 {new_po_no})")
-    if wb_result["failed"] > 0:
-        st.error(f"❌ 寫入失敗 {wb_result['failed']} 筆")
-        with st.expander("失敗原因"):
-            for err in wb_result["errors"]:
-                st.text(err)
-
-    # 下載
-    if docx_path and Path(docx_path).exists():
-        st.markdown("#### 下載檔案")
-        d_cols = st.columns(2)
-        with d_cols[0]:
-            with open(docx_path, "rb") as f:
-                st.download_button(
-                    "📥 下載 DOCX", data=f.read(),
-                    file_name=Path(docx_path).name,
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True, key="fpo_dl_docx",
+        try:
+            from core.pdf_generator import generate_po_files
+            with st.spinner("產生 docx + PDF..."):
+                result = generate_po_files(po_ctx)
+            docx_path = result.get("docx_path")
+            pdf_path = result.get("pdf_path")
+            if result.get("error"):
+                st.warning(result["error"])
+        except FileNotFoundError as e:
+            if "PO_EUSWAY" in str(e):
+                st.error(
+                    "❌ EUSWAY 模板未上傳:`templates/PO_EUSWAY.docx` 不存在。"
+                    "如需產 EW 字首 PO,請先建立並上傳 PO_EUSWAY.docx。"
                 )
+            else:
+                st.error(f"❌ 產 PDF 失敗:{e}")
+            st.stop()
+        except Exception as e:
+            st.error(f"❌ 產 PDF 失敗:{e}")
+            with st.expander("錯誤詳情"):
+                st.code(traceback.format_exc())
+            st.stop()
+
+        st.success(f"✅ PDF / DOCX 已產生(訂單編號 {new_po_no})")
+
+        d_cols = st.columns(2)
+        if docx_path and Path(docx_path).exists():
+            with d_cols[0]:
+                with open(docx_path, "rb") as f:
+                    st.download_button(
+                        "📥 下載 DOCX", data=f.read(),
+                        file_name=Path(docx_path).name,
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True, key="fpo_dl_docx",
+                    )
         if pdf_path and Path(pdf_path).exists():
             with d_cols[1]:
                 with open(pdf_path, "rb") as f:
@@ -508,5 +512,43 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
                         use_container_width=True, key="fpo_dl_pdf",
                     )
 
-    if wb_result["success"] > 0:
-        st.info("⚠️ 寫入成功後,請按側邊欄 **Refresh** 才會看到主表更新。")
+        st.info("📝 PDF 確認 OK 後,可按上方「💾 寫回 Teable」把資料寫進主表。")
+
+    # ─── 寫回 Teable 流程 ─
+    if do_writeback:
+        records_fields = []
+        for it in parsed.items:
+            f_price = factory_unit_prices.get(it.part_number, 0.0)
+            f_due = factory_due_dates.get(it.part_number)
+            f_due_str = f_due.strftime("%Y/%m/%d") if f_due else ""
+            order_date_str = order_date_input.strftime("%Y/%m/%d")
+            cust_date_str = parsed.po_date or order_date_str
+            spec_text = item_specs.get(it.part_number, "") or it.description
+
+            records_fields.append({
+                COL_GLOCOM_PO: new_po_no,
+                "客戶": parsed.customer_name,
+                "PO#": parsed.customer_po_no,
+                "P/N": it.part_number,
+                "Order Q'TY\n (PCS)": it.quantity,
+                "工廠": factory_short,
+                "工廠交期": f_due_str,
+                "Ship date": f_due_str,
+                "銷貨金額": round(f_price * it.quantity, 2),
+                "接單金額": round(it.amount, 2),
+                "客戶要求注意事項": spec_text,
+                "工廠下單日期": order_date_str,
+                "客戶下單日期": cust_date_str,
+            })
+
+        with st.spinner(f"寫入 {len(records_fields)} 筆 Teable record..."):
+            wb_result = create_teable_records(table_url, headers, records_fields)
+
+        if wb_result["success"] > 0:
+            st.success(f"✅ 已寫入 Teable {wb_result['success']} 筆 record(訂單編號 {new_po_no})")
+            st.info("⚠️ 請按側邊欄 **Refresh** 才會看到主表更新。")
+        if wb_result["failed"] > 0:
+            st.error(f"❌ 寫入失敗 {wb_result['failed']} 筆")
+            with st.expander("失敗原因"):
+                for err in wb_result["errors"]:
+                    st.text(err)
