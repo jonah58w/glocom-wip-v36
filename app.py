@@ -1288,8 +1288,7 @@ menu = st.sidebar.radio(
         "業績明細表",
         "Customer Preview",
         "Import / Update",
-        "建立工廠 PO",
-        "Factory PO",
+        "工廠 PO", 
         "SignFlow",
     ]
 )
@@ -1934,13 +1933,15 @@ elif menu == "Import / Update":
             except Exception as e:
                 st.error(f"Image OCR failed: {e}")
                 
-elif menu == "建立工廠 PO":
-    from factory_po_create_page import render_factory_po_create_page
-    render_factory_po_create_page(orders, TABLE_URL, HEADERS)
-    
-elif menu == "Factory PO":
-    from factory_po_page import render_factory_po_page
-    render_factory_po_page(orders, TABLE_URL, HEADERS)
+elif menu == "工廠 PO":
+    st.subheader("🏭 工廠 PO")
+    tab_create, tab_query = st.tabs(["📝 建立新訂單", "📋 查詢 / 管理訂單"])
+    with tab_create:
+        from factory_po_create_page import render_factory_po_create_page
+        render_factory_po_create_page(orders, TABLE_URL, HEADERS)
+    with tab_query:
+        from factory_po_page import render_factory_po_page
+        render_factory_po_page(orders, TABLE_URL, HEADERS)
 
 elif menu == "SignFlow":
     render_approval_page()
