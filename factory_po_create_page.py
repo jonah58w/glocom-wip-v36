@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3。
+建立工廠 PO 頁面 v3.1。
 
-主要更新(v3):
+主要更新(v3.1):
+- 拿掉「規格沒填→fallback 客戶描述」邏輯,避免規格欄重複印料號
+- 規格沒填時顯示紅色錯誤,阻擋產 PDF / 寫回 Teable
+
+v3 更新:
 - Step 5 規格改成 3 個 Tab:
   Tab A: ⚡ 從前一張同料號訂單帶入(查 Teable 主表「客戶要求注意事項」欄)
   Tab B: 📋 多列貼上(從 ERP 一列一列複製,自動用 ; 串接)
   Tab C: ✏️ 手動輸入(新料號完整規格 / 舊料號簡短規格)
 - Step 6 確認鍵已拆成兩個獨立按鈕:【產 PDF】+【寫回 Teable】
 - 規格輸出維持「一列」(不換行)
-- 提供「最終規格(可編輯)」文字框,各 Tab 套用後皆可繼續修改
 """
 
 from __future__ import annotations
@@ -53,6 +56,13 @@ SPEC_OPTIONS_FULL = {
 
 
 # ─── 工廠主檔 ────────────────────────────────────
+def _strip_placeholder_brackets(text: str) -> str:
+    """剝掉字串中的 [請補...] 方框註記,例如『優技電子 [請補完整名]』→『優技電子』"""
+    if not text:
+        return ""
+    return re.sub(r"\s*\[[^\]]*\]\s*", "", str(text)).strip()
+
+
 def load_factories() -> dict:
     if not FACTORIES_JSON.exists():
         return {}
@@ -60,7 +70,11 @@ def load_factories() -> dict:
         with open(FACTORIES_JSON, "r", encoding="utf-8") as f:
             data = json.load(f)
         all_factories = data.get("factories", {})
-        return {k: v for k, v in all_factories.items() if v.get("is_active")}
+        active = {k: v for k, v in all_factories.items() if v.get("is_active")}
+        # 把 factory_name 的方框註記剝掉(避免印在簽名欄)
+        for v in active.values():
+            v["factory_name"] = _strip_placeholder_brackets(v.get("factory_name", ""))
+        return active
     except Exception as e:
         st.error(f"factories.json 讀取失敗:{e}")
         return {}
@@ -216,7 +230,8 @@ def build_po_context_from_new_order(
     for it in parsed.items:
         f_price = float(factory_unit_prices.get(it.part_number, 0.0))
         f_due = factory_due_dates.get(it.part_number)
-        spec_text = item_specs.get(it.part_number, "") or it.description
+        # v3.1: 規格沒填就空白,不再 fallback 到客戶描述(避免印出料號重複)
+        spec_text = (item_specs.get(it.part_number, "") or "").strip()
         items.append({
             "part_number": it.part_number,
             "spec_text": spec_text,
@@ -630,7 +645,9 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
 
     empty_spec_pns = [pn for pn, sp in item_specs.items() if not (sp or "").strip()]
     if empty_spec_pns:
-        st.warning(f"⚠️ 規格沒填的品項:{', '.join(empty_spec_pns)}(會 fallback 用客戶 PO 描述)")
+        st.error(f"❌ 以下品項規格沒填:**{', '.join(empty_spec_pns)}**。"
+                 "規格欄會印空白,請回 Step 5 填好再產 PDF / 寫回 Teable。")
+        st.stop()
 
     # ─── 產 PDF ─
     if do_pdf:
@@ -696,7 +713,8 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             f_due_str = f_due.strftime("%Y/%m/%d") if f_due else ""
             order_date_str = order_date_input.strftime("%Y/%m/%d")
             cust_date_str = parsed.po_date or order_date_str
-            spec_text = item_specs.get(it.part_number, "") or it.description
+            # v3.1: 規格沒填就空白,不再 fallback 到客戶描述
+            spec_text = (item_specs.get(it.part_number, "") or "").strip()
 
             records_fields.append({
                 COL_GLOCOM_PO: new_po_no,
