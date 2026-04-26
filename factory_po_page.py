@@ -12,6 +12,10 @@ Factory PO 頁面模組,給 GLOCOM Control Tower 使用。
 - core.factory_master (factories.json)
 - core.pdf_generator (產 docx + PDF)
 - core.teable_writeback (回寫 PDF URL)
+
+階段 1 變更(2026-04-26):
+- 新增三個下拉聯動篩選:類型 / 客戶 / 工廠
+- 類型篩選 UI 上 G 改顯示為 GC(內部資料仍維持 G)
 """
 
 import streamlit as st
@@ -40,6 +44,36 @@ from core.pdf_generator import generate_po_files
 from core.teable_writeback import write_pdf_url_to_records
 
 
+# ─── 客戶欄位探測 ─────────────────────────────────
+# core.teable_query 沒有 export COL_CUSTOMER,所以這裡用候選名單探測。
+# 若你的 Teable 表用其他名稱,請加到這個 list。
+CUSTOMER_COL_CANDIDATES = ["Customer", "客戶", "客戶名稱"]
+
+
+def _find_customer_col(df: pd.DataFrame) -> str | None:
+    for c in CUSTOMER_COL_CANDIDATES:
+        if c in df.columns:
+            return c
+    return None
+
+
+def _ui_label_to_order_type(label: str) -> str:
+    """UI selectbox 顯示的標籤,轉回 parse_glocom_po_no 內部的 order_type。
+
+    UI 上 G 顯示為 GC,但內部資料(訂單編號 G1150031-02)仍是 G。
+    """
+    if label == "GC":
+        return "G"
+    return label
+
+
+def _display_order_type(order_type: str) -> str:
+    """內部 order_type 轉成 UI 顯示。"""
+    if order_type == "G":
+        return "GC"
+    return order_type
+
+
 def render_factory_po_page(orders: pd.DataFrame, table_url: str, headers: dict):
     """主頁面渲染。
 
@@ -59,39 +93,107 @@ def render_factory_po_page(orders: pd.DataFrame, table_url: str, headers: dict):
         st.error(f"主表缺少必要欄位「{COL_GLOCOM_PO}」")
         return
 
-    # ─── 選擇西拓訂單編號 ─────────────────────────────
-    po_options = list_glocom_po_options(orders)
-    if not po_options:
-        st.warning("主表沒有任何西拓訂單編號。")
-        return
+    # 偵測客戶欄位
+    customer_col = _find_customer_col(orders)
 
-    st.markdown("### 1. 選擇西拓訂單編號")
+    # ─── 三個下拉聯動篩選 ──────────────────────────
+    st.markdown("### 1. 篩選與選擇西拓訂單編號")
 
-    col_filter, col_select = st.columns([1, 3])
-    with col_filter:
-        type_filter = st.selectbox("類型篩選", ["全部", "ET", "EW", "G"])
+    # filtered 會被三個篩選條件依序縮小範圍,最後再丟給 list_glocom_po_options
+    filtered = orders.copy()
+
+    col_type, col_customer, col_factory = st.columns(3)
+
+    # 1) 類型篩選 (UI 上 G 顯示為 GC)
+    with col_type:
+        type_filter = st.selectbox(
+            "類型篩選",
+            ["全部", "GC", "ET", "EW"],
+            key="po_type_filter",
+            help="GC = GLOCOM 給台灣工廠 / ET = EUSWAY 給台灣工廠 / EW = EUSWAY 給大陸工廠",
+        )
 
     if type_filter != "全部":
-        po_options = [
-            (po, label) for po, label in po_options
-            if parse_glocom_po_no(po)["order_type"] == type_filter
+        actual_order_type = _ui_label_to_order_type(type_filter)
+        type_mask = filtered[COL_GLOCOM_PO].apply(
+            lambda x: parse_glocom_po_no(safe_text(x)).get("order_type", "") == actual_order_type
+        )
+        filtered = filtered[type_mask]
+
+    # 2) 客戶篩選
+    with col_customer:
+        if customer_col:
+            customer_values = sorted({
+                str(x).strip()
+                for x in filtered[customer_col].dropna().tolist()
+                if str(x).strip()
+            })
+            customer_options = ["全部"] + customer_values
+            customer_filter = st.selectbox(
+                "客戶",
+                customer_options,
+                key="po_customer_filter",
+            )
+        else:
+            st.selectbox(
+                "客戶 (找不到欄位)",
+                ["全部"],
+                disabled=True,
+                key="po_customer_filter_disabled",
+            )
+            customer_filter = "全部"
+
+    if customer_filter != "全部" and customer_col:
+        filtered = filtered[
+            filtered[customer_col].astype(str).str.strip() == customer_filter
         ]
 
+    # 3) 工廠篩選
+    with col_factory:
+        if COL_FACTORY in filtered.columns:
+            factory_values = sorted({
+                str(x).strip()
+                for x in filtered[COL_FACTORY].dropna().tolist()
+                if str(x).strip()
+            })
+            factory_options = ["全部"] + factory_values
+            factory_filter = st.selectbox(
+                "工廠",
+                factory_options,
+                key="po_factory_filter",
+            )
+        else:
+            st.selectbox(
+                "工廠 (找不到欄位)",
+                ["全部"],
+                disabled=True,
+                key="po_factory_filter_disabled",
+            )
+            factory_filter = "全部"
+
+    if factory_filter != "全部" and COL_FACTORY in filtered.columns:
+        filtered = filtered[
+            filtered[COL_FACTORY].astype(str).str.strip() == factory_filter
+        ]
+
+    # ─── 從過濾後 orders 撈 PO options ─────────────
+    po_options = list_glocom_po_options(filtered)
+
     if not po_options:
-        st.info(f"沒有 {type_filter} 類型的單號。")
+        st.info("依目前篩選條件沒有任何訂單。請調整上方篩選器。")
         return
 
-    with col_select:
-        selected_idx = st.selectbox(
-            f"西拓訂單編號 (共 {len(po_options)} 個可選)",
-            range(len(po_options)),
-            format_func=lambda i: po_options[i][1],
-            key="factory_po_select",
-        )
+    selected_idx = st.selectbox(
+        f"西拓訂單編號 (共 {len(po_options)} 個可選)",
+        range(len(po_options)),
+        format_func=lambda i: po_options[i][1],
+        key="factory_po_select",
+    )
 
     po_no = po_options[selected_idx][0]
 
     # ─── 撈出該編號的所有 row ─────────────────────────
+    # 注意:get_po_rows 用原始 orders(不是 filtered),確保抓得到完整品項
     rows = get_po_rows(orders, po_no)
     if rows.empty:
         st.error(f"找不到 {po_no} 的資料")
@@ -104,7 +206,7 @@ def render_factory_po_page(orders: pd.DataFrame, table_url: str, headers: dict):
 
     info_cols = st.columns(4)
     info_cols[0].metric("品項數", len(rows))
-    info_cols[1].metric("訂單類型", parsed["order_type"])
+    info_cols[1].metric("訂單類型", _display_order_type(parsed["order_type"]))
     info_cols[2].metric("開單抬頭", parsed["issuing_company"])
     factory_short = safe_text(rows.iloc[0][COL_FACTORY]) if COL_FACTORY in rows.columns else ""
     info_cols[3].metric("工廠", factory_short or "(無)")
@@ -213,8 +315,6 @@ def render_factory_po_page(orders: pd.DataFrame, table_url: str, headers: dict):
                 if not record_ids:
                     st.warning("找不到對應的 record_id,無法回寫 Teable")
                 else:
-                    # 寫入欄位用 PDF 檔名(實際 URL 取決於部署環境;
-                    # 第一版先寫檔名,之後可改成 S3 / pCloud / 雲端 URL)
                     pdf_url_to_write = (
                         str(pdf_path) if pdf_path else str(docx_path)
                     )
