@@ -1288,7 +1288,7 @@ menu = st.sidebar.radio(
         "業績明細表",
         "Customer Preview",
         "Import / Update",
-        "工廠 PO", 
+        "工廠 PO",
         "SignFlow",
     ]
 )
@@ -1932,13 +1932,20 @@ elif menu == "Import / Update":
                                     st.error(msg)
             except Exception as e:
                 st.error(f"Image OCR failed: {e}")
-                
+
 elif menu == "工廠 PO":
     st.subheader("🏭 工廠 PO")
-    tab_create, tab_query = st.tabs(["📝 建立新訂單", "📋 查詢 / 管理訂單"])
+    tab_create, tab_edit, tab_query = st.tabs([
+        "📝 建立新訂單",
+        "✏️ 編輯既有訂單",
+        "📋 查詢/管理訂單",
+    ])
     with tab_create:
         from factory_po_create_page import render_factory_po_create_page
         render_factory_po_create_page(orders, TABLE_URL, HEADERS)
+    with tab_edit:
+        from factory_po_edit_page import render_factory_po_edit_page
+        render_factory_po_edit_page(orders, TABLE_URL, HEADERS)
     with tab_query:
         from factory_po_page import render_factory_po_page
         render_factory_po_page(orders, TABLE_URL, HEADERS)
