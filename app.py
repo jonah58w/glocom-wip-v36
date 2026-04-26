@@ -391,7 +391,7 @@ def parse_factory_text_report(text: str) -> pd.DataFrame:
 # ================================
 def ocr_image_to_text(image: Image.Image) -> str:
     try:
-        return pytesseract.image_to_string(image, lang="eng")
+        return pytesseract.image_to_string(image, lang="chi_tra+eng")
     except Exception as e:
         return f"OCR_ERROR: {e}"
 def extract_po_from_text(text: str) -> str:
