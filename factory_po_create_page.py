@@ -1,11 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v2。
+建立工廠 PO 頁面 v3。
 
-主要更新(v2):
-- Step 5 規格改成「新料號完整規格」+「舊料號簡短規格」雙模式
-- 規格輸出改為「一列」(用分號 ; 串接,不換行),不再拉長頁面
-- Step 6 確認鍵拆成兩個獨立按鈕:【產 PDF】+【寫回 Teable】
+主要更新(v3):
+- Step 5 規格改成 3 個 Tab:
+  Tab A: ⚡ 從前一張同料號訂單帶入(查 Teable 主表「客戶要求注意事項」欄)
+  Tab B: 📋 多列貼上(從 ERP 一列一列複製,自動用 ; 串接)
+  Tab C: ✏️ 手動輸入(新料號完整規格 / 舊料號簡短規格)
+- Step 6 確認鍵已拆成兩個獨立按鈕:【產 PDF】+【寫回 Teable】
+- 規格輸出維持「一列」(不換行)
+- 提供「最終規格(可編輯)」文字框,各 Tab 套用後皆可繼續修改
 """
 
 from __future__ import annotations
@@ -48,6 +52,7 @@ SPEC_OPTIONS_FULL = {
 }
 
 
+# ─── 工廠主檔 ────────────────────────────────────
 def load_factories() -> dict:
     if not FACTORIES_JSON.exists():
         return {}
@@ -61,6 +66,7 @@ def load_factories() -> dict:
         return {}
 
 
+# ─── 字首邏輯 ────────────────────────────────────
 def derive_prefix(issuing_company: str, factory_region: str) -> str:
     issuing = (issuing_company or "").upper()
     region = (factory_region or "").lower()
@@ -105,6 +111,7 @@ def calc_next_po_number(orders_df: pd.DataFrame, prefix: str) -> str:
     return f"{prefix}{year}{serial + 1:04d}-01"
 
 
+# ─── Teable 寫入 ─────────────────────────────────
 def create_teable_records(table_url: str, headers: dict, fields_list: list) -> dict:
     result = {"success": 0, "failed": 0, "errors": [], "created_ids": []}
     if not fields_list:
@@ -133,12 +140,78 @@ def create_teable_records(table_url: str, headers: dict, fields_list: list) -> d
     return result
 
 
+# ─── Teable 查同料號歷史 ─────────────────────────
+def fetch_previous_spec(orders: pd.DataFrame, part_number: str):
+    """查 Teable 主表,找同 P/N 最近一筆有規格的訂單。
+    Returns: list of dict [{"po_no", "spec", "factory", "date"}],按日期降冪排序。
+    """
+    results = []
+    if orders.empty:
+        return results
+
+    pn_col = "P/N"
+    spec_col = "客戶要求注意事項"
+    po_col = COL_GLOCOM_PO
+    date_col = "工廠下單日期"
+    factory_col = "工廠"
+
+    if pn_col not in orders.columns:
+        return results
+
+    pn_target = str(part_number).strip()
+    matches = orders[orders[pn_col].astype(str).str.strip() == pn_target].copy()
+    if matches.empty:
+        return results
+
+    # 按工廠下單日期排序(降冪)
+    if date_col in matches.columns:
+        matches[date_col + "_dt"] = pd.to_datetime(matches[date_col], errors="coerce")
+        matches = matches.sort_values(date_col + "_dt", ascending=False)
+
+    seen_pos = set()
+    for _, row in matches.iterrows():
+        po = str(row.get(po_col, "")).strip() if po_col in row.index else ""
+        if not po or po in seen_pos:
+            continue
+        seen_pos.add(po)
+        spec = str(row.get(spec_col, "")).strip() if spec_col in row.index else ""
+        if pd.isna(spec) or spec.lower() == "nan":
+            spec = ""
+        factory = str(row.get(factory_col, "")).strip() if factory_col in row.index else ""
+        date_str = str(row.get(date_col, "")).strip() if date_col in row.index else ""
+        results.append({
+            "po_no": po,
+            "spec": spec,
+            "factory": factory,
+            "date": date_str,
+        })
+        if len(results) >= 5:  # 最多回 5 筆
+            break
+
+    return results
+
+
+# ─── 規格組字串 ──────────────────────────────────
+def build_full_spec_oneline(selections: dict, extra_text: str) -> str:
+    """新料號完整規格 → 一列字串"""
+    parts = []
+    for cat, val in selections.items():
+        if val:
+            if cat in ("Tg",):
+                parts.append(val)
+            else:
+                parts.append(f"{cat}: {val}")
+    if extra_text and extra_text.strip():
+        parts.append(extra_text.strip())
+    return "; ".join(parts)
+
+
 def build_po_context_from_new_order(
     new_po_no, parsed, factory_data, factory_short, issuing_company,
     factory_unit_prices, factory_due_dates, item_specs,
     purchase_responsible, order_date, is_revised,
 ):
-    """item_specs: dict {part_no: spec_text} 每品項各自的規格(一列字串)"""
+    """item_specs: dict {part_no: spec_text}"""
     items = []
     for it in parsed.items:
         f_price = float(factory_unit_prices.get(it.part_number, 0.0))
@@ -185,20 +258,163 @@ def _reset_form():
             pass
 
 
-def build_full_spec_oneline(selections: dict, extra_text: str) -> str:
-    """新料號完整規格 → 一列字串 (用 ; 串接)
-    例: Material: 4L; Tg170; Board thickness: 1.6mm; ...
-    """
-    parts = []
-    for cat, val in selections.items():
-        if val:
-            if cat in ("Tg",):
-                parts.append(val)
-            else:
-                parts.append(f"{cat}: {val}")
-    if extra_text and extra_text.strip():
-        parts.append(extra_text.strip())
-    return "; ".join(parts)
+# ─── Step 5 規格輸入(每品項 3 個 Tab) ─────────
+def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
+    """渲染 Step 5 單一品項的規格輸入區。回傳最終規格字串。"""
+
+    # 最終規格存在這個 session_state key
+    final_key = f"fpo_spec_final_{idx}"
+    if final_key not in st.session_state:
+        st.session_state[final_key] = ""
+
+    with st.container(border=True):
+        st.markdown(f"**品項 {idx + 1}:`{item.part_number}`**(數量 {item.quantity:,})")
+
+        tab_a, tab_b, tab_c = st.tabs([
+            "⚡ 從前一張同料號帶入",
+            "📋 多列貼上(從 ERP)",
+            "✏️ 手動輸入",
+        ])
+
+        # ─── Tab A: 從歷史訂單帶入 ─
+        with tab_a:
+            st.caption(f"從 Teable 主表查 P/N『{item.part_number}』的歷史訂單,取最近一筆規格")
+
+            if st.button(f"🔍 查詢", key=f"fpo_query_btn_{idx}"):
+                hits = fetch_previous_spec(orders, item.part_number)
+                st.session_state[f"fpo_query_hits_{idx}"] = hits
+
+            hits = st.session_state.get(f"fpo_query_hits_{idx}")
+            if hits is not None:
+                if not hits:
+                    st.warning(f"沒找到 P/N『{item.part_number}』的歷史訂單")
+                else:
+                    st.info(f"找到 **{len(hits)}** 筆歷史訂單(由新到舊)")
+                    for h_idx, h in enumerate(hits):
+                        with st.expander(
+                            f"📦 {h['po_no']}  |  {h['factory']}  |  {h['date']}",
+                            expanded=(h_idx == 0),
+                        ):
+                            if h["spec"]:
+                                st.code(h["spec"], language=None)
+                                if st.button(
+                                    f"⬇ 套用此規格",
+                                    key=f"fpo_apply_hist_{idx}_{h_idx}",
+                                    type="primary",
+                                ):
+                                    st.session_state[final_key] = h["spec"]
+                                    st.rerun()
+                            else:
+                                st.caption("(此筆訂單沒填規格)")
+
+        # ─── Tab B: 多列貼上 ─
+        with tab_b:
+            st.caption("從 ERP 一列一列複製貼上(最多 8 列),按下「組合」會用『; 』串成一列")
+            paste_lines = []
+            cols_paste = st.columns(2)
+            for line_idx in range(8):
+                target = cols_paste[line_idx % 2]
+                with target:
+                    line = st.text_input(
+                        f"第 {line_idx + 1} 列",
+                        key=f"fpo_paste_{idx}_{line_idx}",
+                        placeholder="例如: 8L, FR4, 1.6mm, 1up",
+                    )
+                if line and line.strip():
+                    paste_lines.append(line.strip())
+
+            cols_btn_b = st.columns([3, 1])
+            with cols_btn_b[0]:
+                if paste_lines:
+                    preview = "; ".join(paste_lines)
+                    st.caption(f"預覽: `{preview}`")
+            with cols_btn_b[1]:
+                if st.button(
+                    "⬇ 組合並套用",
+                    key=f"fpo_combine_paste_{idx}",
+                    disabled=not paste_lines,
+                    use_container_width=True,
+                    type="primary",
+                ):
+                    st.session_state[final_key] = "; ".join(paste_lines)
+                    st.rerun()
+
+        # ─── Tab C: 手動輸入 ─
+        with tab_c:
+            mode = st.radio(
+                "規格類型",
+                ["新料號(完整規格)", "舊料號(簡短規格)"],
+                horizontal=True,
+                key=f"fpo_spec_mode_{idx}",
+            )
+
+            if mode == "新料號(完整規格)":
+                st.caption("勾選 7 項基本規格 + 補充其他要求。會組成一列。")
+                cols_a = st.columns(4)
+                cols_b = st.columns(4)
+                selections = {}
+                cats = list(SPEC_OPTIONS_FULL.keys())
+                for i, cat in enumerate(cats):
+                    target_col = cols_a[i] if i < 4 else cols_b[i - 4]
+                    with target_col:
+                        selections[cat] = st.selectbox(
+                            cat, [""] + SPEC_OPTIONS_FULL[cat],
+                            key=f"fpo_spec_full_{idx}_{cat}",
+                        )
+
+                extra = st.text_input(
+                    "其他規格 / 補充",
+                    placeholder="例如: 排版 4up panel; 須加西拓 UL Logo + Date Code (YYWW)",
+                    key=f"fpo_spec_full_extra_{idx}",
+                )
+
+                preview = build_full_spec_oneline(selections, extra)
+                cols_btn_c = st.columns([3, 1])
+                with cols_btn_c[0]:
+                    if preview:
+                        st.caption(f"預覽: `{preview}`")
+                with cols_btn_c[1]:
+                    if st.button(
+                        "⬇ 套用",
+                        key=f"fpo_apply_full_{idx}",
+                        disabled=not preview,
+                        use_container_width=True,
+                        type="primary",
+                    ):
+                        st.session_state[final_key] = preview
+                        st.rerun()
+
+            else:  # 舊料號簡短
+                st.caption("舊料號通常只要寫『舊料號;重點規格』即可,例如『舊料號;S/M: Red』")
+                short = st.text_input(
+                    "簡短規格(直接輸入一列)",
+                    placeholder='例如: 舊料號;S/M: Red 或 舊料號;4up, 但規格須改為 Tg170; ENIG: 2u"',
+                    key=f"fpo_spec_short_{idx}",
+                )
+
+                cols_btn_c = st.columns([3, 1])
+                with cols_btn_c[1]:
+                    if st.button(
+                        "⬇ 套用",
+                        key=f"fpo_apply_short_{idx}",
+                        disabled=not short.strip(),
+                        use_container_width=True,
+                        type="primary",
+                    ):
+                        st.session_state[final_key] = short.strip()
+                        st.rerun()
+
+        # ─── 最終規格(可編輯) ─
+        st.markdown("##### 📋 最終規格(印在 PO 上,可直接編輯)")
+        st.text_area(
+            "最終規格",
+            key=final_key,
+            label_visibility="collapsed",
+            height=68,
+            placeholder="(尚未套用任何規格,可手動輸入或從上方 Tab 套用)",
+        )
+
+    return st.session_state[final_key]
 
 
 # ─── 主入口 ───────────────────────────────────────
@@ -211,7 +427,7 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
         st.error("data/factories.json 讀取失敗或無工廠資料")
         st.stop()
 
-    # ─── Step 1: 上傳 PDF ─
+    # ─── Step 1 ─
     st.markdown("### Step 1. 上傳客戶 PO PDF")
     col_up, col_clear = st.columns([4, 1])
     with col_up:
@@ -231,7 +447,7 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
         st.info("👆 請上傳客戶 PO PDF。")
         st.stop()
 
-    # ─── Step 2: 解析 ─
+    # ─── Step 2 ─
     try:
         with st.spinner("解析 PDF..."):
             pdf_bytes = uploaded.getvalue()
@@ -288,10 +504,9 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             except: pass
             parsed.items[i].delivery_date = str(row["客戶交期"]).strip() or None
 
-    # ─── Step 3: 工廠 + 字首 + 編號 ─
+    # ─── Step 3 ─
     st.markdown("### Step 3. 工廠 / 發出公司 / 字首 / 編號")
     s3_cols = st.columns(3)
-
     factory_keys = sorted(factories.keys())
     with s3_cols[0]:
         factory_short = st.selectbox(
@@ -339,7 +554,7 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     with cols_pic[0]:
         purchase_responsible = st.text_input("負責採購", value="Amy", key="fpo_pic")
 
-    # ─── Step 4: 工廠單價 + 出貨日 ─
+    # ─── Step 4 ─
     st.markdown("### Step 4. 每品項:工廠單價 + 工廠交期")
     factory_unit_prices = {}
     factory_due_dates = {}
@@ -371,61 +586,19 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     )
     st.metric("工廠總金額", f"{factory_data.get('default_currency', 'NT$')} {factory_total:,.2f}")
 
-    # ─── Step 5: 每品項規格(雙模式)─
+    # ─── Step 5: 每品項規格(3 Tab) ─
     st.markdown("### Step 5. 每品項產品規格")
-    st.caption("規格會印成「一列」放在工廠 PO 的『產品規格』欄。請選擇填寫模式。")
+    st.caption("每個品項各有 3 種輸入方式可選。規格會以「一列」印在工廠 PO 的『產品規格』欄。")
 
-    item_specs = {}  # {part_no: spec_text}
-
+    item_specs = {}
     for idx, it in enumerate(parsed.items):
-        with st.container(border=True):
-            st.markdown(f"**品項 {idx + 1}:`{it.part_number}`**(數量 {it.quantity})")
-
-            mode = st.radio(
-                "規格類型",
-                ["新料號(完整規格)", "舊料號(簡短規格)"],
-                horizontal=True,
-                key=f"fpo_spec_mode_{idx}",
-            )
-
-            if mode == "新料號(完整規格)":
-                cols_a = st.columns(4)
-                cols_b = st.columns(4)
-                selections = {}
-                cats = list(SPEC_OPTIONS_FULL.keys())
-                for i, cat in enumerate(cats):
-                    target_col = cols_a[i] if i < 4 else cols_b[i - 4]
-                    with target_col:
-                        selections[cat] = st.selectbox(
-                            cat, [""] + SPEC_OPTIONS_FULL[cat],
-                            key=f"fpo_spec_full_{idx}_{cat}",
-                        )
-
-                extra = st.text_input(
-                    "其他規格 / 補充(會接在後面,可空)",
-                    placeholder="例如: 排版 4up panel; 須加西拓 UL Logo + Date Code (YYWW)",
-                    key=f"fpo_spec_full_extra_{idx}",
-                )
-                spec_text = build_full_spec_oneline(selections, extra)
-
-            else:  # 舊料號模式
-                spec_text = st.text_input(
-                    "舊料號規格(直接輸入一列)",
-                    placeholder="例如: 舊料號;4up, 但規格須改為 Tg170; ENIG: 2u\"",
-                    key=f"fpo_spec_short_{idx}",
-                )
-
-            if spec_text:
-                st.success(f"📋 印在 PO 上:`{spec_text}`")
-            else:
-                st.info("⚠️ 規格還沒填,印出來會是空的(或 fallback 客戶描述)")
-
-            item_specs[it.part_number] = spec_text
+        spec_text = render_spec_input_for_item(idx, it, orders)
+        item_specs[it.part_number] = spec_text
 
     # ─── Step 6: 兩個獨立按鈕 ─
     st.divider()
     st.markdown("### Step 6. 產出 / 寫回")
-    st.caption("**產 PDF** 和 **寫回 Teable** 是分開的,可以分別執行。建議先按產 PDF 預覽 → OK 再按寫回 Teable。")
+    st.caption("**產 PDF** 和 **寫回 Teable** 是分開的。建議先產 PDF 預覽 → OK 再寫回 Teable。")
 
     btn_cols = st.columns([2, 2, 1])
     with btn_cols[0]:
@@ -450,15 +623,16 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     if not (do_pdf or do_writeback):
         st.stop()
 
+    # ─── 共用驗證 ─
     zero_price_pns = [pn for pn, price in factory_unit_prices.items() if price == 0]
     if zero_price_pns:
         st.warning(f"⚠️ 工廠單價為 0 的品項:{', '.join(zero_price_pns)}")
 
-    empty_spec_pns = [pn for pn, sp in item_specs.items() if not sp.strip()]
+    empty_spec_pns = [pn for pn, sp in item_specs.items() if not (sp or "").strip()]
     if empty_spec_pns:
-        st.warning(f"⚠️ 規格沒填的品項:{', '.join(empty_spec_pns)}(會用客戶 PO 描述當 fallback)")
+        st.warning(f"⚠️ 規格沒填的品項:{', '.join(empty_spec_pns)}(會 fallback 用客戶 PO 描述)")
 
-    # ─── 產 PDF 流程 ─
+    # ─── 產 PDF ─
     if do_pdf:
         po_ctx = build_po_context_from_new_order(
             new_po_no=new_po_no, parsed=parsed, factory_data=factory_data,
@@ -480,7 +654,6 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             if "PO_EUSWAY" in str(e):
                 st.error(
                     "❌ EUSWAY 模板未上傳:`templates/PO_EUSWAY.docx` 不存在。"
-                    "如需產 EW 字首 PO,請先建立並上傳 PO_EUSWAY.docx。"
                 )
             else:
                 st.error(f"❌ 產 PDF 失敗:{e}")
@@ -514,7 +687,7 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
 
         st.info("📝 PDF 確認 OK 後,可按上方「💾 寫回 Teable」把資料寫進主表。")
 
-    # ─── 寫回 Teable 流程 ─
+    # ─── 寫回 Teable ─
     if do_writeback:
         records_fields = []
         for it in parsed.items:
