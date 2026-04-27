@@ -284,97 +284,140 @@ def _reset_form():
             pass
 
 
-# ─── Step 5 規格輸入(每品項 3 個 Tab) ─────────
+# ─── Step 5 規格輸入(每品項)──────────────────
 def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
-    """渲染 Step 5 單一品項的規格輸入區。回傳最終規格字串。"""
+    """
+    渲染 Step 5 單一品項的規格輸入區。回傳最終規格字串。
+
+    v3.3 變更:
+    - 頂部加「舊料號 / 新料號」radio
+    - 選舊料號 → 預設帶「舊料號:{排版}」+「注意:{客戶 PO 抽出的注意事項}」到最終規格框
+    - 選新料號 → 顯示 3 個工具 Tab,必須填規格
+    """
 
     # 最終規格存在這個 session_state key
     final_key = f"fpo_spec_final_{idx}"
     if final_key not in st.session_state:
         st.session_state[final_key] = ""
 
+    # 料號類型 key
+    type_key = f"fpo_spec_type_{idx}"
+    if type_key not in st.session_state:
+        st.session_state[type_key] = "舊料號"  # 預設舊料號
+
+    # 已套用過舊料號預設值的記號(避免每次 rerun 都覆蓋用戶編輯)
+    applied_old_default_key = f"fpo_spec_old_applied_{idx}"
+
     with st.container(border=True):
         st.markdown(f"**品項 {idx + 1}:`{item.part_number}`**(數量 {item.quantity:,})")
 
-        tab_a, tab_b, tab_c = st.tabs([
-            "⚡ 從前一張同料號帶入",
-            "📋 多列貼上(從 ERP)",
-            "✏️ 手動輸入",
-        ])
-
-        # ─── Tab A: 從歷史訂單帶入 ─
-        with tab_a:
-            st.caption(f"從 Teable 主表查 P/N『{item.part_number}』的歷史訂單,取最近一筆規格")
-
-            if st.button(f"🔍 查詢", key=f"fpo_query_btn_{idx}"):
-                hits = fetch_previous_spec(orders, item.part_number)
-                st.session_state[f"fpo_query_hits_{idx}"] = hits
-
-            hits = st.session_state.get(f"fpo_query_hits_{idx}")
-            if hits is not None:
-                if not hits:
-                    st.warning(f"沒找到 P/N『{item.part_number}』的歷史訂單")
-                else:
-                    st.info(f"找到 **{len(hits)}** 筆歷史訂單(由新到舊)")
-                    for h_idx, h in enumerate(hits):
-                        with st.expander(
-                            f"📦 {h['po_no']}  |  {h['factory']}  |  {h['date']}",
-                            expanded=(h_idx == 0),
-                        ):
-                            if h["spec"]:
-                                st.code(h["spec"], language=None)
-                                if st.button(
-                                    f"⬇ 套用此規格",
-                                    key=f"fpo_apply_hist_{idx}_{h_idx}",
-                                    type="primary",
-                                ):
-                                    st.session_state[final_key] = h["spec"]
-                                    st.rerun()
-                            else:
-                                st.caption("(此筆訂單沒填規格)")
-
-        # ─── Tab B: 多列貼上 ─
-        with tab_b:
-            st.caption("從 ERP 一列一列複製貼上(最多 8 列),按下「組合」會用『; 』串成一列")
-            paste_lines = []
-            cols_paste = st.columns(2)
-            for line_idx in range(8):
-                target = cols_paste[line_idx % 2]
-                with target:
-                    line = st.text_input(
-                        f"第 {line_idx + 1} 列",
-                        key=f"fpo_paste_{idx}_{line_idx}",
-                        placeholder="例如: 8L, FR4, 1.6mm, 1up",
-                    )
-                if line and line.strip():
-                    paste_lines.append(line.strip())
-
-            cols_btn_b = st.columns([3, 1])
-            with cols_btn_b[0]:
-                if paste_lines:
-                    preview = "; ".join(paste_lines)
-                    st.caption(f"預覽: `{preview}`")
-            with cols_btn_b[1]:
-                if st.button(
-                    "⬇ 組合並套用",
-                    key=f"fpo_combine_paste_{idx}",
-                    disabled=not paste_lines,
-                    use_container_width=True,
-                    type="primary",
-                ):
-                    st.session_state[final_key] = "; ".join(paste_lines)
-                    st.rerun()
-
-        # ─── Tab C: 手動輸入 ─
-        with tab_c:
-            mode = st.radio(
-                "規格類型",
-                ["新料號(完整規格)", "舊料號(簡短規格)"],
+        # ─── 頂部:選舊/新料號 ─
+        cols_type = st.columns([2, 5])
+        with cols_type[0]:
+            new_type = st.radio(
+                "料號類型",
+                ["舊料號", "新料號"],
+                key=type_key,
                 horizontal=True,
-                key=f"fpo_spec_mode_{idx}",
             )
 
-            if mode == "新料號(完整規格)":
+        # 舊料號邏輯:第一次切到舊料號時,把「舊料號 + 客戶注意事項」帶進最終規格框
+        if new_type == "舊料號":
+            with cols_type[1]:
+                st.caption("👉 系統已自動帶入「舊料號 + 客戶 PO 上的注意事項」。請於最終規格框直接編輯。")
+
+            # 只在還沒套用過舊料號預設值時才覆蓋
+            if not st.session_state.get(applied_old_default_key, False):
+                # 從客戶 PO 抽出來的描述當「注意事項」素材
+                customer_desc = (item.description or "").strip()
+                # 預設值:「舊料號」+(若有客戶描述就附上)
+                default_lines = ["舊料號"]
+                if customer_desc:
+                    default_lines.append(f"注意:")
+                    default_lines.append(customer_desc)
+                st.session_state[final_key] = "\n".join(default_lines)
+                st.session_state[applied_old_default_key] = True
+
+        else:  # 新料號
+            with cols_type[1]:
+                st.caption("👉 新料號:用下方 3 個工具填完整規格,或直接在最終規格框打字。")
+
+            # 切到新料號時,清掉舊料號預設值記號(下次切回去會重新套用)
+            st.session_state[applied_old_default_key] = False
+
+        # ─── 工具區(只在新料號時顯示)─
+        if new_type == "新料號":
+            tab_a, tab_b, tab_c = st.tabs([
+                "⚡ 從前一張同料號帶入",
+                "📋 多列貼上(從 ERP)",
+                "✏️ 7 選單 + 補充",
+            ])
+
+            # ─── Tab A: 從歷史訂單帶入 ─
+            with tab_a:
+                st.caption(f"從 Teable 主表查 P/N『{item.part_number}』的歷史訂單,取最近一筆規格")
+
+                if st.button(f"🔍 查詢", key=f"fpo_query_btn_{idx}"):
+                    hits = fetch_previous_spec(orders, item.part_number)
+                    st.session_state[f"fpo_query_hits_{idx}"] = hits
+
+                hits = st.session_state.get(f"fpo_query_hits_{idx}")
+                if hits is not None:
+                    if not hits:
+                        st.warning(f"沒找到 P/N『{item.part_number}』的歷史訂單")
+                    else:
+                        st.info(f"找到 **{len(hits)}** 筆歷史訂單(由新到舊)")
+                        for h_idx, h in enumerate(hits):
+                            with st.expander(
+                                f"📦 {h['po_no']}  |  {h['factory']}  |  {h['date']}",
+                                expanded=(h_idx == 0),
+                            ):
+                                if h["spec"]:
+                                    st.code(h["spec"], language=None)
+                                    if st.button(
+                                        f"⬇ 套用此規格",
+                                        key=f"fpo_apply_hist_{idx}_{h_idx}",
+                                        type="primary",
+                                    ):
+                                        st.session_state[final_key] = h["spec"]
+                                        st.rerun()
+                                else:
+                                    st.caption("(此筆訂單沒填規格)")
+
+            # ─── Tab B: 多列貼上 ─
+            with tab_b:
+                st.caption("從 ERP 一列一列複製貼上(最多 8 列),按下「組合」會用『; 』串成一列")
+                paste_lines = []
+                cols_paste = st.columns(2)
+                for line_idx in range(8):
+                    target = cols_paste[line_idx % 2]
+                    with target:
+                        line = st.text_input(
+                            f"第 {line_idx + 1} 列",
+                            key=f"fpo_paste_{idx}_{line_idx}",
+                            placeholder="例如: 8L, FR4, 1.6mm, 1up",
+                        )
+                    if line and line.strip():
+                        paste_lines.append(line.strip())
+
+                cols_btn_b = st.columns([3, 1])
+                with cols_btn_b[0]:
+                    if paste_lines:
+                        preview = "; ".join(paste_lines)
+                        st.caption(f"預覽: `{preview}`")
+                with cols_btn_b[1]:
+                    if st.button(
+                        "⬇ 組合並套用",
+                        key=f"fpo_combine_paste_{idx}",
+                        disabled=not paste_lines,
+                        use_container_width=True,
+                        type="primary",
+                    ):
+                        st.session_state[final_key] = "; ".join(paste_lines)
+                        st.rerun()
+
+            # ─── Tab C: 7 選單 + 補充 ─
+            with tab_c:
                 st.caption("勾選 7 項基本規格 + 補充其他要求。會組成一列。")
                 cols_a = st.columns(4)
                 cols_b = st.columns(4)
@@ -410,34 +453,19 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                         st.session_state[final_key] = preview
                         st.rerun()
 
-            else:  # 舊料號簡短
-                st.caption("舊料號通常只要寫『舊料號;重點規格』即可,例如『舊料號;S/M: Red』")
-                short = st.text_input(
-                    "簡短規格(直接輸入一列)",
-                    placeholder='例如: 舊料號;S/M: Red 或 舊料號;4up, 但規格須改為 Tg170; ENIG: 2u"',
-                    key=f"fpo_spec_short_{idx}",
-                )
-
-                cols_btn_c = st.columns([3, 1])
-                with cols_btn_c[1]:
-                    if st.button(
-                        "⬇ 套用",
-                        key=f"fpo_apply_short_{idx}",
-                        disabled=not short.strip(),
-                        use_container_width=True,
-                        type="primary",
-                    ):
-                        st.session_state[final_key] = short.strip()
-                        st.rerun()
-
-        # ─── 最終規格(可編輯) ─
+        # ─── 最終規格框(永遠可編輯)─
         st.markdown("##### 📋 最終規格(印在 PO 上,可直接編輯)")
+        if new_type == "舊料號":
+            spec_placeholder = "舊料號\n注意:\n1. ...\n2. ..."
+        else:
+            spec_placeholder = "(尚未套用任何規格,可手動輸入或從上方工具套用)"
+
         st.text_area(
             "最終規格",
             key=final_key,
             label_visibility="collapsed",
-            height=68,
-            placeholder="(尚未套用任何規格,可手動輸入或從上方 Tab 套用)",
+            height=120,  # 加大高度,讓多行注意事項好編輯
+            placeholder=spec_placeholder,
         )
 
     return st.session_state[final_key]
