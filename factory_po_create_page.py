@@ -41,6 +41,7 @@ from core.teable_query import (
 # ─── 設定 ────────────────────────────────────────
 HERE = Path(__file__).parent
 FACTORIES_JSON = HERE / "data" / "factories.json"
+SPEC_HISTORY_JSON = HERE / "data" / "spec_history.json"
 
 
 # 新料號完整規格的選項
@@ -166,53 +167,94 @@ def create_teable_records(table_url: str, headers: dict, fields_list: list) -> d
 
 
 # ─── Teable 查同料號歷史 ─────────────────────────
-def fetch_previous_spec(orders: pd.DataFrame, part_number: str):
-    """查 Teable 主表,找同 P/N 最近一筆有規格的訂單。
-    Returns: list of dict [{"po_no", "spec", "factory", "date"}],按日期降冪排序。
+def load_spec_history() -> dict:
+    """讀 data/spec_history.json (從歷史 RTF/DOCX 訂單檔抽出來的注意事項對應表)"""
+    if not SPEC_HISTORY_JSON.exists():
+        return {}
+    try:
+        with open(SPEC_HISTORY_JSON, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("spec_history", {}) or {}
+    except Exception as e:
+        st.warning(f"spec_history.json 讀取失敗:{e}")
+        return {}
+
+
+def fetch_previous_spec(orders: pd.DataFrame, part_number: str, factory_short: str = ""):
+    """
+    查同 P/N 最近一筆訂單的規格。
+    
+    v3.4 變更:
+    - 優先從 data/spec_history.json(歷史 RTF/DOCX 解析結果)抓
+    - 找不到再從 Teable 主表「客戶要求注意事項」欄抓
+    
+    Args:
+        factory_short: 若有指定,優先回傳同工廠的最近一筆;沒有再降級到不分工廠
+    
+    Returns: list of dict [{"po_no", "spec", "factory", "date", "source"}],按日期降冪。
+             source = "history_file" 或 "teable"
     """
     results = []
-    if orders.empty:
-        return results
-
-    pn_col = "P/N"
-    spec_col = "客戶要求注意事項"
-    po_col = COL_GLOCOM_PO
-    date_col = "工廠下單日期"
-    factory_col = "工廠"
-
-    if pn_col not in orders.columns:
-        return results
-
     pn_target = str(part_number).strip()
-    matches = orders[orders[pn_col].astype(str).str.strip() == pn_target].copy()
-    if matches.empty:
+    if not pn_target:
         return results
-
-    # 按工廠下單日期排序(降冪)
-    if date_col in matches.columns:
-        matches[date_col + "_dt"] = pd.to_datetime(matches[date_col], errors="coerce")
-        matches = matches.sort_values(date_col + "_dt", ascending=False)
-
-    seen_pos = set()
-    for _, row in matches.iterrows():
-        po = str(row.get(po_col, "")).strip() if po_col in row.index else ""
-        if not po or po in seen_pos:
-            continue
-        seen_pos.add(po)
-        spec = str(row.get(spec_col, "")).strip() if spec_col in row.index else ""
-        if pd.isna(spec) or spec.lower() == "nan":
-            spec = ""
-        factory = str(row.get(factory_col, "")).strip() if factory_col in row.index else ""
-        date_str = str(row.get(date_col, "")).strip() if date_col in row.index else ""
-        results.append({
-            "po_no": po,
-            "spec": spec,
-            "factory": factory,
-            "date": date_str,
-        })
-        if len(results) >= 5:  # 最多回 5 筆
-            break
-
+    
+    # ─── 1. 從 spec_history.json 查 ─
+    spec_history = load_spec_history()
+    if pn_target in spec_history:
+        history_records = spec_history[pn_target].get("history", [])
+        # 同工廠優先
+        if factory_short:
+            same_factory = [r for r in history_records if r.get("factory") == factory_short]
+            other = [r for r in history_records if r.get("factory") != factory_short]
+            ordered = same_factory + other
+        else:
+            ordered = history_records
+        for r in ordered:
+            results.append({
+                "po_no": r.get("po", ""),
+                "spec": r.get("spec_text", ""),
+                "factory": r.get("factory", ""),
+                "date": r.get("date", ""),
+                "source": "history_file",
+            })
+    
+    # ─── 2. 若 spec_history 沒命中,再查 Teable 主表 ─
+    if not results and not orders.empty:
+        pn_col = "P/N"
+        spec_col = "客戶要求注意事項"
+        po_col = COL_GLOCOM_PO
+        date_col = "工廠下單日期"
+        factory_col = "工廠"
+        
+        if pn_col in orders.columns:
+            matches = orders[orders[pn_col].astype(str).str.strip() == pn_target].copy()
+            if not matches.empty:
+                if date_col in matches.columns:
+                    matches[date_col + "_dt"] = pd.to_datetime(matches[date_col], errors="coerce")
+                    matches = matches.sort_values(date_col + "_dt", ascending=False)
+                
+                seen_pos = set()
+                for _, row in matches.iterrows():
+                    po = str(row.get(po_col, "")).strip() if po_col in row.index else ""
+                    if not po or po in seen_pos:
+                        continue
+                    seen_pos.add(po)
+                    spec = str(row.get(spec_col, "")).strip() if spec_col in row.index else ""
+                    if pd.isna(spec) or spec.lower() == "nan":
+                        spec = ""
+                    factory = str(row.get(factory_col, "")).strip() if factory_col in row.index else ""
+                    date_str = str(row.get(date_col, "")).strip() if date_col in row.index else ""
+                    results.append({
+                        "po_no": po,
+                        "spec": spec,
+                        "factory": factory,
+                        "date": date_str,
+                        "source": "teable",
+                    })
+                    if len(results) >= 5:
+                        break
+    
     return results
 
 
@@ -321,22 +363,53 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                 horizontal=True,
             )
 
-        # 舊料號邏輯:第一次切到舊料號時,把「舊料號 + 客戶注意事項」帶進最終規格框
+        # 舊料號邏輯:第一次切到舊料號時,把「舊料號 + 歷史注意事項」帶進最終規格框
         if new_type == "舊料號":
             with cols_type[1]:
-                st.caption("👉 系統已自動帶入「舊料號 + 客戶 PO 上的注意事項」。請於最終規格框直接編輯。")
+                st.caption("👉 系統會從歷史訂單檔(同料號最近一筆)自動帶入注意事項。請於最終規格框直接編輯。")
 
             # 只在還沒套用過舊料號預設值時才覆蓋
             if not st.session_state.get(applied_old_default_key, False):
-                # 從客戶 PO 抽出來的描述當「注意事項」素材
-                customer_desc = (item.description or "").strip()
-                # 預設值:「舊料號」+(若有客戶描述就附上)
-                default_lines = ["舊料號"]
-                if customer_desc:
-                    default_lines.append(f"注意:")
-                    default_lines.append(customer_desc)
-                st.session_state[final_key] = "\n".join(default_lines)
+                # ★ v3.4: 同工廠優先(從 session 抓 Step 3 選的工廠)
+                current_factory = st.session_state.get("fpo_factory_short", "")
+                hist_hits = fetch_previous_spec(orders, item.part_number, factory_short=current_factory)
+                hist_spec = ""
+                hist_po = ""
+                hist_factory = ""
+                hist_source = ""
+                if hist_hits:
+                    for h in hist_hits:
+                        if h.get("spec"):
+                            hist_spec = h["spec"].strip()
+                            hist_po = h.get("po_no", "")
+                            hist_factory = h.get("factory", "")
+                            hist_source = h.get("source", "")
+                            break
+
+                # 預設值:「舊料號」+ 空一行 +「注意:歷史注意事項」
+                if hist_spec:
+                    default_text = f"舊料號\n\n注意:\n{hist_spec}"
+                else:
+                    default_text = "舊料號"
+
+                st.session_state[final_key] = default_text
                 st.session_state[applied_old_default_key] = True
+                st.session_state[f"_fpo_old_hist_po_{idx}"] = hist_po
+                st.session_state[f"_fpo_old_hist_factory_{idx}"] = hist_factory
+                st.session_state[f"_fpo_old_hist_source_{idx}"] = hist_source
+
+            # 顯示「來源訂單」提示
+            hist_po_shown = st.session_state.get(f"_fpo_old_hist_po_{idx}", "")
+            hist_factory_shown = st.session_state.get(f"_fpo_old_hist_factory_{idx}", "")
+            hist_source_shown = st.session_state.get(f"_fpo_old_hist_source_{idx}", "")
+            if hist_po_shown:
+                source_label = "歷史訂單檔" if hist_source_shown == "history_file" else "Teable 主表"
+                factory_info = f" / {hist_factory_shown}" if hist_factory_shown else ""
+                st.caption(
+                    f"📌 注意事項來源:**{hist_po_shown}**{factory_info}({source_label})"
+                )
+            else:
+                st.caption("⚠️ 沒找到同料號的歷史訂單,請手動填注意事項。")
 
         else:  # 新料號
             with cols_type[1]:
