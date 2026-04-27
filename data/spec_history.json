@@ -1,0 +1,899 @@
+{
+  "_meta": {
+    "generated_at": "2026-04-27T02:48:36.768484",
+    "source": "115年訂單 RTF/DOCX",
+    "total_orders": 41,
+    "total_items": 84,
+    "unique_part_numbers": 48
+  },
+  "spec_history": {
+    "700-000191 Rev B": {
+      "latest": {
+        "po": "EW1150018-01",
+        "date": "2026-04-15",
+        "factory": "Profit Grand",
+        "spec_text": "舊料號；60up, 但須添加乾燥劑與濕度指示卡\n110,640\n追加\n147,360\n注意:\n1. 板子不可有MADE IN USA\n2. X-outs控制在5%內\n3. PCB須添加乾燥劑與濕度指示卡"
+      },
+      "history": [
+        {
+          "po": "EW1150018-01",
+          "date": "2026-04-15",
+          "factory": "Profit Grand",
+          "spec_text": "舊料號；60up, 但須添加乾燥劑與濕度指示卡\n110,640\n追加\n147,360\n注意:\n1. 板子不可有MADE IN USA\n2. X-outs控制在5%內\n3. PCB須添加乾燥劑與濕度指示卡"
+        },
+        {
+          "po": "EW1150018-01",
+          "date": "2026-03-18",
+          "factory": "Profit Grand",
+          "spec_text": "舊料號；60up, 但須添加乾燥劑與濕度指示卡\n110,640\n注意:\n1. 板子不可有MADE IN USA\n2. X-outs控制在5%內\n3. PCB須添加乾燥劑與濕度指示卡"
+        },
+        {
+          "po": "EW1150001-01",
+          "date": "2026-01-07",
+          "factory": "Profit Grand",
+          "spec_text": "舊料號；60up, 但須添加乾燥劑與濕度指示卡\n注意:\n1. 板子不可有MADE IN USA\n2. X-outs控制在5%內\n3. PCB須添加乾燥劑與濕度指示卡\n(1,667 panels)"
+        }
+      ]
+    },
+    "AgPilot 9002 Rev F": {
+      "latest": {
+        "po": "ET1150006-01",
+        "date": "2026-01-29",
+        "factory": "全興",
+        "spec_text": "舊料號; 2up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡"
+      },
+      "history": [
+        {
+          "po": "ET1150006-01",
+          "date": "2026-01-29",
+          "factory": "全興",
+          "spec_text": "舊料號; 2up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡"
+        }
+      ]
+    },
+    "110-0217-902A_C019": {
+      "latest": {
+        "po": "ET1150008-01",
+        "date": "2026-02-05",
+        "factory": "宏棋",
+        "spec_text": "舊料號；2up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡"
+      },
+      "history": [
+        {
+          "po": "ET1150008-01",
+          "date": "2026-02-05",
+          "factory": "宏棋",
+          "spec_text": "舊料號；2up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡"
+        }
+      ]
+    },
+    "110-0211E_B702": {
+      "latest": {
+        "po": "ET1150009-01",
+        "date": "2026-02-05",
+        "factory": "優技",
+        "spec_text": "(New version) 舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡"
+      },
+      "history": [
+        {
+          "po": "ET1150009-01",
+          "date": "2026-02-05",
+          "factory": "優技",
+          "spec_text": "(New version) 舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡"
+        }
+      ]
+    },
+    "交期3/5 or sooner!": {
+      "latest": {
+        "po": "ET1150009-01",
+        "date": "2026-02-05",
+        "factory": "優技",
+        "spec_text": "交期5/18"
+      },
+      "history": [
+        {
+          "po": "ET1150009-01",
+          "date": "2026-02-05",
+          "factory": "優技",
+          "spec_text": "交期5/18"
+        },
+        {
+          "po": "ET1150009-01",
+          "date": "2026-02-05",
+          "factory": "優技",
+          "spec_text": "交期5/18"
+        }
+      ]
+    },
+    "110-2018-002A_A705": {
+      "latest": {
+        "po": "ET1150009-01",
+        "date": "2026-02-05",
+        "factory": "優技",
+        "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內"
+      },
+      "history": [
+        {
+          "po": "ET1150009-01",
+          "date": "2026-02-05",
+          "factory": "優技",
+          "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內"
+        }
+      ]
+    },
+    "PCB須添加乾燥劑與濕度指示卡": {
+      "latest": {
+        "po": "ET1150009-01",
+        "date": "2026-02-05",
+        "factory": "優技",
+        "spec_text": "640pcs"
+      },
+      "history": [
+        {
+          "po": "ET1150009-01",
+          "date": "2026-02-05",
+          "factory": "優技",
+          "spec_text": "640pcs"
+        }
+      ]
+    },
+    "舊料號；8up, 但須添加乾燥劑與濕度指示卡": {
+      "latest": {
+        "po": "ET1150011-01",
+        "date": "2026-02-25",
+        "factory": "全興",
+        "spec_text": "1. 曾發生品質異常, 請注意\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡\n稅額 479.00"
+      },
+      "history": [
+        {
+          "po": "ET1150011-01",
+          "date": "2026-02-25",
+          "factory": "全興",
+          "spec_text": "1. 曾發生品質異常, 請注意\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡\n稅額 479.00"
+        }
+      ]
+    },
+    "110-6222-001 Issue B_C035": {
+      "latest": {
+        "po": "ET1150023-01",
+        "date": "2026-04-02",
+        "factory": "優技",
+        "spec_text": "舊料號 ; 1up,請依材料Tg170,表面處理: ENIG:2u\" + G/F: 30u\"，可剝膠\n1. S/M請用深綠色(dark green),不可假性露銅，並注意出貨板彎翹!\n2. 板子不可出有MADE IN USA\n3. 若出庫存板，Date code必須在規定有限期限內\n4. PCB須添加乾燥劑與濕度指示卡 3,334\n(NEW Rev C035) 1."
+      },
+      "history": [
+        {
+          "po": "ET1150023-01",
+          "date": "2026-04-02",
+          "factory": "優技",
+          "spec_text": "舊料號 ; 1up,請依材料Tg170,表面處理: ENIG:2u\" + G/F: 30u\"，可剝膠\n1. S/M請用深綠色(dark green),不可假性露銅，並注意出貨板彎翹!\n2. 板子不可出有MADE IN USA\n3. 若出庫存板，Date code必須在規定有限期限內\n4. PCB須添加乾燥劑與濕度指示卡 3,334\n(NEW Rev C035) 1."
+        },
+        {
+          "po": "ET1150013-01",
+          "date": "2026-02-25",
+          "factory": "優技",
+          "spec_text": "(NEW Rev C035) 請依今天傳的110-6222-001B_C035_GerberFiles製作，材料:Tg170，表面處理:ENIG:2u”+G/F:30u”，可剝膠，但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡"
+        },
+        {
+          "po": "ET1150013-01",
+          "date": "2026-02-25",
+          "factory": "優技",
+          "spec_text": "(NEW Rev C035) 請依今天傳的110-6222-001B_C035_GerberFiles製作，材料:Tg170，表面處理:ENIG:2u”+G/F:30u”，可剝膠，但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡"
+        }
+      ]
+    },
+    "PCBJEA02000": {
+      "latest": {
+        "po": "ET1150019-01",
+        "date": "2026-03-18",
+        "factory": "宏棋",
+        "spec_text": "舊料號；4up, 但須添加乾燥劑與濕度指示卡\n(8712-JEA Rev 2; 4 up array) 1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡\n=(3,000pcs\n+\n3,000pcs)"
+      },
+      "history": [
+        {
+          "po": "ET1150019-01",
+          "date": "2026-03-18",
+          "factory": "宏棋",
+          "spec_text": "舊料號；4up, 但須添加乾燥劑與濕度指示卡\n(8712-JEA Rev 2; 4 up array) 1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡\n=(3,000pcs\n+\n3,000pcs)"
+        }
+      ]
+    },
+    "舊料號; 1up, 依附件Gerbers製作": {
+      "latest": {
+        "po": "ET1150020-01",
+        "date": "2026-03-20",
+        "factory": "全興",
+        "spec_text": "，若與目前生產資料有差異，請告知。\n注意:\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡 100"
+      },
+      "history": [
+        {
+          "po": "ET1150020-01",
+          "date": "2026-03-20",
+          "factory": "全興",
+          "spec_text": "，若與目前生產資料有差異，請告知。\n注意:\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡 100"
+        }
+      ]
+    },
+    "舊料號；1up,, 依附件Gerbers製作": {
+      "latest": {
+        "po": "ET1150020-02",
+        "date": "2026-03-20",
+        "factory": "星晨",
+        "spec_text": "，若與目前生產資料有差異，請告知 30\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡\n4."
+      },
+      "history": [
+        {
+          "po": "ET1150020-02",
+          "date": "2026-03-20",
+          "factory": "星晨",
+          "spec_text": "，若與目前生產資料有差異，請告知 30\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡\n4."
+        }
+      ]
+    },
+    "B415M-A-PCB Rev B5.1E": {
+      "latest": {
+        "po": "ET1150024-01",
+        "date": "2026-04-07",
+        "factory": "",
+        "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n注意：曾發生異常，請注意品質。\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡\n50"
+      },
+      "history": [
+        {
+          "po": "ET1150024-01",
+          "date": "2026-04-07",
+          "factory": "",
+          "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n注意：曾發生異常，請注意品質。\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡\n50"
+        }
+      ]
+    },
+    "PCBAPQ007000": {
+      "latest": {
+        "po": "ET1150026-01",
+        "date": "2026-04-13",
+        "factory": "宏棋",
+        "spec_text": "(2up; LQYP8226 Rev R FB Main 2320-09) 舊料號；2up\n請比照上張訂單製作!\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡\n250"
+      },
+      "history": [
+        {
+          "po": "ET1150026-01",
+          "date": "2026-04-13",
+          "factory": "宏棋",
+          "spec_text": "(2up; LQYP8226 Rev R FB Main 2320-09) 舊料號；2up\n請比照上張訂單製作!\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡\n250"
+        }
+      ]
+    },
+    "OR SOONER!": {
+      "latest": {
+        "po": "ET1150026-01",
+        "date": "2026-04-13",
+        "factory": "宏棋",
+        "spec_text": "(125panels)"
+      },
+      "history": [
+        {
+          "po": "ET1150026-01",
+          "date": "2026-04-13",
+          "factory": "宏棋",
+          "spec_text": "(125panels)"
+        }
+      ]
+    },
+    "TS-CAN1X2": {
+      "latest": {
+        "po": "ET1150028-01",
+        "date": "2026-04-17",
+        "factory": "星晨",
+        "spec_text": "舊料號；4up, 但規格須改為Tg170; ENIG: 2u”"
+      },
+      "history": [
+        {
+          "po": "ET1150028-01",
+          "date": "2026-04-17",
+          "factory": "星晨",
+          "spec_text": "舊料號；4up, 但規格須改為Tg170; ENIG: 2u”"
+        }
+      ]
+    },
+    "工作檔 Working Gerber 照舊!": {
+      "latest": {
+        "po": "ET1150028-01",
+        "date": "2026-04-17",
+        "factory": "星晨",
+        "spec_text": "1.板子不可有MADE IN USA\n2.若出庫存板，Date code必須在規定有效期內\n3.PCB須添加乾燥劑與濕度指示卡 252"
+      },
+      "history": [
+        {
+          "po": "ET1150028-01",
+          "date": "2026-04-17",
+          "factory": "星晨",
+          "spec_text": "1.板子不可有MADE IN USA\n2.若出庫存板，Date code必須在規定有效期內\n3.PCB須添加乾燥劑與濕度指示卡 252"
+        }
+      ]
+    },
+    "TraceME R9P5": {
+      "latest": {
+        "po": "ET1150029-01",
+        "date": "2026-04-24",
+        "factory": "宏棋",
+        "spec_text": "舊料號; 5up\n(NO X-outs)"
+      },
+      "history": [
+        {
+          "po": "ET1150029-01",
+          "date": "2026-04-24",
+          "factory": "宏棋",
+          "spec_text": "舊料號; 5up\n(NO X-outs)"
+        }
+      ]
+    },
+    "ATP3 Rev G": {
+      "latest": {
+        "po": "ET1150032-01",
+        "date": "2026-04-27",
+        "factory": "優技",
+        "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n(注意防焊為: Red)\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡 1,000\n(0800ATP3G-Red)"
+      },
+      "history": [
+        {
+          "po": "ET1150032-01",
+          "date": "2026-04-27",
+          "factory": "優技",
+          "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n(注意防焊為: Red)\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡 1,000\n(0800ATP3G-Red)"
+        }
+      ]
+    },
+    "TS-8390 Rev E": {
+      "latest": {
+        "po": "EW1150005-01",
+        "date": "2026-01-23",
+        "factory": "Profit Grand",
+        "spec_text": "(NEW version) 舊料號:1up, 比照之前生產\n1. 板子不可有MADE IN USA\n2. PCB須添加乾燥劑與濕度指示卡"
+      },
+      "history": [
+        {
+          "po": "EW1150005-01",
+          "date": "2026-01-23",
+          "factory": "Profit Grand",
+          "spec_text": "(NEW version) 舊料號:1up, 比照之前生產\n1. 板子不可有MADE IN USA\n2. PCB須添加乾燥劑與濕度指示卡"
+        }
+      ]
+    },
+    "P4163200": {
+      "latest": {
+        "po": "G1150031-02",
+        "date": "2026-04-24",
+        "factory": "全興",
+        "spec_text": "舊料號:2up\n注意:\n1. No X-outs\n2. 真空包裝10panels一包 100"
+      },
+      "history": [
+        {
+          "po": "G1150031-02",
+          "date": "2026-04-24",
+          "factory": "全興",
+          "spec_text": "舊料號:2up\n注意:\n1. No X-outs\n2. 真空包裝10panels一包 100"
+        },
+        {
+          "po": "G1150002-01",
+          "date": "2026-01-08",
+          "factory": "全興",
+          "spec_text": "舊料號；2up\n注意：\n1. No x-outs\n2. 真空包裝10panels一包"
+        }
+      ]
+    },
+    "P4079300": {
+      "latest": {
+        "po": "G1150002-02",
+        "date": "2026-01-08",
+        "factory": "宏棋",
+        "spec_text": "舊料號；3up\n注意：\n1. 真空包裝10panels一包\n2. No X-outs"
+      },
+      "history": [
+        {
+          "po": "G1150002-02",
+          "date": "2026-01-08",
+          "factory": "宏棋",
+          "spec_text": "舊料號；3up\n注意：\n1. 真空包裝10panels一包\n2. No X-outs"
+        }
+      ]
+    },
+    "No X-outs!": {
+      "latest": {
+        "po": "G1150012-01",
+        "date": "2026-02-25",
+        "factory": "全興",
+        "spec_text": "2 27_21_701 2,002"
+      },
+      "history": [
+        {
+          "po": "G1150012-01",
+          "date": "2026-02-25",
+          "factory": "全興",
+          "spec_text": "2 27_21_701 2,002"
+        },
+        {
+          "po": "G1150012-01",
+          "date": "2026-02-25",
+          "factory": "全興",
+          "spec_text": "3 27_46_201 舊料號5up ; 已添加 E497845 500"
+        },
+        {
+          "po": "G1150012-01",
+          "date": "2026-02-25",
+          "factory": "全興",
+          "spec_text": "4 28_33_601 舊料號14up ; 已添加 E497845 504"
+        },
+        {
+          "po": "G1150012-01",
+          "date": "2026-02-25",
+          "factory": "全興",
+          "spec_text": "稅額 13442.00"
+        },
+        {
+          "po": "G1150012-02",
+          "date": "2026-02-25",
+          "factory": "宏棋",
+          "spec_text": "2 28_35_702 3,000"
+        },
+        {
+          "po": "G1150012-02",
+          "date": "2026-02-25",
+          "factory": "宏棋",
+          "spec_text": "稅額 15,268.00"
+        },
+        {
+          "po": "G1150010-01",
+          "date": "2026-02-09",
+          "factory": "宏棋",
+          "spec_text": "MAR. 10, 2026"
+        },
+        {
+          "po": "G1150010-01",
+          "date": "2026-02-09",
+          "factory": "宏棋",
+          "spec_text": "MAR. 5, 2026"
+        },
+        {
+          "po": "G1150003-01",
+          "date": "2026-01-14",
+          "factory": "全興",
+          "spec_text": "FEB. 4, 2026"
+        },
+        {
+          "po": "G1150003-02",
+          "date": "2026-01-14",
+          "factory": "宏棋",
+          "spec_text": "FEB. 4, 2026\n30_40_501\n(EPC8316 Proz V2.0/29.08.2022) 舊料號5up ; 已添加 E497845"
+        },
+        {
+          "po": "G1150003-02",
+          "date": "2026-01-14",
+          "factory": "宏棋",
+          "spec_text": "FEB. 4, 2026\n30_40_801\n(EPC 8316 Rel V2.0 / 29.08.2022) 舊料號4up ; 已添加 E497845"
+        },
+        {
+          "po": "G1150003-02",
+          "date": "2026-01-14",
+          "factory": "宏棋",
+          "spec_text": "FEB. 4, 2026"
+        }
+      ]
+    },
+    "F41080008V30": {
+      "latest": {
+        "po": "G1150004-01",
+        "date": "2026-01-19",
+        "factory": "全興",
+        "spec_text": "舊料號；14up\n(Only New Date Code, 不收庫存板!)\n1. 注意: 真空包裝要求: 5 panels (70 pcs) /每包!"
+      },
+      "history": [
+        {
+          "po": "G1150004-01",
+          "date": "2026-01-19",
+          "factory": "全興",
+          "spec_text": "舊料號；14up\n(Only New Date Code, 不收庫存板!)\n1. 注意: 真空包裝要求: 5 panels (70 pcs) /每包!"
+        }
+      ]
+    },
+    "P4134100": {
+      "latest": {
+        "po": "G1150004-01",
+        "date": "2026-01-19",
+        "factory": "全興",
+        "spec_text": "舊料號；4up"
+      },
+      "history": [
+        {
+          "po": "G1150004-01",
+          "date": "2026-01-19",
+          "factory": "全興",
+          "spec_text": "舊料號；4up"
+        }
+      ]
+    },
+    "真空包裝10panels一包": {
+      "latest": {
+        "po": "G1150004-01",
+        "date": "2026-01-19",
+        "factory": "全興",
+        "spec_text": "FEB. 2, 2026"
+      },
+      "history": [
+        {
+          "po": "G1150004-01",
+          "date": "2026-01-19",
+          "factory": "全興",
+          "spec_text": "FEB. 2, 2026"
+        }
+      ]
+    },
+    "F41140096V160": {
+      "latest": {
+        "po": "G1150004-02",
+        "date": "2026-01-19",
+        "factory": "",
+        "spec_text": "舊料號；1up panel"
+      },
+      "history": [
+        {
+          "po": "G1150004-02",
+          "date": "2026-01-19",
+          "factory": "",
+          "spec_text": "舊料號；1up panel"
+        }
+      ]
+    },
+    "Only New Date Code; 不收庫存板!": {
+      "latest": {
+        "po": "G1150004-02",
+        "date": "2026-01-19",
+        "factory": "",
+        "spec_text": "注意：\n1. 有氣泡(爆板)異常發生，注意品質!\n2. 曾發生真空包裝破裂異常! 出貨真空包裝10panels一包"
+      },
+      "history": [
+        {
+          "po": "G1150004-02",
+          "date": "2026-01-19",
+          "factory": "",
+          "spec_text": "注意：\n1. 有氣泡(爆板)異常發生，注意品質!\n2. 曾發生真空包裝破裂異常! 出貨真空包裝10panels一包"
+        }
+      ]
+    },
+    "舊料號；6up": {
+      "latest": {
+        "po": "G1150007-01",
+        "date": "2026-01-29",
+        "factory": "星晨",
+        "spec_text": "(No X-outs)"
+      },
+      "history": [
+        {
+          "po": "G1150007-01",
+          "date": "2026-01-29",
+          "factory": "星晨",
+          "spec_text": "(No X-outs)"
+        }
+      ]
+    },
+    "28_00_701 (Display1202_V2.01)": {
+      "latest": {
+        "po": "G1150010-01",
+        "date": "2026-02-09",
+        "factory": "宏棋",
+        "spec_text": "舊料號20up ; 已添加 E497845"
+      },
+      "history": [
+        {
+          "po": "G1150010-01",
+          "date": "2026-02-09",
+          "factory": "宏棋",
+          "spec_text": "舊料號20up ; 已添加 E497845"
+        }
+      ]
+    },
+    "舊料號14up ; 已添加 E497845": {
+      "latest": {
+        "po": "G1150012-01",
+        "date": "2026-02-25",
+        "factory": "全興",
+        "spec_text": "(143panels)"
+      },
+      "history": [
+        {
+          "po": "G1150012-01",
+          "date": "2026-02-25",
+          "factory": "全興",
+          "spec_text": "(143panels)"
+        }
+      ]
+    },
+    "& UL Logo, \"94V-0\"於防焊層": {
+      "latest": {
+        "po": "G1150012-01",
+        "date": "2026-02-25",
+        "factory": "全興",
+        "spec_text": "(100panels)"
+      },
+      "history": [
+        {
+          "po": "G1150012-01",
+          "date": "2026-02-25",
+          "factory": "全興",
+          "spec_text": "(100panels)"
+        },
+        {
+          "po": "G1150012-01",
+          "date": "2026-02-25",
+          "factory": "全興",
+          "spec_text": "(36panels)"
+        }
+      ]
+    },
+    "& UL Logo, “94V-0”於防焊層": {
+      "latest": {
+        "po": "G1150012-02",
+        "date": "2026-02-25",
+        "factory": "宏棋",
+        "spec_text": "MAR. 19, 2026\n(EPS8112 V1.1 USS gr IC) & UL Logo, “94V-0”於防焊層"
+      },
+      "history": [
+        {
+          "po": "G1150012-02",
+          "date": "2026-02-25",
+          "factory": "宏棋",
+          "spec_text": "MAR. 19, 2026\n(EPS8112 V1.1 USS gr IC) & UL Logo, “94V-0”於防焊層"
+        }
+      ]
+    },
+    "Setup & Tooling Charge": {
+      "latest": {
+        "po": "G1150014-01",
+        "date": "2026-02-26",
+        "factory": "祥竑",
+        "spec_text": "MAR. 18,2025"
+      },
+      "history": [
+        {
+          "po": "G1150014-01",
+          "date": "2026-02-26",
+          "factory": "祥竑",
+          "spec_text": "MAR. 18,2025"
+        },
+        {
+          "po": "G1150014-01",
+          "date": "2026-02-26",
+          "factory": "祥竑",
+          "spec_text": "MAR. 18,2025"
+        },
+        {
+          "po": "G1150014-01",
+          "date": "2026-02-26",
+          "factory": "祥竑",
+          "spec_text": "MAR. 18,2025"
+        }
+      ]
+    },
+    "P1056400": {
+      "latest": {
+        "po": "G1150015-01",
+        "date": "2026-02-26",
+        "factory": "全興",
+        "spec_text": "舊料號: 8up\n注意:\n1. Leadfree HASL\n2. 真空包裝10panels一包"
+      },
+      "history": [
+        {
+          "po": "G1150015-01",
+          "date": "2026-02-26",
+          "factory": "全興",
+          "spec_text": "舊料號: 8up\n注意:\n1. Leadfree HASL\n2. 真空包裝10panels一包"
+        }
+      ]
+    },
+    "00013315 V1.0": {
+      "latest": {
+        "po": "G1150015-01",
+        "date": "2026-02-26",
+        "factory": "全興",
+        "spec_text": "舊料號: 1up\n注意：\n1. 真空包裝10panels一包 300"
+      },
+      "history": [
+        {
+          "po": "G1150015-01",
+          "date": "2026-02-26",
+          "factory": "全興",
+          "spec_text": "舊料號: 1up\n注意：\n1. 真空包裝10panels一包 300"
+        }
+      ]
+    },
+    "295005 Rev-A": {
+      "latest": {
+        "po": "G1150017-01",
+        "date": "2026-03-09",
+        "factory": "沅榕",
+        "spec_text": "舊料號: 1up\n(DBU-2328_M Rev A) 注意: 板子不可有MADE IN USA"
+      },
+      "history": [
+        {
+          "po": "G1150017-01",
+          "date": "2026-03-09",
+          "factory": "沅榕",
+          "spec_text": "舊料號: 1up\n(DBU-2328_M Rev A) 注意: 板子不可有MADE IN USA"
+        }
+      ]
+    },
+    "F41080034V2.1": {
+      "latest": {
+        "po": "G1150021-01",
+        "date": "2026-03-30",
+        "factory": "星晨",
+        "spec_text": "舊料號；3up\n(Only New Date Code;不收庫存板!)\n注意：\n1. Leadfree HASL\n2. 真空包裝10panels一包"
+      },
+      "history": [
+        {
+          "po": "G1150021-01",
+          "date": "2026-03-30",
+          "factory": "星晨",
+          "spec_text": "舊料號；3up\n(Only New Date Code;不收庫存板!)\n注意：\n1. Leadfree HASL\n2. 真空包裝10panels一包"
+        }
+      ]
+    },
+    "F41080024V3.0": {
+      "latest": {
+        "po": "G1150021-01",
+        "date": "2026-03-30",
+        "factory": "星晨",
+        "spec_text": "舊料號:3up\n(Only New Date Code;不收庫存板!)\n注意：\n1. Leadfree HASL\n2. 真空包裝10 panels一包!"
+      },
+      "history": [
+        {
+          "po": "G1150021-01",
+          "date": "2026-03-30",
+          "factory": "星晨",
+          "spec_text": "舊料號:3up\n(Only New Date Code;不收庫存板!)\n注意：\n1. Leadfree HASL\n2. 真空包裝10 panels一包!"
+        }
+      ]
+    },
+    "00006493V1.0": {
+      "latest": {
+        "po": "G1150021-02",
+        "date": "2026-03-30",
+        "factory": "宏棋",
+        "spec_text": "Working gerber承認, 才可生產! 請於14:00前傳working gerber (& stencil gerber) 給我司，如有工程問題請一併詢問，謝謝！"
+      },
+      "history": [
+        {
+          "po": "G1150021-02",
+          "date": "2026-03-30",
+          "factory": "宏棋",
+          "spec_text": "Working gerber承認, 才可生產! 請於14:00前傳working gerber (& stencil gerber) 給我司，如有工程問題請一併詢問，謝謝！"
+        }
+      ]
+    },
+    "Layers: 2L": {
+      "latest": {
+        "po": "G1150021-02",
+        "date": "2026-03-30",
+        "factory": "宏棋",
+        "spec_text": "Material: FR4\nBoard thickness: 1.6mm\nCopper thickness: 1oz (35um) finish\n排版: 1up + 板邊 * 4,"
+      },
+      "history": [
+        {
+          "po": "G1150021-02",
+          "date": "2026-03-30",
+          "factory": "宏棋",
+          "spec_text": "Material: FR4\nBoard thickness: 1.6mm\nCopper thickness: 1oz (35um) finish\n排版: 1up + 板邊 * 4,"
+        }
+      ]
+    },
+    "Unit size: 140mm * 74mm": {
+      "latest": {
+        "po": "G1150021-02",
+        "date": "2026-03-30",
+        "factory": "宏棋",
+        "spec_text": "Surface Finish: Lead free HASL\nS/M: Green, S/L: White\n須添加西拓UL logo & date code ( WWYY ) on the silkscreen layer.\n樣板: 除試鍚板外，須另外於出貨時提供樣板一片送本司備份! 300\n(此價格含單價NT 76.00 & NRE：NT$8,000.00，首次出貨請以此單價開立發票)\n合計\n付款方式 :次月結兩個月,每月帳單截止日25號,票期60天\n進貨方式 :待確認\n進貨地址 :待確認\n注意事項:\n1. 出貨時須附 出貨報告、C of C、切片報告(含切片) & 試鍚板(真空包裝)。\n2. 真空包裝每包的毛重不可超過19Kgs; 而板厚1.6mm以下, 15PNL一包；1.6mm -2.0mm\n(不含, 以下), 10PNL一包；2.0mm (含以上), 5PNL一包。\n3. 須符合客戶SPECs 與 IPC6012規定，不可補線，但經事先允許者除外。\n4. 出貨報告& C of C: 用GLOCOM抬頭文件，且須用西拓UL Logo, 除非不需UL。\n(請勿在箱內放置任何不符規定之貴司名稱的文件，若致各種異常或違背一般商業保密協\n定，則責任自負!)\n5. 須距出貨交期一個月內才可發料生產，否則，因修改、變更REV或Cancel訂單所造成之損\n失，須自行負責。\n6. 當訂單與所提供之Gerbers & drawing有衝突不同時(如料號或版本等)，以訂單為主，但\n仍須提出詢問確認後，方可生產, 否則須自行負責所造成之錯誤。\n7. 若出庫存板，務必注意Date Code，化金/HASL不能超過五個月，其餘表面處理不能超過\n二個月，否則客戶會剔退板子。\n8. 務必使用外銷箱 (厚度: 7-8mm以上); 箱內四周與上下面，須內襯厚紙板，並以瓦楞紙\n板或氣泡墊 (不可使用保麗龍!) 塞滿空隙，再以打包帶打包，除正反兩面外，中間須再\n固定一條，以免搬運過程有箱子破裂，或板子撞壞等問題發生!\n9. 出貨板子，不可有MADE IN USA或其他國家；否則一經海關驗出，須自負罰責。\n10.若從大陸出貨，所有與物流Booking的文件，寄件人須填寫\"貴司名稱/(Eusway/Glocom)\""
+      },
+      "history": [
+        {
+          "po": "G1150021-02",
+          "date": "2026-03-30",
+          "factory": "宏棋",
+          "spec_text": "Surface Finish: Lead free HASL\nS/M: Green, S/L: White\n須添加西拓UL logo & date code ( WWYY ) on the silkscreen layer.\n樣板: 除試鍚板外，須另外於出貨時提供樣板一片送本司備份! 300\n(此價格含單價NT 76.00 & NRE：NT$8,000.00，首次出貨請以此單價開立發票)\n合計\n付款方式 :次月結兩個月,每月帳單截止日25號,票期60天\n進貨方式 :待確認\n進貨地址 :待確認\n注意事項:\n1. 出貨時須附 出貨報告、C of C、切片報告(含切片) & 試鍚板(真空包裝)。\n2. 真空包裝每包的毛重不可超過19Kgs; 而板厚1.6mm以下, 15PNL一包；1.6mm -2.0mm\n(不含, 以下), 10PNL一包；2.0mm (含以上), 5PNL一包。\n3. 須符合客戶SPECs 與 IPC6012規定，不可補線，但經事先允許者除外。\n4. 出貨報告& C of C: 用GLOCOM抬頭文件，且須用西拓UL Logo, 除非不需UL。\n(請勿在箱內放置任何不符規定之貴司名稱的文件，若致各種異常或違背一般商業保密協\n定，則責任自負!)\n5. 須距出貨交期一個月內才可發料生產，否則，因修改、變更REV或Cancel訂單所造成之損\n失，須自行負責。\n6. 當訂單與所提供之Gerbers & drawing有衝突不同時(如料號或版本等)，以訂單為主，但\n仍須提出詢問確認後，方可生產, 否則須自行負責所造成之錯誤。\n7. 若出庫存板，務必注意Date Code，化金/HASL不能超過五個月，其餘表面處理不能超過\n二個月，否則客戶會剔退板子。\n8. 務必使用外銷箱 (厚度: 7-8mm以上); 箱內四周與上下面，須內襯厚紙板，並以瓦楞紙\n板或氣泡墊 (不可使用保麗龍!) 塞滿空隙，再以打包帶打包，除正反兩面外，中間須再\n固定一條，以免搬運過程有箱子破裂，或板子撞壞等問題發生!\n9. 出貨板子，不可有MADE IN USA或其他國家；否則一經海關驗出，須自負罰責。\n10.若從大陸出貨，所有與物流Booking的文件，寄件人須填寫\"貴司名稱/(Eusway/Glocom)\""
+        }
+      ]
+    },
+    "，若未加註(Eusway/Glocom)，致客戶端IQC進料檢驗拒收，須自行負責。": {
+      "latest": {
+        "po": "G1150021-02",
+        "date": "2026-03-30",
+        "factory": "宏棋",
+        "spec_text": "宏棋科技有限公司 西拓電子有限公司"
+      },
+      "history": [
+        {
+          "po": "G1150021-02",
+          "date": "2026-03-30",
+          "factory": "宏棋",
+          "spec_text": "宏棋科技有限公司 西拓電子有限公司"
+        }
+      ]
+    },
+    "Sync2IP Micro Rec-C": {
+      "latest": {
+        "po": "G1150025-01",
+        "date": "2026-04-09",
+        "factory": "沅榕",
+        "spec_text": "Working Gerber承認後，才可生產！ 請於下午14:00前傳working gerber (& stencil gerber)給我司，如有工程問題請一併詢問，謝謝！\nMaterial: 4L; Tg170\nBoard thickness: 62mil\nCopper thickness: 1oz all layers\n排版: 1up panel (請比照附件前版Rev B Working gerber Sync2IP_MICRO working file.zip添加上下留邊)\n疊構: 請依附件Sync2IP_Mini_Short_Version_Fabrication.pdf製作\nSurface Finish: Lead-free HASL\nS/M: Red\nS/L: White\n須添加西拓UL logo & date code (YYWW);比照前版Working gerber (with stencil gerber)- DBU-2328_M. zip添加\n樣板: 除試鍚板外，須另外提供樣板供備份. 25"
+      },
+      "history": [
+        {
+          "po": "G1150025-01",
+          "date": "2026-04-09",
+          "factory": "沅榕",
+          "spec_text": "Working Gerber承認後，才可生產！ 請於下午14:00前傳working gerber (& stencil gerber)給我司，如有工程問題請一併詢問，謝謝！\nMaterial: 4L; Tg170\nBoard thickness: 62mil\nCopper thickness: 1oz all layers\n排版: 1up panel (請比照附件前版Rev B Working gerber Sync2IP_MICRO working file.zip添加上下留邊)\n疊構: 請依附件Sync2IP_Mini_Short_Version_Fabrication.pdf製作\nSurface Finish: Lead-free HASL\nS/M: Red\nS/L: White\n須添加西拓UL logo & date code (YYWW);比照前版Working gerber (with stencil gerber)- DBU-2328_M. zip添加\n樣板: 除試鍚板外，須另外提供樣板供備份. 25"
+        }
+      ]
+    },
+    "Sync2IP 180005 Rev-B": {
+      "latest": {
+        "po": "G1150027-01",
+        "date": "2026-04-15",
+        "factory": "沅榕",
+        "spec_text": "Working Gerber承認後，才可生產！ 請於下午14:00前傳working gerber (& stencil gerber)給我司，如有工程問題請一併詢問，謝謝！\nMaterial: 4L; Tg170\nBoard thickness: 1.6mm\nCopper thickness: Ext: 1oz all layers finish\n排版: 1up panel\n疊構: 請依附件製作\nSurface Finish: Lead-free HASL\nS/M: Matte Green\nS/L: White\n須添加西拓UL logo & date code (YYWW);\n樣板: 除試鍚板外，須另外提供樣板供備份. 50"
+      },
+      "history": [
+        {
+          "po": "G1150027-01",
+          "date": "2026-04-15",
+          "factory": "沅榕",
+          "spec_text": "Working Gerber承認後，才可生產！ 請於下午14:00前傳working gerber (& stencil gerber)給我司，如有工程問題請一併詢問，謝謝！\nMaterial: 4L; Tg170\nBoard thickness: 1.6mm\nCopper thickness: Ext: 1oz all layers finish\n排版: 1up panel\n疊構: 請依附件製作\nSurface Finish: Lead-free HASL\nS/M: Matte Green\nS/L: White\n須添加西拓UL logo & date code (YYWW);\n樣板: 除試鍚板外，須另外提供樣板供備份. 50"
+        }
+      ]
+    },
+    "S04H101157A0": {
+      "latest": {
+        "po": "G1150030-01",
+        "date": "2026-04-24",
+        "factory": "沅榕",
+        "spec_text": "Working Gerber承認後，才可生產！ 請於下午14:00前傳working gerber (& stencil gerber)給我司，如有工程問題請一併詢問，謝謝！\nMaterial: 4L; Tg170 (待確認)\nBoard thickness: 62mil\nCopper thickness: 1oz all layers\n排版: 5up panel (依Gerber排版製作)\n疊構: 請依附件pdf製作\nSurface Finish: Lead-free HASL\nS/M: Matter Green (待確認)\nS/L: White\n須添加西拓UL logo & date code (YYWW);比照前版Working gerber (with stencil gerber)- DBU-2328_M. zip添加\n樣板: 除試鍚板外，須另外提供樣板供備份.\n50"
+      },
+      "history": [
+        {
+          "po": "G1150030-01",
+          "date": "2026-04-24",
+          "factory": "沅榕",
+          "spec_text": "Working Gerber承認後，才可生產！ 請於下午14:00前傳working gerber (& stencil gerber)給我司，如有工程問題請一併詢問，謝謝！\nMaterial: 4L; Tg170 (待確認)\nBoard thickness: 62mil\nCopper thickness: 1oz all layers\n排版: 5up panel (依Gerber排版製作)\n疊構: 請依附件pdf製作\nSurface Finish: Lead-free HASL\nS/M: Matter Green (待確認)\nS/L: White\n須添加西拓UL logo & date code (YYWW);比照前版Working gerber (with stencil gerber)- DBU-2328_M. zip添加\n樣板: 除試鍚板外，須另外提供樣板供備份.\n50"
+        }
+      ]
+    },
+    "P2004503": {
+      "latest": {
+        "po": "G1150031-01",
+        "date": "2026-04-24",
+        "factory": "",
+        "spec_text": "舊料號:10up\n注意:\n1. 真空包裝10panels一包\n2. No X-outs 600"
+      },
+      "history": [
+        {
+          "po": "G1150031-01",
+          "date": "2026-04-24",
+          "factory": "",
+          "spec_text": "舊料號:10up\n注意:\n1. 真空包裝10panels一包\n2. No X-outs 600"
+        }
+      ]
+    },
+    "P3021601": {
+      "latest": {
+        "po": "G1150031-02",
+        "date": "2026-04-24",
+        "factory": "全興",
+        "spec_text": "舊料號:3up\n(No X-outs)\n注意:真空包裝10panels一包! 300"
+      },
+      "history": [
+        {
+          "po": "G1150031-02",
+          "date": "2026-04-24",
+          "factory": "全興",
+          "spec_text": "舊料號:3up\n(No X-outs)\n注意:真空包裝10panels一包! 300"
+        }
+      ]
+    }
+  }
+}
