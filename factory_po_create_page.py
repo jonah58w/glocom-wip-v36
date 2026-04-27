@@ -522,7 +522,11 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     # ─── Step 3 ─
     st.markdown("### Step 3. 工廠 / 發出公司 / 字首 / 編號")
     s3_cols = st.columns(3)
-    factory_keys = sorted(factories.keys())
+    # v3.2: 用 sort_priority 排序(優技預設第一,FCF 最後)
+    factory_keys = sorted(
+        factories.keys(),
+        key=lambda k: (factories[k].get("sort_priority", 999), k),
+    )
     with s3_cols[0]:
         factory_short = st.selectbox(
             "工廠 *", factory_keys, key="fpo_factory_short",
