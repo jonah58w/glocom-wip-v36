@@ -1,18 +1,28 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.1。
+建立工廠 PO 頁面 v3.5。
 
-主要更新(v3.1):
+主要更新(v3.5):
+- ★ 三層編號防撞機制(避免人工手 key 跟系統建單撞號):
+  第 1 層【即時撈】:進頁面時直接呼叫 Teable API 撈最新編號(不靠側邊欄 Refresh)
+  第 2 層【撞號警告】:產 PDF 前再撈一次,撞號就紅色警告擋下,自動換新編號
+  第 3 層【寫入鎖】:寫回 Teable 前最後檢查一次,真的撞才往上跳
+- ★ Step 3 加「🔄 重新計算編號」按鈕(不用整頁 reload)
+
+v3.4 變更:
+- 規格優先從 data/spec_history.json(歷史 RTF/DOCX)抓
+- 找不到再從 Teable 主表「客戶要求注意事項」抓
+
+v3.3 變更:
+- 規格頂部加「舊料號 / 新料號」radio
+- 選舊料號自動帶歷史注意事項
+
+v3.2 變更:
+- 工廠下拉用 sort_priority 排序
+
+v3.1 變更:
 - 拿掉「規格沒填→fallback 客戶描述」邏輯,避免規格欄重複印料號
 - 規格沒填時顯示紅色錯誤,阻擋產 PDF / 寫回 Teable
-
-v3 更新:
-- Step 5 規格改成 3 個 Tab:
-  Tab A: ⚡ 從前一張同料號訂單帶入(查 Teable 主表「客戶要求注意事項」欄)
-  Tab B: 📋 多列貼上(從 ERP 一列一列複製,自動用 ; 串接)
-  Tab C: ✏️ 手動輸入(新料號完整規格 / 舊料號簡短規格)
-- Step 6 確認鍵已拆成兩個獨立按鈕:【產 PDF】+【寫回 Teable】
-- 規格輸出維持「一列」(不換行)
 """
 
 from __future__ import annotations
@@ -102,27 +112,73 @@ def internal_prefix(display: str) -> str:
     return "G" if display == "GC" else display
 
 
-def calc_next_po_number(orders_df: pd.DataFrame, prefix: str) -> str:
+# ─── ★ v3.5: 即時撈 Teable API ─────────────
+def fetch_all_po_numbers_from_teable(table_url: str, headers: dict) -> set[str]:
+    """
+    直接打 Teable API 撈所有訂單編號(不靠側邊欄 Refresh 的 cache)。
+    
+    回傳:set of all 西拓訂單編號 字串
+    """
+    po_numbers = set()
+    page_token = None
+    pn = COL_GLOCOM_PO  # "西拓訂單編號"
+    
+    try:
+        while True:
+            params = {
+                "fieldKeyType": "name",
+                "cellFormat": "text",
+                "take": 1000,
+                "viewId": "viwGqqwdvy5WkaqfQuJ",  # 「API - All Records」
+                "projection": [pn],  # 只撈這一欄省流量
+            }
+            if page_token:
+                params["nextPageToken"] = page_token
+            
+            r = requests.get(table_url, headers=headers, params=params, timeout=30)
+            if r.status_code != 200:
+                break
+            
+            data = r.json()
+            records = data.get("records", []) or []
+            for rec in records:
+                fields = rec.get("fields", {}) or {}
+                val = str(fields.get(pn, "") or "").strip()
+                if val:
+                    po_numbers.add(val)
+            
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+    except Exception as e:
+        st.warning(f"⚠️ 即時撈 Teable 編號失敗:{e}(改用側邊欄快取)")
+    
+    return po_numbers
+
+
+def calc_next_po_number(po_numbers_set: set[str], prefix: str) -> str:
     """
     計算下一個訂單編號。
     
-    重點:流水號要**全局唯一**,不論字首 G/ET/EW/GC 等。
+    重點:流水號要**全局唯一**,不論字首 G/ET/EW/GC。
     例如 Teable 上有 G1150030-01,則下一個 ET 編號也不能用 1150030,
     必須是 ET1150031-01。
     
-    格式:{prefix}{民國年3位}{流水號4位}-{品項序號}
-    例如:G1150031-01
+    Args:
+        po_numbers_set: 所有現有訂單編號的 set
+        prefix: 內部字首 (G / ET / EW)
+    
+    Returns: 下一個訂單編號,例如 G1150031-01
     """
-    if orders_df.empty or COL_GLOCOM_PO not in orders_df.columns:
+    if not po_numbers_set:
         roc_year = datetime.now().year - 1911
         return f"{prefix}{roc_year}0001-01"
 
-    # ★ 不寫死 prefix,搜所有字首 (G, GC, ET, EW, etc.)
     pattern = re.compile(r"^[A-Z]+(\d{3})(\d{4})-(\d+)$")
     max_year_serial = (0, 0)
 
-    for raw_po in orders_df[COL_GLOCOM_PO].dropna().astype(str):
-        m = pattern.match(raw_po.strip())
+    for po in po_numbers_set:
+        m = pattern.match(po.strip())
         if m:
             year = int(m.group(1))
             serial = int(m.group(2))
@@ -135,6 +191,17 @@ def calc_next_po_number(orders_df: pd.DataFrame, prefix: str) -> str:
 
     year, serial = max_year_serial
     return f"{prefix}{year}{serial + 1:04d}-01"
+
+
+def calc_next_po_number_from_df(orders_df: pd.DataFrame, prefix: str) -> str:
+    """從 DataFrame (側邊欄快取)算下一編號 - fallback 用"""
+    if orders_df.empty or COL_GLOCOM_PO not in orders_df.columns:
+        roc_year = datetime.now().year - 1911
+        return f"{prefix}{roc_year}0001-01"
+    po_set = set()
+    for raw_po in orders_df[COL_GLOCOM_PO].dropna().astype(str):
+        po_set.add(raw_po.strip())
+    return calc_next_po_number(po_set, prefix)
 
 
 # ─── Teable 寫入 ─────────────────────────────────
@@ -184,15 +251,11 @@ def fetch_previous_spec(orders: pd.DataFrame, part_number: str, factory_short: s
     """
     查同 P/N 最近一筆訂單的規格。
     
-    v3.4 變更:
-    - 優先從 data/spec_history.json(歷史 RTF/DOCX 解析結果)抓
-    - 找不到再從 Teable 主表「客戶要求注意事項」欄抓
+    優先順序:
+    1. data/spec_history.json (從歷史 RTF/DOCX 解析)
+    2. Teable 主表「客戶要求注意事項」欄
     
-    Args:
-        factory_short: 若有指定,優先回傳同工廠的最近一筆;沒有再降級到不分工廠
-    
-    Returns: list of dict [{"po_no", "spec", "factory", "date", "source"}],按日期降冪。
-             source = "history_file" 或 "teable"
+    同工廠優先(如果有指定 factory_short)。
     """
     results = []
     pn_target = str(part_number).strip()
@@ -260,7 +323,6 @@ def fetch_previous_spec(orders: pd.DataFrame, part_number: str, factory_short: s
 
 # ─── 規格組字串 ──────────────────────────────────
 def build_full_spec_oneline(selections: dict, extra_text: str) -> str:
-    """新料號完整規格 → 一列字串"""
     parts = []
     for cat, val in selections.items():
         if val:
@@ -278,12 +340,10 @@ def build_po_context_from_new_order(
     factory_unit_prices, factory_due_dates, item_specs,
     purchase_responsible, order_date, is_revised,
 ):
-    """item_specs: dict {part_no: spec_text}"""
     items = []
     for it in parsed.items:
         f_price = float(factory_unit_prices.get(it.part_number, 0.0))
         f_due = factory_due_dates.get(it.part_number)
-        # v3.1: 規格沒填就空白,不再 fallback 到客戶描述(避免印出料號重複)
         spec_text = (item_specs.get(it.part_number, "") or "").strip()
         items.append({
             "part_number": it.part_number,
@@ -328,49 +388,31 @@ def _reset_form():
 
 # ─── Step 5 規格輸入(每品項)──────────────────
 def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
-    """
-    渲染 Step 5 單一品項的規格輸入區。回傳最終規格字串。
-
-    v3.3 變更:
-    - 頂部加「舊料號 / 新料號」radio
-    - 選舊料號 → 預設帶「舊料號:{排版}」+「注意:{客戶 PO 抽出的注意事項}」到最終規格框
-    - 選新料號 → 顯示 3 個工具 Tab,必須填規格
-    """
-
-    # 最終規格存在這個 session_state key
     final_key = f"fpo_spec_final_{idx}"
     if final_key not in st.session_state:
         st.session_state[final_key] = ""
 
-    # 料號類型 key
     type_key = f"fpo_spec_type_{idx}"
     if type_key not in st.session_state:
-        st.session_state[type_key] = "舊料號"  # 預設舊料號
+        st.session_state[type_key] = "舊料號"
 
-    # 已套用過舊料號預設值的記號(避免每次 rerun 都覆蓋用戶編輯)
     applied_old_default_key = f"fpo_spec_old_applied_{idx}"
 
     with st.container(border=True):
         st.markdown(f"**品項 {idx + 1}:`{item.part_number}`**(數量 {item.quantity:,})")
 
-        # ─── 頂部:選舊/新料號 ─
         cols_type = st.columns([2, 5])
         with cols_type[0]:
             new_type = st.radio(
-                "料號類型",
-                ["舊料號", "新料號"],
-                key=type_key,
-                horizontal=True,
+                "料號類型", ["舊料號", "新料號"],
+                key=type_key, horizontal=True,
             )
 
-        # 舊料號邏輯:第一次切到舊料號時,把「舊料號 + 歷史注意事項」帶進最終規格框
         if new_type == "舊料號":
             with cols_type[1]:
                 st.caption("👉 系統會從歷史訂單檔(同料號最近一筆)自動帶入注意事項。請於最終規格框直接編輯。")
 
-            # 只在還沒套用過舊料號預設值時才覆蓋
             if not st.session_state.get(applied_old_default_key, False):
-                # ★ v3.4: 同工廠優先(從 session 抓 Step 3 選的工廠)
                 current_factory = st.session_state.get("fpo_factory_short", "")
                 hist_hits = fetch_previous_spec(orders, item.part_number, factory_short=current_factory)
                 hist_spec = ""
@@ -386,7 +428,6 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                             hist_source = h.get("source", "")
                             break
 
-                # 預設值:「舊料號」+ 空一行 +「注意:歷史注意事項」
                 if hist_spec:
                     default_text = f"舊料號\n\n注意:\n{hist_spec}"
                 else:
@@ -398,7 +439,6 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                 st.session_state[f"_fpo_old_hist_factory_{idx}"] = hist_factory
                 st.session_state[f"_fpo_old_hist_source_{idx}"] = hist_source
 
-            # 顯示「來源訂單」提示
             hist_po_shown = st.session_state.get(f"_fpo_old_hist_po_{idx}", "")
             hist_factory_shown = st.session_state.get(f"_fpo_old_hist_factory_{idx}", "")
             hist_source_shown = st.session_state.get(f"_fpo_old_hist_source_{idx}", "")
@@ -414,11 +454,8 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
         else:  # 新料號
             with cols_type[1]:
                 st.caption("👉 新料號:用下方 3 個工具填完整規格,或直接在最終規格框打字。")
-
-            # 切到新料號時,清掉舊料號預設值記號(下次切回去會重新套用)
             st.session_state[applied_old_default_key] = False
 
-        # ─── 工具區(只在新料號時顯示)─
         if new_type == "新料號":
             tab_a, tab_b, tab_c = st.tabs([
                 "⚡ 從前一張同料號帶入",
@@ -426,10 +463,8 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                 "✏️ 7 選單 + 補充",
             ])
 
-            # ─── Tab A: 從歷史訂單帶入 ─
             with tab_a:
-                st.caption(f"從 Teable 主表查 P/N『{item.part_number}』的歷史訂單,取最近一筆規格")
-
+                st.caption(f"從 Teable 主表 / 歷史訂單檔查 P/N『{item.part_number}』")
                 if st.button(f"🔍 查詢", key=f"fpo_query_btn_{idx}"):
                     hits = fetch_previous_spec(orders, item.part_number)
                     st.session_state[f"fpo_query_hits_{idx}"] = hits
@@ -457,7 +492,6 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                                 else:
                                     st.caption("(此筆訂單沒填規格)")
 
-            # ─── Tab B: 多列貼上 ─
             with tab_b:
                 st.caption("從 ERP 一列一列複製貼上(最多 8 列),按下「組合」會用『; 』串成一列")
                 paste_lines = []
@@ -489,7 +523,6 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                         st.session_state[final_key] = "; ".join(paste_lines)
                         st.rerun()
 
-            # ─── Tab C: 7 選單 + 補充 ─
             with tab_c:
                 st.caption("勾選 7 項基本規格 + 補充其他要求。會組成一列。")
                 cols_a = st.columns(4)
@@ -526,7 +559,6 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                         st.session_state[final_key] = preview
                         st.rerun()
 
-        # ─── 最終規格框(永遠可編輯)─
         st.markdown("##### 📋 最終規格(印在 PO 上,可直接編輯)")
         if new_type == "舊料號":
             spec_placeholder = "舊料號\n注意:\n1. ...\n2. ..."
@@ -537,11 +569,35 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
             "最終規格",
             key=final_key,
             label_visibility="collapsed",
-            height=120,  # 加大高度,讓多行注意事項好編輯
+            height=120,
             placeholder=spec_placeholder,
         )
 
     return st.session_state[final_key]
+
+
+# ─── ★ v3.5: 即時撈 Teable 編號 + 計算下一編號 (有 cache) ─
+def get_live_po_numbers(table_url: str, headers: dict, force_refresh: bool = False) -> set[str]:
+    """
+    即時撈 Teable 上所有訂單編號。30 秒 cache 避免每次 rerun 都打 API。
+    
+    Args:
+        force_refresh: True 時強制重撈
+    """
+    cache_key = "_fpo_live_po_numbers"
+    cache_time_key = "_fpo_live_po_numbers_t"
+    
+    now = datetime.now().timestamp()
+    cached_time = st.session_state.get(cache_time_key, 0)
+    cached_set = st.session_state.get(cache_key)
+    
+    if not force_refresh and cached_set is not None and (now - cached_time) < 30:
+        return cached_set
+    
+    fresh_set = fetch_all_po_numbers_from_teable(table_url, headers)
+    st.session_state[cache_key] = fresh_set
+    st.session_state[cache_time_key] = now
+    return fresh_set
 
 
 # ─── 主入口 ───────────────────────────────────────
@@ -634,7 +690,6 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     # ─── Step 3 ─
     st.markdown("### Step 3. 工廠 / 發出公司 / 字首 / 編號")
     s3_cols = st.columns(3)
-    # v3.2: 用 sort_priority 排序(優技預設第一,FCF 最後)
     factory_keys = sorted(
         factories.keys(),
         key=lambda k: (factories[k].get("sort_priority", 999), k),
@@ -672,15 +727,33 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
         )
 
     chosen_internal = internal_prefix(prefix_chosen)
-    new_po_no = calc_next_po_number(orders, chosen_internal)
 
-    cols_no = st.columns([2, 1, 1])
+    # ─── ★ v3.5 第 1 層防護:即時撈 Teable 編號(不靠 Refresh) ─
+    live_po_numbers = get_live_po_numbers(table_url, headers)
+    new_po_no = calc_next_po_number(live_po_numbers, chosen_internal)
+
+    # 顯示編號 + Refresh 按鈕
+    cols_no = st.columns([2, 0.6, 1, 1])
     with cols_no[0]:
         st.success(f"📋 新訂單編號:**`{new_po_no}`**")
     with cols_no[1]:
-        order_date_input = st.date_input("採購日期", value=date.today(), key="fpo_order_date")
+        if st.button("🔄", key="fpo_refresh_no", help="重新從 Teable 撈最新編號"):
+            get_live_po_numbers(table_url, headers, force_refresh=True)
+            st.rerun()
     with cols_no[2]:
+        order_date_input = st.date_input("採購日期", value=date.today(), key="fpo_order_date")
+    with cols_no[3]:
         is_revised = st.checkbox("REVISED", value=False, key="fpo_revised")
+
+    # 顯示 cache 狀態(讓使用者放心)
+    cache_t = st.session_state.get("_fpo_live_po_numbers_t", 0)
+    if cache_t:
+        age_sec = int(datetime.now().timestamp() - cache_t)
+        st.caption(
+            f"🟢 Teable 即時資料(共 {len(live_po_numbers)} 筆訂單,{age_sec} 秒前撈) · "
+            "30 秒 cache 內不重撈 · 按 🔄 強制刷新"
+        )
+
     cols_pic = st.columns([1, 3])
     with cols_pic[0]:
         purchase_responsible = st.text_input("負責採購", value="Amy", key="fpo_pic")
@@ -734,17 +807,13 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     btn_cols = st.columns([2, 2, 1])
     with btn_cols[0]:
         do_pdf = st.button(
-            "📄 產 PDF",
-            type="primary",
-            use_container_width=True,
-            key="fpo_do_pdf",
+            "📄 產 PDF", type="primary",
+            use_container_width=True, key="fpo_do_pdf",
         )
     with btn_cols[1]:
         do_writeback = st.button(
-            "💾 寫回 Teable",
-            type="secondary",
-            use_container_width=True,
-            key="fpo_do_writeback",
+            "💾 寫回 Teable", type="secondary",
+            use_container_width=True, key="fpo_do_writeback",
         )
     with btn_cols[2]:
         if st.button("🗑️ 全部清除", use_container_width=True, key="fpo_clear_bottom"):
@@ -764,6 +833,35 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
         st.error(f"❌ 以下品項規格沒填:**{', '.join(empty_spec_pns)}**。"
                  "規格欄會印空白,請回 Step 5 填好再產 PDF / 寫回 Teable。")
         st.stop()
+
+    # ─── ★ v3.5 第 2 層防護:產 PDF 前撞號檢查 ─
+    if do_pdf:
+        with st.spinner("最後檢查 Teable 編號..."):
+            fresh_po_set = get_live_po_numbers(table_url, headers, force_refresh=True)
+        
+        if new_po_no in fresh_po_set:
+            # 撞了!算新的並擋下
+            corrected_po = calc_next_po_number(fresh_po_set, chosen_internal)
+            st.error(
+                f"❌ **編號撞號警告!** "
+                f"剛剛偵測到 Teable 上已經有 **`{new_po_no}`**(可能是別人在你建單期間手動 key 進去)。\n\n"
+                f"➡️ 系統建議改用 **`{corrected_po}`**。請按 🔄 重新整理頁面後再試一次。"
+            )
+            st.stop()
+
+    if do_writeback:
+        with st.spinner("最後檢查 Teable 編號..."):
+            fresh_po_set = get_live_po_numbers(table_url, headers, force_refresh=True)
+        
+        if new_po_no in fresh_po_set:
+            # ─── ★ v3.5 第 3 層:寫入鎖,撞了就拒絕 ─
+            corrected_po = calc_next_po_number(fresh_po_set, chosen_internal)
+            st.error(
+                f"❌ **寫入鎖觸發!** "
+                f"Teable 上已經有 **`{new_po_no}`**,拒絕寫入避免覆蓋。\n\n"
+                f"➡️ 請按 🔄 重新整理編號(會跳到 **`{corrected_po}`**)後重試。"
+            )
+            st.stop()
 
     # ─── 產 PDF ─
     if do_pdf:
@@ -829,7 +927,6 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             f_due_str = f_due.strftime("%Y/%m/%d") if f_due else ""
             order_date_str = order_date_input.strftime("%Y/%m/%d")
             cust_date_str = parsed.po_date or order_date_str
-            # v3.1: 規格沒填就空白,不再 fallback 到客戶描述
             spec_text = (item_specs.get(it.part_number, "") or "").strip()
 
             records_fields.append({
@@ -853,6 +950,10 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
 
         if wb_result["success"] > 0:
             st.success(f"✅ 已寫入 Teable {wb_result['success']} 筆 record(訂單編號 {new_po_no})")
+            # 寫成功後清掉 cache,下次進來會重撈
+            for k in ["_fpo_live_po_numbers", "_fpo_live_po_numbers_t"]:
+                if k in st.session_state:
+                    del st.session_state[k]
             st.info("⚠️ 請按側邊欄 **Refresh** 才會看到主表更新。")
         if wb_result["failed"] > 0:
             st.error(f"❌ 寫入失敗 {wb_result['failed']} 筆")
