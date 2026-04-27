@@ -4,9 +4,11 @@
     "source": "115年訂單 RTF/DOCX",
     "total_orders": 41,
     "total_items": 84,
-    "unique_part_numbers": 31,
+    "unique_part_numbers": 33,
     "cleaned": true,
-    "cleanup_version": "v17"
+    "cleanup_version": "v17",
+    "manual_additions": 2,
+    "last_manual_add": "2026-04-27 (G1140001-01 / 00006713v1.1)"
   },
   "spec_history": {
     "700-000191 Rev B": {
@@ -494,6 +496,38 @@
           "date": "2026-04-24",
           "factory": "全興",
           "spec_text": "舊料號:3up\n(No X-outs)\n注意:真空包裝10panels一包!"
+        }
+      ]
+    },
+    "00006713v1.1 REV 2": {
+      "latest": {
+        "po": "G1140001-01",
+        "date": "2025-01-03",
+        "factory": "星晨",
+        "spec_text": "舊料號;1up\n注意:\n1. 僅接受新 Date Code ! 不能出庫存板\n2. 真空包裝 10 panels 一包!"
+      },
+      "history": [
+        {
+          "po": "G1140001-01",
+          "date": "2025-01-03",
+          "factory": "星晨",
+          "spec_text": "舊料號;1up\n注意:\n1. 僅接受新 Date Code ! 不能出庫存板\n2. 真空包裝 10 panels 一包!"
+        }
+      ]
+    },
+    "00006713v1.1": {
+      "latest": {
+        "po": "G1140001-01",
+        "date": "2025-01-03",
+        "factory": "星晨",
+        "spec_text": "舊料號;1up\n注意:\n1. 僅接受新 Date Code ! 不能出庫存板\n2. 真空包裝 10 panels 一包!"
+      },
+      "history": [
+        {
+          "po": "G1140001-01",
+          "date": "2025-01-03",
+          "factory": "星晨",
+          "spec_text": "舊料號;1up\n注意:\n1. 僅接受新 Date Code ! 不能出庫存板\n2. 真空包裝 10 panels 一包!"
         }
       ]
     }
