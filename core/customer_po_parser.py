@@ -1,8 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-客戶 PO PDF 解析器 v3。
+客戶 PO PDF 解析器 v6 (2026-04-27)。
 
 支援的客戶:WESCO / TIETO / GUDE / KCS / VORNE,其他走通用 fallback。
+
+v6 變更:
+- TIETO 支援新版欄序 (6053+):
+  Pos | Code | Item name | Amount | Unit (pcs/kpl) | Unit price | [Disc.%] | Total | Time
+- TIETO 仍相容舊版 (5976/5988/6043):
+  Pos | Code | Item name | Amount | pcs | Unit price | Total | Time
+- 單位識別擴展:pcs / kpl / 任何 2-4 個英文字母
 
 WESCO/TIETO/GUDE/KCS 用 pdfplumber.extract_text() + regex。
 VORNE 是表格型 PDF,用 pdfplumber.extract_tables() 直接抓表格。
@@ -95,6 +102,7 @@ def _parse_iso_date(s: str) -> str:
 
 
 def _eu_num(s: str) -> float:
+    """處理歐洲數字格式 '1 005,00' / '300,00' / '3,350'"""
     s = (s or "").strip().replace(" ", "").replace("\u00a0", "")
     if "," in s and "." in s:
         if s.rfind(",") > s.rfind("."):
@@ -176,8 +184,25 @@ def parse_wesco(text: str) -> ParsedPO:
     return p
 
 
-# ─── TIETO ──────────────────────────────────────
-TIETO_ITEM_RE = re.compile(
+# ─── TIETO (v6: 同時支援新舊欄序) ──────────────
+# 新版欄序 (6053+): Pos | Code | Item name | Amount | Unit | Unit price | Disc.% | Total | Time
+# 範例: "1 00006713v1.1 REV 2 FR4/2L/1,6/1pp/LF HAL/Bronto 300,00 kpl 3,350 1 005,00 27.4.2026"
+TIETO_ITEM_NEW_RE = re.compile(
+    r"^(\d+)\s+"                              # 1: pos
+    r"(\S+)\s+"                                # 2: code
+    r"(.+?)\s+"                                # 3: item name
+    r"([\d, ]+,\d{2})\s+"                      # 4: amount (歐式: 300,00)
+    r"(pcs|kpl|kpl\.|pcs\.|[a-zA-Z]{2,4})\s+"  # 5: unit (pcs/kpl/...)
+    r"([\d,]+)\s+"                             # 6: unit price (3,350)
+    r"([\d, ]+,\d{2})\s+"                      # 7: total (1 005,00)
+    r"(\d{1,2}\.\d{1,2}\.\d{4})\s*$",          # 8: time
+    re.M
+)
+
+# 舊版欄序 (5976/5988/6043): Pos | Code | Item name | Amount | pcs | Unit price | Total | Time
+# 用同一個 regex 也能 match,因為 unit 改寬鬆了
+# 但保留作為文件參考
+TIETO_ITEM_OLD_RE = re.compile(
     r"^(\d+)\s+(\S+)\s+(.+?)\s+([\d, ]+)\s+pcs\s+([\d,]+)\s+([\d, ]+,\d{2})\s+(\d{1,2}\.\d{1,2}\.\d{4})\s*$",
     re.M
 )
@@ -186,37 +211,60 @@ TIETO_ITEM_RE = re.compile(
 def parse_tieto(text: str) -> ParsedPO:
     p = ParsedPO(parser_used="TIETO", raw_text=text, customer_name="TIETO", currency="USD")
 
+    # PO 號 + 日期
     m = re.search(r"\b(\d{4})\s+(\d{1,2}\.\d{1,2}\.\d{4})\s+\d+\s*\(\d", text)
     if m:
         p.customer_po_no = m.group(1)
         p.po_date = _parse_iso_date(m.group(2))
 
+    # 付款條件
     m = re.search(r"Terms of payment\s+([^\n]+)", text)
     if m:
         p.payment_terms = m.group(1).strip()
 
+    # 出貨方式
     m = re.search(r"Method of delivery\s+([^\n]+)", text)
     if m:
         p.ship_via = m.group(1).strip()
 
+    # Total amount (新舊都同樣的 pattern: "Total amount USD 1005,00" 或 "Total amount EUR 5,143.00")
     m = re.search(r"Total amount\s+\w+\s+([\d,. ]+)", text)
     if m:
         p.total_amount = _eu_num(m.group(1))
 
-    for m in TIETO_ITEM_RE.finditer(text):
-        try:
-            qty = int(_eu_num(m.group(4)))
-        except ValueError:
-            qty = 0
-        p.items.append(POItem(
-            line=m.group(1),
-            part_number=m.group(2),
-            description=m.group(3).strip(),
-            quantity=qty,
-            unit_price=_eu_num(m.group(5)),
-            amount=_eu_num(m.group(6)),
-            delivery_date=_parse_iso_date(m.group(7)),
-        ))
+    # 品項 - 先試新版欄序(更寬鬆,涵蓋 pcs / kpl 等)
+    matches_new = list(TIETO_ITEM_NEW_RE.finditer(text))
+    if matches_new:
+        for m in matches_new:
+            try:
+                qty = int(_eu_num(m.group(4)))
+            except (ValueError, TypeError):
+                qty = 0
+            p.items.append(POItem(
+                line=m.group(1),
+                part_number=m.group(2),
+                description=m.group(3).strip(),
+                quantity=qty,
+                unit_price=_eu_num(m.group(6)),
+                amount=_eu_num(m.group(7)),
+                delivery_date=_parse_iso_date(m.group(8)),
+            ))
+    else:
+        # Fallback: 試舊版欄序
+        for m in TIETO_ITEM_OLD_RE.finditer(text):
+            try:
+                qty = int(_eu_num(m.group(4)))
+            except (ValueError, TypeError):
+                qty = 0
+            p.items.append(POItem(
+                line=m.group(1),
+                part_number=m.group(2),
+                description=m.group(3).strip(),
+                quantity=qty,
+                unit_price=_eu_num(m.group(5)),
+                amount=_eu_num(m.group(6)),
+                delivery_date=_parse_iso_date(m.group(7)),
+            ))
 
     if not p.items:
         p.parse_warnings.append("TIETO: 沒解出品項,請手動補")
