@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "version": "2026-04-25",
-    "note": "工廠主檔。空殼欄位請 Jonah 之後逐步補完整。短名(short)必須跟 Teable 主表「工廠」欄位的值完全一致,系統用 short 做查表 key。",
+    "version": "2026-04-27",
+    "note": "工廠主檔。短名(short)必須跟 Teable 主表「工廠」欄位的值完全一致,系統用 short 做查表 key。",
     "field_guide": {
       "short": "Teable 主表「工廠」欄位的短名(查表 key,不可重複)",
       "factory_name": "PDF 上印的完整公司名",
@@ -11,18 +11,36 @@
       "default_currency": "預設幣別,可在 UI 改",
       "default_payment_terms": "預設付款條件,可在 UI 改",
       "default_shipment / default_ship_to": "進貨方式 / 進貨地址,可在 UI 改",
-      "region": "Taiwan / China / HK / Other,影響單號類型自動建議(僅作參考,實際單號從 Teable 西拓訂單編號讀)",
-      "is_active": "false 的工廠不會出現在下拉選單"
+      "region": "Taiwan / China / HK / Other",
+      "is_active": "false 的工廠不會出現在下拉選單",
+      "sort_priority": "下拉選單排序;數字越小越優先(優技=0=預設,FCF=99=最後)"
     }
   },
   "factories": {
+    "優技": {
+      "short": "優技",
+      "factory_name": "優技電子股份有限公司",
+      "factory_name_en": "",
+      "contact_person": "林中柏 #113",
+      "phone": "02-8685-0551",
+      "fax": "02-8685-5981",
+      "address": "新北市樹林區東順街71號",
+      "default_currency": "NT$",
+      "default_payment_terms": "次月結兩個月,每月帳款截止日25號,票期60天",
+      "default_shipment": "待通知",
+      "default_ship_to": "待通知",
+      "region": "Taiwan",
+      "is_active": true,
+      "sort_priority": 0,
+      "_data_source": "從 ET1150023-01.rtf 完整帶入"
+    },
     "星晨": {
       "short": "星晨",
       "factory_name": "星晨電路股份有限公司",
       "factory_name_en": "",
       "contact_person": "呂宗霖",
-      "phone": "2202-6632 #227",
-      "fax": "2202-1887",
+      "phone": "02-2202-6632 #227",
+      "fax": "02-2202-1887",
       "address": "新北市新莊區瓊林南路275巷10號",
       "default_currency": "NT$",
       "default_payment_terms": "次月結兩個月,每月帳款截止日25號,票期60天",
@@ -30,7 +48,8 @@
       "default_ship_to": "待通知",
       "region": "Taiwan",
       "is_active": true,
-      "_data_source": "從附件 ET1150028-01-TS-CAN1X2.pdf 帶入"
+      "sort_priority": 10,
+      "_data_source": "從 G1150007-01.rtf 完整帶入"
     },
     "宏棋": {
       "short": "宏棋",
@@ -46,7 +65,8 @@
       "default_ship_to": "待確認",
       "region": "Taiwan",
       "is_active": true,
-      "_data_source": "從附件 ET1150029-01__宏棋.pdf 帶入"
+      "sort_priority": 20,
+      "_data_source": "從 ET1150008-01.rtf 完整帶入"
     },
     "沅榕": {
       "short": "沅榕",
@@ -62,7 +82,76 @@
       "default_ship_to": "待通知",
       "region": "Taiwan",
       "is_active": true,
-      "_data_source": "從附件 G1150030-01.pdf 帶入"
+      "sort_priority": 30,
+      "_data_source": "從 G1150027-01.rtf 完整帶入"
+    },
+    "全興": {
+      "short": "全興",
+      "factory_name": "全興電子有限公司",
+      "factory_name_en": "",
+      "contact_person": "張嘉娣",
+      "phone": "03-346-3995",
+      "fax": "03-346-5005",
+      "address": "桃園市桃園區春日路1651巷24弄5號",
+      "default_currency": "NT$",
+      "default_payment_terms": "次月結兩個月,每月帳款截止日25號,票期60天",
+      "default_shipment": "待通知",
+      "default_ship_to": "待通知",
+      "region": "Taiwan",
+      "is_active": true,
+      "sort_priority": 40,
+      "_data_source": "從 G1150004-01.rtf 完整帶入"
+    },
+    "祥竑": {
+      "short": "祥竑",
+      "factory_name": "祥竑電子股份有限公司",
+      "factory_name_en": "",
+      "contact_person": "Justin",
+      "phone": "03-419-3073",
+      "fax": "03-419-3060",
+      "address": "桃園市平鎮區平鎮工業區工業12路1-1號",
+      "default_currency": "NT$",
+      "default_payment_terms": "次月結兩個月,每月帳款截止日25號,票期60天",
+      "default_shipment": "待確認",
+      "default_ship_to": "待確認",
+      "region": "Taiwan",
+      "is_active": true,
+      "sort_priority": 50,
+      "_data_source": "從 G1150014-01.rtf 完整帶入"
+    },
+    "柏承": {
+      "short": "柏承",
+      "factory_name": "柏承科技 [請補完整名]",
+      "factory_name_en": "",
+      "contact_person": "[請補]",
+      "phone": "[請補]",
+      "fax": "[請補]",
+      "address": "[請補]",
+      "default_currency": "NT$",
+      "default_payment_terms": "次月結兩個月,每月帳款截止日25號,票期60天",
+      "default_shipment": "待通知",
+      "default_ship_to": "待通知",
+      "region": "Taiwan",
+      "is_active": true,
+      "sort_priority": 60,
+      "_data_source": "空殼,沒找到歷史 RTF 可帶入"
+    },
+    "台豐": {
+      "short": "台豐",
+      "factory_name": "台豐精密 [請補完整名]",
+      "factory_name_en": "",
+      "contact_person": "[請補]",
+      "phone": "[請補]",
+      "fax": "[請補]",
+      "address": "[請補]",
+      "default_currency": "NT$",
+      "default_payment_terms": "次月結兩個月,每月帳款截止日25號,票期60天",
+      "default_shipment": "待通知",
+      "default_ship_to": "待通知",
+      "region": "Taiwan",
+      "is_active": true,
+      "sort_priority": 70,
+      "_data_source": "空殼,沒找到歷史 RTF 可帶入"
     },
     "Profit Grand": {
       "short": "Profit Grand",
@@ -78,87 +167,8 @@
       "default_ship_to": "待通知",
       "region": "HK",
       "is_active": true,
-      "_data_source": "從附件 EW1150018-01.pdf 帶入"
-    },
-    "全興": {
-      "short": "全興",
-      "factory_name": "全興電子有限公司",
-      "factory_name_en": "",
-      "contact_person": "[請補]",
-      "phone": "[請補]",
-      "fax": "[請補]",
-      "address": "[請補]",
-      "default_currency": "NT$",
-      "default_payment_terms": "次月結兩個月,每月帳款截止日25號,票期60天",
-      "default_shipment": "待通知",
-      "default_ship_to": "待通知",
-      "region": "Taiwan",
-      "is_active": true,
-      "_data_source": "公司名從產品資料卡.pdf 帶入,其他欄位待補"
-    },
-    "優技": {
-      "short": "優技",
-      "factory_name": "優技電子 [請補完整名]",
-      "factory_name_en": "",
-      "contact_person": "[請補]",
-      "phone": "[請補]",
-      "fax": "[請補]",
-      "address": "[請補]",
-      "default_currency": "NT$",
-      "default_payment_terms": "[請補]",
-      "default_shipment": "待通知",
-      "default_ship_to": "待通知",
-      "region": "Taiwan",
-      "is_active": true,
-      "_data_source": "空殼,從工廠情報截圖帶名"
-    },
-    "祥竑": {
-      "short": "祥竑",
-      "factory_name": "祥竑科技 [請補完整名]",
-      "factory_name_en": "",
-      "contact_person": "[請補]",
-      "phone": "[請補]",
-      "fax": "[請補]",
-      "address": "[請補]",
-      "default_currency": "NT$",
-      "default_payment_terms": "[請補]",
-      "default_shipment": "待通知",
-      "default_ship_to": "待通知",
-      "region": "Taiwan",
-      "is_active": true,
-      "_data_source": "空殼,從工廠情報截圖帶名"
-    },
-    "柏承": {
-      "short": "柏承",
-      "factory_name": "柏承科技 [請補完整名]",
-      "factory_name_en": "",
-      "contact_person": "[請補]",
-      "phone": "[請補]",
-      "fax": "[請補]",
-      "address": "[請補]",
-      "default_currency": "NT$",
-      "default_payment_terms": "[請補]",
-      "default_shipment": "待通知",
-      "default_ship_to": "待通知",
-      "region": "Taiwan",
-      "is_active": true,
-      "_data_source": "空殼,從工廠情報截圖帶名"
-    },
-    "台豐": {
-      "short": "台豐",
-      "factory_name": "台豐精密 [請補完整名]",
-      "factory_name_en": "",
-      "contact_person": "[請補]",
-      "phone": "[請補]",
-      "fax": "[請補]",
-      "address": "[請補]",
-      "default_currency": "NT$",
-      "default_payment_terms": "[請補]",
-      "default_shipment": "待通知",
-      "default_ship_to": "待通知",
-      "region": "Taiwan",
-      "is_active": true,
-      "_data_source": "空殼,從工廠情報截圖帶名"
+      "sort_priority": 80,
+      "_data_source": "從 EW1150018-01.docx 帶入"
     },
     "FCF": {
       "short": "FCF",
@@ -174,7 +184,8 @@
       "default_ship_to": "待通知",
       "region": "China",
       "is_active": true,
-      "_data_source": "空殼,從工廠情報截圖帶名;China 工廠所以預設 USD + EXW China"
+      "sort_priority": 99,
+      "_data_source": "空殼,大陸工廠;預設 USD + EXW China"
     }
   }
 }
