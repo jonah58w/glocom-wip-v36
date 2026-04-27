@@ -102,11 +102,22 @@ def internal_prefix(display: str) -> str:
 
 
 def calc_next_po_number(orders_df: pd.DataFrame, prefix: str) -> str:
+    """
+    計算下一個訂單編號。
+    
+    重點:流水號要**全局唯一**,不論字首 G/ET/EW/GC 等。
+    例如 Teable 上有 G1150030-01,則下一個 ET 編號也不能用 1150030,
+    必須是 ET1150031-01。
+    
+    格式:{prefix}{民國年3位}{流水號4位}-{品項序號}
+    例如:G1150031-01
+    """
     if orders_df.empty or COL_GLOCOM_PO not in orders_df.columns:
         roc_year = datetime.now().year - 1911
         return f"{prefix}{roc_year}0001-01"
 
-    pattern = re.compile(rf"^{re.escape(prefix)}(\d{{3}})(\d{{4}})-(\d+)$")
+    # ★ 不寫死 prefix,搜所有字首 (G, GC, ET, EW, etc.)
+    pattern = re.compile(r"^[A-Z]+(\d{3})(\d{4})-(\d+)$")
     max_year_serial = (0, 0)
 
     for raw_po in orders_df[COL_GLOCOM_PO].dropna().astype(str):
