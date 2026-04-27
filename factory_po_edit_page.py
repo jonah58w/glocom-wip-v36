@@ -324,8 +324,11 @@ def render_factory_po_edit_page(orders: pd.DataFrame, table_url: str, headers: d
             key="fpoe_customer_po",
         )
 
-    # 工廠(整單共用)
-    factory_keys = sorted(factories.keys())
+    # 工廠(整單共用)— v3.2: 用 sort_priority 排序
+    factory_keys = sorted(
+        factories.keys(),
+        key=lambda k: (factories[k].get("sort_priority", 999), k),
+    )
     raw_factory = _safe_str(first_row.get("工廠", ""))
     factory_idx = factory_keys.index(raw_factory) if raw_factory in factory_keys else 0
     with cols_common[2]:
