@@ -1,13 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.5。
+建立工廠 PO 頁面 v3.6。
 
-主要更新(v3.5):
-- ★ 三層編號防撞機制(避免人工手 key 跟系統建單撞號):
-  第 1 層【即時撈】:進頁面時直接呼叫 Teable API 撈最新編號(不靠側邊欄 Refresh)
-  第 2 層【撞號警告】:產 PDF 前再撈一次,撞號就紅色警告擋下,自動換新編號
-  第 3 層【寫入鎖】:寫回 Teable 前最後檢查一次,真的撞才往上跳
-- ★ Step 3 加「🔄 重新計算編號」按鈕(不用整頁 reload)
+主要更新(v3.6):
+- ★ 寫進 Teable 成功後,自動把規格寫進 GitHub 上的 spec_history.json
+  - 透過 GitHub REST API,不依賴本機 git
+  - PAT 存在 Streamlit Secrets ([github] token = "...")
+  - 兩條更新管道並行:
+    (a) ERP 訂單 → 公司伺服器排程(每天 13:30)
+    (b) Streamlit 訂單 → 即時寫 GitHub
+  - 任一條故障另一條仍運作,規格庫永不斷源
+
+v3.5 變更:
+- 三層編號防撞機制
+- Refresh 按鈕
 
 v3.4 變更:
 - 規格優先從 data/spec_history.json(歷史 RTF/DOCX)抓
@@ -955,6 +961,48 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
                 if k in st.session_state:
                     del st.session_state[k]
             st.info("⚠️ 請按側邊欄 **Refresh** 才會看到主表更新。")
+            
+            # ─── ★ v3.6: 順便寫進 spec_history.json (GitHub) ─
+            try:
+                from core.spec_history_writer import (
+                    append_multiple_spec_history,
+                    is_github_writer_available,
+                )
+                if is_github_writer_available():
+                    sh_items = []
+                    for it in parsed.items:
+                        sh_items.append({
+                            "part_number": it.part_number,
+                            "spec_text": (item_specs.get(it.part_number, "") or "").strip(),
+                            "po_no": new_po_no,
+                            "factory": factory_short,
+                            "date_str": order_date_input.strftime("%Y-%m-%d"),
+                        })
+                    
+                    with st.spinner("更新規格歷史庫到 GitHub..."):
+                        sh_success, sh_fail, sh_msgs = append_multiple_spec_history(sh_items)
+                    
+                    if sh_success > 0 and sh_fail == 0:
+                        st.success(
+                            f"✅ 規格歷史庫已即時更新到 GitHub ({sh_success} 筆) — "
+                            "下一張同料號訂單會自動帶入此規格"
+                        )
+                    elif sh_fail > 0:
+                        st.warning(
+                            f"⚠️ 規格歷史庫 GitHub 更新部分失敗(成功 {sh_success}, 失敗 {sh_fail})"
+                        )
+                    
+                    with st.expander("📜 規格歷史庫更新明細"):
+                        for m in sh_msgs:
+                            st.text(m)
+                else:
+                    st.caption(
+                        "💡 提示:設定 GitHub Token 後可即時更新規格歷史庫。"
+                        "暫時不影響使用 — 排程腳本(13:30)仍會處理 ERP 出單。"
+                    )
+            except Exception as e:
+                st.warning(f"⚠️ 規格歷史庫更新失敗(不影響 Teable 主表): {e}")
+        
         if wb_result["failed"] > 0:
             st.error(f"❌ 寫入失敗 {wb_result['failed']} 筆")
             with st.expander("失敗原因"):
