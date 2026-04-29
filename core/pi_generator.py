@@ -352,7 +352,7 @@ def render_pi_docx(pi_ctx: dict, output_path: Path = None) -> Path:
     # logo 動態載入(若沒檔則用空白佔位)
     logo_path = _find_logo_path()
     if logo_path:
-        logo_img = InlineImage(doc, str(logo_path), width=Cm(2.4))
+        logo_img = InlineImage(doc, str(logo_path), width=Cm(3.0))
     else:
         logo_img = ""
 
