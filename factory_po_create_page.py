@@ -1087,27 +1087,49 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
         )
     
     # 自動偵測 NRE 品項
+    # 規則(從嚴):
+    #   1. 料號 99-開頭 → NRE(VORNE 等客戶都用 99-XXXX)
+    #   2. 料號完全等於 "NRE" → NRE
+    #   3. 描述「整段是 NRE 相關」+ 數量為 1 → NRE
+    #      只認:^NRE / ^1 Time NRE / ^Setup Fee / ^Tooling Fee / ^Engineering Fee 開頭
+    #   ★ 不再用「描述含 Net List」做判斷 — Net List Test 常是 PCB 描述的一部分
+    NRE_DESCRIPTION_PATTERNS = (
+        "NRE", "1 TIME NRE", "1-TIME NRE",
+        "SETUP FEE", "TOOLING FEE", "ENGINEERING FEE",
+        "ONE-TIME FEE", "ONE TIME FEE",
+    )
+    
+    def _is_nre_item(it):
+        # 料號規則
+        pn = (it.part_number or "").strip()
+        if pn.startswith("99-"):
+            return True
+        if pn.upper() == "NRE":
+            return True
+        # 描述規則(只在數量為 1 才考慮 — 多顆通常不是 NRE)
+        desc = (it.description or "").strip().upper()
+        if it.quantity == 1:
+            for pattern in NRE_DESCRIPTION_PATTERNS:
+                if desc.startswith(pattern):
+                    return True
+            # 完全等於某些 keywords
+            if desc in ("NRE", "1 TIME NRE", "SETUP", "TOOLING"):
+                return True
+        return False
+    
     detected_nre_items = []
     main_items = []
     for it in parsed.items:
-        is_nre = (
-            it.part_number.startswith("99-") or
-            it.part_number.upper() == "NRE" or
-            "NRE" in (it.description or "").upper() or
-            "1 TIME" in (it.description or "").upper() or
-            "SETUP" in (it.description or "").upper() or
-            "NET LIST" in (it.description or "").upper()
-        )
-        if is_nre:
+        if _is_nre_item(it):
             detected_nre_items.append(it)
         else:
             main_items.append(it)
     
     if detected_nre_items:
         st.info(
-            f"💡 自動偵測到 {len(detected_nre_items)} 個可能的 NRE 品項:"
+            f"💡 自動偵測到 {len(detected_nre_items)} 個 NRE 品項:"
             f" {', '.join(it.part_number for it in detected_nre_items)}"
-            f"(料號 99-開頭、或描述含 NRE/1 Time/Setup/Net List)"
+            f"(料號 99-開頭 或 描述以 NRE/Setup Fee/Tooling Fee 開頭 + 數量=1)"
         )
     
     nre_amount = 0.0
