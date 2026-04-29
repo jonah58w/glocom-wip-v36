@@ -1594,6 +1594,19 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
 
         with st.spinner(f"寫入 {len(records_fields)} 筆 Teable record..."):
             wb_result = create_teable_records(table_url, headers, records_fields)
+        
+        # ★ v3.9.6: 偵錯訊息 — 確保任何狀況都有提示
+        if not records_fields:
+            st.error(
+                f"❌ **沒有任何 record 可寫入 Teable**(records_fields 是空的)\n\n"
+                f"可能原因:NRE 偵測把所有品項都當 NRE 跳過。\n\n"
+                f"偵錯資訊:\n"
+                f"- parsed.items 共 {len(parsed.items)} 個品項: {[it.part_number for it in parsed.items]}\n"
+                f"- detected_nre_pns: {sorted(detected_nre_pns_wb)}\n"
+                f"- nre_mode: {nre_mode_wb}, has_nre: {has_nre_wb}, skip_nre_in_writeback: {skip_nre_in_writeback}\n\n"
+                f"➡️ 請按「🗑 全部清除」重新建單,或回 Step 4-1 確認 NRE 偵測。"
+            )
+            st.stop()
 
         if wb_result["success"] > 0:
             st.success(f"✅ 已寫入 Teable {wb_result['success']} 筆 record(訂單編號 {new_po_no})")
@@ -1649,3 +1662,12 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             with st.expander("失敗原因"):
                 for err in wb_result["errors"]:
                     st.text(err)
+        elif wb_result["success"] == 0:
+            # ★ v3.9.6: 寫入既沒成功也沒失敗計數,可能是 API 回應異常
+            st.error(
+                f"❌ **寫入結果異常**(success=0, failed=0)\n\n"
+                f"偵錯資訊:\n"
+                f"- 嘗試寫入 {len(records_fields)} 筆\n"
+                f"- API 回應沒有正常 records 列表\n\n"
+                f"➡️ 請檢查 Teable API token 是否有效,或開瀏覽器 console 看詳細錯誤。"
+            )
