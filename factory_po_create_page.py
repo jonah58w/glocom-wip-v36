@@ -1,15 +1,43 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.6。
+建立工廠 PO 頁面 v3.9。
 
-主要更新(v3.6):
-- ★ 寫進 Teable 成功後,自動把規格寫進 GitHub 上的 spec_history.json
+主要更新(v3.9):
+- ★ 新料號規格結構化 — 「7 選單 + 補充」tab 改為 3 段式組合:
+  [第1段] 工程確認語(2選1 + 不寫):
+    - "Working Gerber 承認後..."(預設,完整版)
+    - "直接生產!"
+    - 不寫
+  [第2段] 詳細規格(7 選單 + 補充欄):
+    - Material / Tg / Thickness / Copper / Surface Finish / S/M / S/L
+    - Surface Finish: ENIG 跟 Immersion Gold 是同一個,只留 'ENIG 2u"'
+    - 其他補充(text input,可加排版/特殊要求)
+  [第3段] 結尾標準語(強制加,不可關):
+    - "須添加西拓UL logo & date code (YYWW); 樣板: ..."
+- 即時預覽完整 3 段組合
+- 最終規格框仍可手動編輯
+
+v3.8.1 變更:
+- NRE 工程費獨立欄位 + 工廠貨幣自動 (NTD/USD)
+- 字首決定處理模式(GC=合併, ET/EW=獨立)
+- 填 0/NA/留空 → 跳過 NRE
+
+v3.8 變更:
+- NRE 工程費自動處理初版
+
+v3.7 變更:
+- ★ AI 規格智能分析(在 Step 5 舊料號區塊):
+  - 模糊料號比對(ATP3 Rev G == ATP3-Rev-G == atp3 rev g)
+  - 行頻率分析:識別「核心要求 / 最新加 / 舊版有最新沒」
+  - 自動產生「智能合併版本」(以最新為主 + 標出舊版疑點)
+  - 顯示統計徽章 + 紅色警告 + 詳細分析展開
+  - Sandy 看高亮疑點檢查,不會漏掉重要要求
+
+v3.6 變更:
+- 寫進 Teable 成功後,自動把規格寫進 GitHub 上的 spec_history.json
   - 透過 GitHub REST API,不依賴本機 git
   - PAT 存在 Streamlit Secrets ([github] token = "...")
-  - 兩條更新管道並行:
-    (a) ERP 訂單 → 公司伺服器排程(每天 13:30)
-    (b) Streamlit 訂單 → 即時寫 GitHub
-  - 任一條故障另一條仍運作,規格庫永不斷源
+  - 兩條更新管道並行(ERP 排程 + Streamlit 即時)
 
 v3.5 變更:
 - 三層編號防撞機制
@@ -66,10 +94,27 @@ SPEC_OPTIONS_FULL = {
     "Tg": ["Tg130", "Tg150", "Tg170", "Tg180"],
     "Board thickness": ["0.4mm", "0.6mm", "0.8mm", "1.0mm", "1.2mm", "1.6mm", "2.0mm", "2.4mm", "3.2mm"],
     "Copper": ["1oz/1oz", "1/2oz/1/2oz", "2oz/2oz", "3oz/3oz", "Ext: 1oz all layers"],
-    "Surface Finish": ["ENIG", "Lead-free HASL", "HASL", "Immersion Gold", "OSP", "Hard Gold", "Immersion Silver"],
+    # ★ v3.9: Surface Finish 整理 — ENIG 跟 Immersion Gold 同一個意思,只留 ENIG 2u"
+    "Surface Finish": ['ENIG 2u"', "Lead-free HASL", "HASL", "OSP", "Hard Gold", "Immersion Silver"],
     "S/M": ["Green", "Matte Green", "Red", "Blue", "Black", "Matte Black", "White"],
     "S/L": ["White", "Black", "Yellow"],
 }
+
+# ★ v3.9: 新料號規格 - 第 1 段(工程確認語)選項
+ENGINEERING_CONFIRM_OPTIONS = {
+    "Working Gerber 承認": (
+        "Working Gerber承認後,才可生產! 請於下午14:00前傳working gerber"
+        "(& stencil gerber)給我司,如有工程問題請一併詢問,謝謝!"
+    ),
+    "直接生產": "直接生產!",
+    "不寫": "",
+}
+
+# ★ v3.9: 新料號規格 - 第 3 段(結尾標準語,強制加,兩行)
+FACTORY_PO_FOOTER = (
+    "須添加西拓UL logo & date code (YYWW);\n"
+    "樣板: 除試錫板外,須另外提供樣板供備份."
+)
 
 
 # ─── 工廠主檔 ────────────────────────────────────
@@ -328,7 +373,26 @@ def fetch_previous_spec(orders: pd.DataFrame, part_number: str, factory_short: s
 
 
 # ─── 規格組字串 ──────────────────────────────────
-def build_full_spec_oneline(selections: dict, extra_text: str) -> str:
+def build_full_spec_oneline(
+    selections: dict,
+    extra_text: str,
+    engineering_confirm: str = "Working Gerber 承認",  # ★ v3.9
+    include_footer: bool = True,                       # ★ v3.9
+) -> str:
+    """
+    組合新料號規格(3 段式):
+    [第1段] 工程確認語(預設 Working Gerber 承認)
+    [第2段] 7 選單詳細規格 + 其他補充
+    [第3段] 結尾標準語(預設加)
+    """
+    sections = []
+    
+    # 第 1 段:工程確認語
+    confirm_text = ENGINEERING_CONFIRM_OPTIONS.get(engineering_confirm, "").strip()
+    if confirm_text:
+        sections.append(confirm_text)
+    
+    # 第 2 段:詳細規格 + 補充
     parts = []
     for cat, val in selections.items():
         if val:
@@ -338,19 +402,72 @@ def build_full_spec_oneline(selections: dict, extra_text: str) -> str:
                 parts.append(f"{cat}: {val}")
     if extra_text and extra_text.strip():
         parts.append(extra_text.strip())
-    return "; ".join(parts)
+    
+    if parts:
+        sections.append("; ".join(parts))
+    
+    # 第 3 段:結尾標準語
+    if include_footer:
+        sections.append(FACTORY_PO_FOOTER)
+    
+    # 3 段之間用換行分隔(可讀性更好)
+    return "\n".join(sections)
 
 
 def build_po_context_from_new_order(
     new_po_no, parsed, factory_data, factory_short, issuing_company,
     factory_unit_prices, factory_due_dates, item_specs,
     purchase_responsible, order_date, is_revised,
+    nre_settings=None,  # ★ v3.8 新增
 ):
+    """
+    nre_settings (dict, optional):
+        {
+            "has_nre": bool,
+            "nre_amount": float (NT$),
+            "nre_target_pn": str,
+            "detected_nre_pns": list of str,  # 客戶 PDF 上的 NRE 品項料號(這些不該印工廠 PDF)
+        }
+    """
+    nre_settings = nre_settings or {}
+    nre_mode = nre_settings.get("mode", "merge")  # "merge" | "separate"
+    has_nre = nre_settings.get("has_nre", False)
+    nre_amount = float(nre_settings.get("nre_amount", 0) or 0)
+    nre_target_pn = nre_settings.get("nre_target_pn")
+    detected_nre_pns = set(nre_settings.get("detected_nre_pns", []))
+    factory_currency = nre_settings.get("factory_currency", "NTD")
+    
+    # 邏輯:
+    #   GC merge + has_nre   → 過濾 NRE 品項 + 主品項加註
+    #   GC merge + 沒填      → 過濾 NRE 品項(等於 NRE 不要,不印)
+    #   ET separate + has_nre → 不過濾(NRE 那行印,單價是 NRE 金額)
+    #   ET separate + 沒填    → 過濾 NRE 品項(等於 NRE 不要,不印)
+    apply_merge = (nre_mode == "merge" and has_nre)
+    skip_nre_in_pdf = (
+        (nre_mode == "merge") or                    # GC 任何情況都不印 NRE 行(merge 進主品項或不要)
+        (nre_mode == "separate" and not has_nre)    # ET/EW 沒填 NRE 也不印
+    )
+    
     items = []
     for it in parsed.items:
+        # NRE 品項是否跳過
+        if it.part_number in detected_nre_pns and skip_nre_in_pdf:
+            continue
+        
         f_price = float(factory_unit_prices.get(it.part_number, 0.0))
         f_due = factory_due_dates.get(it.part_number)
         spec_text = (item_specs.get(it.part_number, "") or "").strip()
+        
+        # 只在 GC merge + has_nre 時主品項加註
+        if apply_merge and it.part_number == nre_target_pn and nre_amount > 0 and it.quantity > 0:
+            nre_per_pcs = nre_amount / it.quantity
+            currency_label = factory_currency if factory_currency != "NTD" else "NTD"
+            nre_note = f"NRE: {currency_label}{nre_amount:,.0f} (= NRE, {currency_label}{nre_per_pcs:.0f}/pcs)"
+            if spec_text:
+                spec_text = f"{spec_text}\n{nre_note}"
+            else:
+                spec_text = nre_note
+        
         items.append({
             "part_number": it.part_number,
             "spec_text": spec_text,
@@ -416,44 +533,153 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
 
         if new_type == "舊料號":
             with cols_type[1]:
-                st.caption("👉 系統會從歷史訂單檔(同料號最近一筆)自動帶入注意事項。請於最終規格框直接編輯。")
+                st.caption("👉 系統會從歷史訂單檔(模糊比對同料號)智能分析,自動帶入合併版規格。請檢查紅色疑點。")
 
             if not st.session_state.get(applied_old_default_key, False):
                 current_factory = st.session_state.get("fpo_factory_short", "")
-                hist_hits = fetch_previous_spec(orders, item.part_number, factory_short=current_factory)
-                hist_spec = ""
-                hist_po = ""
-                hist_factory = ""
-                hist_source = ""
-                if hist_hits:
-                    for h in hist_hits:
-                        if h.get("spec"):
-                            hist_spec = h["spec"].strip()
-                            hist_po = h.get("po_no", "")
-                            hist_factory = h.get("factory", "")
-                            hist_source = h.get("source", "")
-                            break
-
-                if hist_spec:
-                    default_text = f"舊料號\n\n注意:\n{hist_spec}"
+                
+                # ─── ★ v3.7: 智能歷史分析(模糊料號 + 行頻率分析) ─
+                from core.spec_intelligence import (
+                    analyze_spec_history,
+                    build_smart_spec,
+                    find_similar_part_numbers,
+                )
+                
+                spec_history_dict = load_spec_history()
+                
+                # 找模糊料號(包含原始料號自己)
+                target_pn = item.part_number
+                matched_pn = None
+                history_records = []
+                
+                # 1. 直接 hit
+                if target_pn in spec_history_dict:
+                    matched_pn = target_pn
+                    history_records = spec_history_dict[target_pn].get("history", [])
                 else:
-                    default_text = "舊料號"
-
+                    # 2. 模糊比對
+                    similar = find_similar_part_numbers(
+                        target_pn,
+                        list(spec_history_dict.keys()),
+                        strict=False,  # 寬鬆比對
+                    )
+                    if similar:
+                        # 取相似料號中歷史最多的當主要參考
+                        similar.sort(key=lambda p: -len(spec_history_dict[p].get("history", [])))
+                        matched_pn = similar[0]
+                        history_records = spec_history_dict[matched_pn].get("history", [])
+                
+                # 3. 智能分析
+                if history_records:
+                    analysis = analyze_spec_history(target_pn, history_records)
+                    smart_spec = build_smart_spec(analysis)
+                    default_text = f"舊料號\n\n注意:\n{smart_spec}"
+                    
+                    # 存分析結果到 session_state(下面 UI 會顯示)
+                    st.session_state[f"_fpo_v37_analysis_{idx}"] = {
+                        "matched_pn": matched_pn,
+                        "is_fuzzy": (matched_pn != target_pn),
+                        "total_history": analysis.total_history,
+                        "core_count": len(analysis.core_lines),
+                        "new_count": len(analysis.new_lines),
+                        "dropped_count": len(analysis.dropped_lines),
+                        "has_warnings": analysis.has_warnings,
+                        "latest_po": analysis.latest_record.get("po", ""),
+                        "latest_factory": analysis.latest_record.get("factory", ""),
+                        "latest_date": analysis.latest_record.get("date", ""),
+                        "annotated_lines": [
+                            {
+                                "text": al.text,
+                                "category": al.category,
+                                "explanation": al.explanation,
+                                "color_code": al.color_code,
+                            }
+                            for al in analysis.annotated_lines
+                        ],
+                    }
+                else:
+                    # 沒找到任何歷史 — fallback 到原本邏輯查 Teable
+                    hist_hits = fetch_previous_spec(orders, item.part_number, factory_short=current_factory)
+                    if hist_hits and hist_hits[0].get("spec"):
+                        default_text = f"舊料號\n\n注意:\n{hist_hits[0]['spec'].strip()}"
+                        st.session_state[f"_fpo_v37_analysis_{idx}"] = {
+                            "matched_pn": item.part_number,
+                            "is_fuzzy": False,
+                            "total_history": 1,
+                            "core_count": 0, "new_count": 0, "dropped_count": 0,
+                            "has_warnings": False,
+                            "latest_po": hist_hits[0].get("po_no", ""),
+                            "latest_factory": hist_hits[0].get("factory", ""),
+                            "latest_date": hist_hits[0].get("date", ""),
+                            "annotated_lines": [],
+                            "from_teable": True,
+                        }
+                    else:
+                        default_text = "舊料號"
+                        st.session_state[f"_fpo_v37_analysis_{idx}"] = None
+                
                 st.session_state[final_key] = default_text
                 st.session_state[applied_old_default_key] = True
-                st.session_state[f"_fpo_old_hist_po_{idx}"] = hist_po
-                st.session_state[f"_fpo_old_hist_factory_{idx}"] = hist_factory
-                st.session_state[f"_fpo_old_hist_source_{idx}"] = hist_source
-
-            hist_po_shown = st.session_state.get(f"_fpo_old_hist_po_{idx}", "")
-            hist_factory_shown = st.session_state.get(f"_fpo_old_hist_factory_{idx}", "")
-            hist_source_shown = st.session_state.get(f"_fpo_old_hist_source_{idx}", "")
-            if hist_po_shown:
-                source_label = "歷史訂單檔" if hist_source_shown == "history_file" else "Teable 主表"
-                factory_info = f" / {hist_factory_shown}" if hist_factory_shown else ""
-                st.caption(
-                    f"📌 注意事項來源:**{hist_po_shown}**{factory_info}({source_label})"
-                )
+            
+            # ─── 顯示 v3.7 分析結果 ─
+            v37 = st.session_state.get(f"_fpo_v37_analysis_{idx}")
+            if v37:
+                # 來源標示
+                if v37.get("from_teable"):
+                    src_label = "Teable 主表"
+                elif v37.get("is_fuzzy"):
+                    src_label = f"歷史訂單檔(模糊比對到 `{v37['matched_pn']}`)"
+                else:
+                    src_label = "歷史訂單檔"
+                
+                src_info = f"**{v37['latest_po']}**"
+                if v37.get("latest_factory"):
+                    src_info += f" / {v37['latest_factory']}"
+                if v37.get("latest_date"):
+                    src_info += f" / {v37['latest_date']}"
+                
+                st.caption(f"📌 注意事項來源:{src_info}({src_label})")
+                
+                # 統計徽章
+                total_h = v37.get("total_history", 0)
+                if total_h >= 1:
+                    badge_cols = st.columns(4)
+                    badge_cols[0].metric("📚 歷史筆數", total_h)
+                    badge_cols[1].metric("🟢 核心要求", v37.get("core_count", 0))
+                    badge_cols[2].metric("🔵 最新加的", v37.get("new_count", 0))
+                    badge_cols[3].metric(
+                        "🔴 疑點",
+                        v37.get("dropped_count", 0),
+                        delta=("⚠️ 請檢查" if v37.get("has_warnings") else None),
+                        delta_color="inverse" if v37.get("has_warnings") else "off",
+                    )
+                
+                # 警告區塊(若有 DROPPED)
+                if v37.get("has_warnings"):
+                    dropped_lines = [
+                        a for a in v37.get("annotated_lines", [])
+                        if a.get("category") == "DROPPED"
+                    ]
+                    with st.expander(
+                        f"🔴 ⚠️ {len(dropped_lines)} 條規格在舊版有但最新沒寫(請確認)",
+                        expanded=True,
+                    ):
+                        st.warning(
+                            "以下規格出現在較舊的訂單,但最新一筆沒寫。"
+                            "可能是:(a) 客戶要求變更了 / (b) 最新單漏寫。"
+                            "**請確認哪些要保留**,規格框已自動加入並標 `?`。"
+                        )
+                        for a in dropped_lines:
+                            st.markdown(f"- `{a['text'].strip()}` — {a['explanation']}")
+                
+                # 詳細分析(可展開)
+                if v37.get("annotated_lines"):
+                    with st.expander(f"📊 詳細規格分析(展開看每行的歷史身份)", expanded=False):
+                        for a in v37.get("annotated_lines", []):
+                            st.markdown(
+                                f"{a['color_code']} `{a['text'].strip()[:80]}`  \n"
+                                f"&nbsp;&nbsp;&nbsp;&nbsp;_{a['explanation']}_"
+                            )
             else:
                 st.caption("⚠️ 沒找到同料號的歷史訂單,請手動填注意事項。")
 
@@ -530,7 +756,30 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                         st.rerun()
 
             with tab_c:
-                st.caption("勾選 7 項基本規格 + 補充其他要求。會組成一列。")
+                st.caption("組合 3 段規格:工程確認語 + 7 選單 + 結尾標準語(自動加)")
+                
+                # ─── 第 1 段:工程確認語 ─
+                st.markdown("**第 1 段:工程確認語**")
+                eng_confirm_key = f"fpo_spec_eng_confirm_{idx}"
+                eng_confirm = st.radio(
+                    "工程確認語",
+                    options=list(ENGINEERING_CONFIRM_OPTIONS.keys()),
+                    index=0,  # 預設選「Working Gerber 承認」
+                    horizontal=True,
+                    key=eng_confirm_key,
+                    label_visibility="collapsed",
+                )
+                # 顯示完整內容讓 Sandy 看到效果
+                preview_text = ENGINEERING_CONFIRM_OPTIONS.get(eng_confirm, "")
+                if preview_text:
+                    st.caption(f"預覽: _{preview_text}_")
+                else:
+                    st.caption("(此段不寫)")
+                
+                st.divider()
+                
+                # ─── 第 2 段:7 選單 + 補充 ─
+                st.markdown("**第 2 段:詳細規格**")
                 cols_a = st.columns(4)
                 cols_b = st.columns(4)
                 selections = {}
@@ -544,16 +793,29 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                         )
 
                 extra = st.text_input(
-                    "其他規格 / 補充",
-                    placeholder="例如: 排版 4up panel; 須加西拓 UL Logo + Date Code (YYWW)",
+                    "其他規格 / 補充(此段內)",
+                    placeholder="例如: 排版 4up panel",
                     key=f"fpo_spec_full_extra_{idx}",
                 )
+                
+                st.divider()
+                
+                # ─── 第 3 段:結尾標準語(強制加) ─
+                st.markdown("**第 3 段:結尾標準語(必加)**")
+                st.caption(f"_{FACTORY_PO_FOOTER}_")
 
-                preview = build_full_spec_oneline(selections, extra)
+                # ─── 組合 + 套用 ─
+                st.divider()
+                preview = build_full_spec_oneline(
+                    selections, extra,
+                    engineering_confirm=eng_confirm,
+                    include_footer=True,
+                )
                 cols_btn_c = st.columns([3, 1])
                 with cols_btn_c[0]:
                     if preview:
-                        st.caption(f"預覽: `{preview}`")
+                        st.markdown(f"📝 **完整規格預覽**:")
+                        st.code(preview, language=None)
                 with cols_btn_c[1]:
                     if st.button(
                         "⬇ 套用",
@@ -796,12 +1058,227 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     )
     st.metric("工廠總金額", f"{factory_data.get('default_currency', 'NT$')} {factory_total:,.2f}")
 
+    # ─── ★ v3.8.1: NRE 工程費獨立欄位 + 依字首/貨幣 ─
+    # 規則:
+    #   - 工廠貨幣依 factory_data.default_currency(NTD 台灣 / USD 大陸)
+    #   - GC 字首 → NRE 平攤合併進主品項單價
+    #   - ET/EW   → NRE 獨立一行(實質是給 99-9999 那行的工廠單價)
+    #   - NRE 金額填 0 或 NA → 完全跳過
+    
+    factory_currency = factory_data.get("default_currency", "NTD").replace("$", "").strip().upper() or "NTD"
+    nre_mode = "merge" if chosen_internal == "G" else "separate"
+    nre_mode_label = (
+        f"GC 模式:平攤合併"
+        if nre_mode == "merge"
+        else f"{prefix_chosen} 模式:獨立一行"
+    )
+    
+    st.markdown(f"### Step 4-1. NRE 工程費 — `{nre_mode_label}` · 工廠貨幣 `{factory_currency}`")
+    
+    if nre_mode == "merge":
+        st.caption(
+            f"**GC 字首** → NRE 平攤到主品項工廠單價,規格欄底下加註,工廠 PDF 不印 NRE 那一行。  \n"
+            f"**填 0 / NA / 留空 → 不處理 NRE**(跳過)"
+        )
+    else:
+        st.caption(
+            f"**{prefix_chosen} 字首** → NRE 保留獨立一行,工廠 PDF 印 NRE 品項。  \n"
+            f"**填 0 / NA / 留空 → 不處理 NRE,客戶 PDF 上的 NRE 品項不會印**"
+        )
+    
+    # 自動偵測 NRE 品項
+    detected_nre_items = []
+    main_items = []
+    for it in parsed.items:
+        is_nre = (
+            it.part_number.startswith("99-") or
+            it.part_number.upper() == "NRE" or
+            "NRE" in (it.description or "").upper() or
+            "1 TIME" in (it.description or "").upper() or
+            "SETUP" in (it.description or "").upper() or
+            "NET LIST" in (it.description or "").upper()
+        )
+        if is_nre:
+            detected_nre_items.append(it)
+        else:
+            main_items.append(it)
+    
+    if detected_nre_items:
+        st.info(
+            f"💡 自動偵測到 {len(detected_nre_items)} 個可能的 NRE 品項:"
+            f" {', '.join(it.part_number for it in detected_nre_items)}"
+            f"(料號 99-開頭、或描述含 NRE/1 Time/Setup/Net List)"
+        )
+    
+    nre_amount = 0.0
+    nre_target_pn = None
+    has_nre = False
+    
+    # ─── 獨立 NRE 輸入欄位 ─
+    nre_cols = st.columns([2, 2, 3])
+    
+    with nre_cols[0]:
+        # NRE 金額(支援 0 / NA / 數字)
+        # 預設值:如果有偵測到 NRE 品項,試著從客戶 PDF 抓金額(換算成工廠貨幣)
+        default_nre_str = ""
+        if detected_nre_items:
+            cust_amount = detected_nre_items[0].amount
+            # 客戶價是 USD,工廠是 NTD → 估 ×32 給 Sandy 改
+            if parsed.currency == "USD" and factory_currency == "NTD":
+                default_nre_str = f"{round(cust_amount * 32, 0):.0f}"
+            elif parsed.currency == "USD" and factory_currency == "USD":
+                default_nre_str = f"{cust_amount:.2f}"
+            elif parsed.currency in ("NTD", "NT$") and factory_currency == "NTD":
+                default_nre_str = f"{cust_amount:.0f}"
+            else:
+                default_nre_str = f"{cust_amount:.2f}"
+        
+        nre_input_str = st.text_input(
+            f"NRE 金額 ({factory_currency})",
+            value=default_nre_str,
+            key="fpo_nre_amount_str",
+            help=f"工廠開的 NRE 金額。填 0 / NA / 留空 → 不處理 NRE",
+            placeholder="例: 14000 / 0 / NA",
+        )
+        
+        # 解析輸入:0 / NA / 空 → 不處理
+        nre_input_clean = (nre_input_str or "").strip().upper()
+        if nre_input_clean in ("", "0", "NA", "N/A", "NONE", "-"):
+            has_nre = False
+            nre_amount = 0.0
+        else:
+            try:
+                nre_amount = float(nre_input_clean.replace(",", ""))
+                if nre_amount > 0:
+                    has_nre = True
+            except ValueError:
+                st.error(f"❌ NRE 金額格式錯誤:`{nre_input_str}` — 請填數字、0、或 NA")
+                nre_amount = 0.0
+                has_nre = False
+    
+    if has_nre and nre_mode == "merge":
+        # GC 模式:選主品項
+        with nre_cols[1]:
+            if main_items:
+                pn_options = [it.part_number for it in main_items]
+                nre_target_pn = st.selectbox(
+                    "NRE 對應到主品項 *",
+                    options=pn_options,
+                    key="fpo_nre_target",
+                    help="NRE 金額會除以這個品項的數量,加到工廠單價",
+                )
+            else:
+                st.warning("⚠️ 沒有主品項可以攤提 NRE")
+        
+        with nre_cols[2]:
+            if nre_target_pn and nre_amount > 0:
+                target_item = next(
+                    (it for it in main_items if it.part_number == nre_target_pn),
+                    None,
+                )
+                if target_item and target_item.quantity > 0:
+                    nre_per_pcs = nre_amount / target_item.quantity
+                    original_price = factory_unit_prices.get(nre_target_pn, 0.0)
+                    new_price = original_price + nre_per_pcs
+                    st.success(
+                        f"📊 NRE {nre_amount:,.2f} {factory_currency} ÷ {target_item.quantity} pcs"
+                        f" = {nre_per_pcs:.2f} {factory_currency}/pcs\n\n"
+                        f"主品項 {nre_target_pn} 工廠單價:\n"
+                        f"{factory_currency} {original_price:.2f} + {factory_currency} {nre_per_pcs:.2f}"
+                        f" = **{factory_currency} {new_price:.2f}**"
+                    )
+        
+        # 套到 factory_unit_prices
+        if nre_target_pn and nre_amount > 0:
+            target_item = next(
+                (it for it in main_items if it.part_number == nre_target_pn),
+                None,
+            )
+            if target_item and target_item.quantity > 0:
+                nre_per_pcs = nre_amount / target_item.quantity
+                factory_unit_prices[nre_target_pn] = (
+                    factory_unit_prices.get(nre_target_pn, 0.0) + nre_per_pcs
+                )
+    
+    elif has_nre and nre_mode == "separate":
+        # ET/EW 模式:NRE 獨立顯示,自動把 NRE 金額填到 99-9999 那行的 factory_unit_prices
+        with nre_cols[1]:
+            if detected_nre_items:
+                # 如果有多筆 NRE,選一筆對應(通常只 1 筆)
+                if len(detected_nre_items) > 1:
+                    nre_target_pn = st.selectbox(
+                        "NRE 金額對應到品項 *",
+                        options=[it.part_number for it in detected_nre_items],
+                        key="fpo_nre_target_separate",
+                    )
+                else:
+                    nre_target_pn = detected_nre_items[0].part_number
+                    st.text_input(
+                        "NRE 品項",
+                        value=nre_target_pn,
+                        disabled=True,
+                        key="fpo_nre_target_separate_display",
+                    )
+            else:
+                st.warning(
+                    "⚠️ 客戶 PDF 沒偵測到 NRE 品項。"
+                    "如要保留 NRE 一行,請在 Step 4 主品項清單裡手動處理。"
+                )
+        
+        with nre_cols[2]:
+            if nre_target_pn and nre_amount > 0:
+                st.success(
+                    f"📊 NRE 品項 {nre_target_pn}\n\n"
+                    f"工廠單價: **{factory_currency} {nre_amount:,.2f}**\n\n"
+                    f"工廠 PDF 上會單獨印一行,單價 = 金額 = {nre_amount:,.2f} {factory_currency}"
+                )
+        
+        # 把 NRE 金額直接填到 99-9999 那行
+        if nre_target_pn and nre_amount > 0:
+            factory_unit_prices[nre_target_pn] = nre_amount
+
+    # 儲存 NRE 設定
+    st.session_state["_fpo_nre_settings"] = {
+        "mode": nre_mode,
+        "has_nre": has_nre,
+        "nre_amount": nre_amount,
+        "nre_target_pn": nre_target_pn,
+        "detected_nre_pns": [it.part_number for it in detected_nre_items],
+        "factory_currency": factory_currency,
+    }
+
     # ─── Step 5: 每品項規格(3 Tab) ─
     st.markdown("### Step 5. 每品項產品規格")
     st.caption("每個品項各有 3 種輸入方式可選。規格會以「一列」印在工廠 PO 的『產品規格』欄。")
+    
+    # ★ v3.8.1: NRE 品項是否跳過 Step 5 規格輸入
+    # 跟 build_po_context 用同樣的 skip 邏輯,確保不會印的品項才跳過
+    nre_settings_for_step5 = st.session_state.get("_fpo_nre_settings", {}) or {}
+    _mode = nre_settings_for_step5.get("mode", "merge")
+    _has_nre = nre_settings_for_step5.get("has_nre", False)
+    skip_nre_in_step5 = (
+        (_mode == "merge") or                       # GC 任何情況都不在 Step 5 顯示 NRE
+        (_mode == "separate" and not _has_nre)     # ET/EW 沒填 NRE 也跳過
+    )
+    skip_nre_pns_step5 = (
+        set(nre_settings_for_step5.get("detected_nre_pns", []))
+        if skip_nre_in_step5
+        else set()
+    )
 
     item_specs = {}
     for idx, it in enumerate(parsed.items):
+        if it.part_number in skip_nre_pns_step5:
+            with st.container(border=True):
+                if _mode == "merge" and _has_nre:
+                    msg = f"💡 品項 `{it.part_number}` 是 NRE,已合併到主品項,不會印工廠 PDF,跳過規格填寫"
+                elif _mode == "merge":
+                    msg = f"💡 品項 `{it.part_number}` 是 NRE,GC 模式且未填 NRE 金額,不會印工廠 PDF,跳過規格填寫"
+                else:
+                    msg = f"💡 品項 `{it.part_number}` 是 NRE,未填 NRE 金額,不會印工廠 PDF,跳過規格填寫"
+                st.caption(msg)
+            item_specs[it.part_number] = ""
+            continue
         spec_text = render_spec_input_for_item(idx, it, orders)
         item_specs[it.part_number] = spec_text
 
@@ -830,11 +1307,31 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
         st.stop()
 
     # ─── 共用驗證 ─
-    zero_price_pns = [pn for pn, price in factory_unit_prices.items() if price == 0]
+    # ★ v3.8.1: NRE 跳過邏輯
+    nre_settings_v = st.session_state.get("_fpo_nre_settings", {}) or {}
+    _v_mode = nre_settings_v.get("mode", "merge")
+    _v_has_nre = nre_settings_v.get("has_nre", False)
+    _v_skip = (
+        (_v_mode == "merge") or
+        (_v_mode == "separate" and not _v_has_nre)
+    )
+    skip_nre_pns_v = (
+        set(nre_settings_v.get("detected_nre_pns", []))
+        if _v_skip
+        else set()
+    )
+    
+    zero_price_pns = [
+        pn for pn, price in factory_unit_prices.items()
+        if price == 0 and pn not in skip_nre_pns_v
+    ]
     if zero_price_pns:
         st.warning(f"⚠️ 工廠單價為 0 的品項:{', '.join(zero_price_pns)}")
 
-    empty_spec_pns = [pn for pn, sp in item_specs.items() if not (sp or "").strip()]
+    empty_spec_pns = [
+        pn for pn, sp in item_specs.items()
+        if not (sp or "").strip() and pn not in skip_nre_pns_v
+    ]
     if empty_spec_pns:
         st.error(f"❌ 以下品項規格沒填:**{', '.join(empty_spec_pns)}**。"
                  "規格欄會印空白,請回 Step 5 填好再產 PDF / 寫回 Teable。")
@@ -877,6 +1374,7 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             factory_unit_prices=factory_unit_prices, factory_due_dates=factory_due_dates,
             item_specs=item_specs, purchase_responsible=purchase_responsible,
             order_date=order_date_input, is_revised=is_revised,
+            nre_settings=st.session_state.get("_fpo_nre_settings"),  # ★ v3.8
         )
 
         try:
@@ -926,14 +1424,51 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
 
     # ─── 寫回 Teable ─
     if do_writeback:
+        # ★ v3.8.1: NRE 設定
+        nre_settings = st.session_state.get("_fpo_nre_settings", {}) or {}
+        nre_mode_wb = nre_settings.get("mode", "merge")
+        has_nre_wb = nre_settings.get("has_nre", False)
+        nre_amount_wb = float(nre_settings.get("nre_amount", 0) or 0)
+        nre_target_pn_wb = nre_settings.get("nre_target_pn")
+        detected_nre_pns_wb = set(nre_settings.get("detected_nre_pns", []))
+        factory_currency_wb = nre_settings.get("factory_currency", "NTD")
+        
+        apply_merge_wb = (nre_mode_wb == "merge" and has_nre_wb)
+        skip_nre_in_writeback = (
+            (nre_mode_wb == "merge") or
+            (nre_mode_wb == "separate" and not has_nre_wb)
+        )
+        
         records_fields = []
         for it in parsed.items:
+            # 跳過 NRE 品項的條件:跟 build_po_context 一致
+            if it.part_number in detected_nre_pns_wb and skip_nre_in_writeback:
+                continue
+            
             f_price = factory_unit_prices.get(it.part_number, 0.0)
             f_due = factory_due_dates.get(it.part_number)
             f_due_str = f_due.strftime("%Y/%m/%d") if f_due else ""
             order_date_str = order_date_input.strftime("%Y/%m/%d")
             cust_date_str = parsed.po_date or order_date_str
             spec_text = (item_specs.get(it.part_number, "") or "").strip()
+            
+            # GC merge + has_nre 時主品項加註
+            if apply_merge_wb and it.part_number == nre_target_pn_wb and nre_amount_wb > 0 and it.quantity > 0:
+                nre_per_pcs = nre_amount_wb / it.quantity
+                currency_label = factory_currency_wb if factory_currency_wb != "NTD" else "NTD"
+                nre_note = f"NRE: {currency_label}{nre_amount_wb:,.0f} (= NRE, {currency_label}{nre_per_pcs:.0f}/pcs)"
+                if spec_text:
+                    spec_text = f"{spec_text}\n{nre_note}"
+                else:
+                    spec_text = nre_note
+            
+            # GC merge + has_nre 時主品項接單金額補上 NRE 那行的客戶金額
+            customer_amount = round(it.amount, 2)
+            if apply_merge_wb and it.part_number == nre_target_pn_wb:
+                for nre_it in parsed.items:
+                    if nre_it.part_number in detected_nre_pns_wb:
+                        customer_amount = round(it.amount + nre_it.amount, 2)
+                        break
 
             records_fields.append({
                 COL_GLOCOM_PO: new_po_no,
@@ -945,7 +1480,7 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
                 "工廠交期": f_due_str,
                 "Ship date": f_due_str,
                 "銷貨金額": round(f_price * it.quantity, 2),
-                "接單金額": round(it.amount, 2),
+                "接單金額": customer_amount,
                 "客戶要求注意事項": spec_text,
                 "工廠下單日期": order_date_str,
                 "客戶下單日期": cust_date_str,
