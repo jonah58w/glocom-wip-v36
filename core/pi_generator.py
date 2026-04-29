@@ -356,6 +356,18 @@ def render_pi_docx(pi_ctx: dict, output_path: Path = None) -> Path:
     else:
         logo_img = ""
 
+    # 組合完整地址 (沒傳 customer_address_full 就 fallback 到 addr1+addr2+country)
+    addr_full = pi_ctx.get("customer_address_full", "").strip()
+    if not addr_full:
+        a1 = pi_ctx.get("customer_address1", "").strip().rstrip(",")
+        a2 = pi_ctx.get("customer_address2", "").strip()
+        country = pi_ctx.get("to_country", "").strip()
+        parts = [p for p in (a1, a2, country) if p]
+        addr_full = ", ".join(parts) if parts else ""
+
+    # 貨幣符號(Terms 用)
+    currency_symbol_display = pi_ctx.get("currency_symbol", "US$")
+
     context = {
         "logo_img": logo_img,
         "invoice_no": pi_ctx.get("invoice_no", ""),
@@ -368,12 +380,14 @@ def render_pi_docx(pi_ctx: dict, output_path: Path = None) -> Path:
         "customer_short": pi_ctx.get("customer_short", ""),
         "customer_address1": pi_ctx.get("customer_address1", ""),
         "customer_address2": pi_ctx.get("customer_address2", ""),
+        "customer_address_full": addr_full,                  # ★ 新加
         "customer_tel": pi_ctx.get("customer_tel", ""),
         "customer_fax": pi_ctx.get("customer_fax", ""),
         "shipment_text": pi_ctx.get("shipment_text", ""),
         "from_country": pi_ctx.get("from_country", "Taiwan"),
         "to_country": pi_ctx.get("to_country", ""),
         "terms_text": pi_ctx.get("terms_text", ""),
+        "currency_symbol": currency_symbol_display,           # ★ 新加
         # ★ 三個都帶,確保模板不論用 it / item / items 都能 render
         "it": items_ctx[0] if items_ctx else {},
         "item": items_ctx[0] if items_ctx else {},
