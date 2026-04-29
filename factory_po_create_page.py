@@ -687,6 +687,24 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
             with cols_type[1]:
                 st.caption("👉 新料號:用下方 3 個工具填完整規格,或直接在最終規格框打字。")
             st.session_state[applied_old_default_key] = False
+            
+            # ★ v3.9.1: 切換到新料號時,如果 final_key 還停留在舊料號的內容(以「舊料號」開頭),
+            #            清空讓 Sandy 從頭開始
+            current_final = st.session_state.get(final_key, "")
+            last_type_key = f"_fpo_spec_last_type_{idx}"
+            last_type = st.session_state.get(last_type_key, new_type)
+            
+            if last_type != new_type:
+                # 類型有變(舊→新 或 新→舊),清掉舊內容
+                st.session_state[final_key] = ""
+                current_final = ""
+            elif current_final.strip().startswith("舊料號") and not current_final.strip() == "":
+                # 同一輪剛從舊料號切過來,殘留「舊料號」相關文字 → 清掉
+                if current_final.strip() in ("舊料號", "舊料號\n", "舊料號\n\n注意:"):
+                    st.session_state[final_key] = ""
+            
+            # 紀錄目前類型
+            st.session_state[last_type_key] = new_type
 
         if new_type == "新料號":
             tab_a, tab_b, tab_c = st.tabs([
@@ -827,17 +845,24 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                         st.session_state[final_key] = preview
                         st.rerun()
 
-        st.markdown("##### 📋 最終規格(印在 PO 上,可直接編輯)")
+        st.markdown("##### 📋 最終規格(印在 PO 上,**可直接在框內打字編輯**)")
         if new_type == "舊料號":
             spec_placeholder = "舊料號\n注意:\n1. ...\n2. ..."
         else:
-            spec_placeholder = "(尚未套用任何規格,可手動輸入或從上方工具套用)"
+            spec_placeholder = (
+                "可以直接在這裡打字,或用上方 3 個 tab 工具套用範本後再修改。\n"
+                "範例:\n"
+                "Working Gerber承認後,才可生產!...\n"
+                "Material: 4L; Tg170; Board thickness: 1.6mm; ...\n"
+                "須添加西拓UL logo & date code (YYWW);\n"
+                "樣板: 除試錫板外,須另外提供樣板供備份."
+            )
 
         st.text_area(
             "最終規格",
             key=final_key,
             label_visibility="collapsed",
-            height=120,
+            height=180,  # 加高一點,Sandy 比較好看
             placeholder=spec_placeholder,
         )
 
