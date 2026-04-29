@@ -1,21 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9。
+建立工廠 PO 頁面 v3.9.2。
 
-主要更新(v3.9):
-- ★ 新料號規格結構化 — 「7 選單 + 補充」tab 改為 3 段式組合:
-  [第1段] 工程確認語(2選1 + 不寫):
-    - "Working Gerber 承認後..."(預設,完整版)
-    - "直接生產!"
-    - 不寫
-  [第2段] 詳細規格(7 選單 + 補充欄):
-    - Material / Tg / Thickness / Copper / Surface Finish / S/M / S/L
-    - Surface Finish: ENIG 跟 Immersion Gold 是同一個,只留 'ENIG 2u"'
-    - 其他補充(text input,可加排版/特殊要求)
-  [第3段] 結尾標準語(強制加,不可關):
-    - "須添加西拓UL logo & date code (YYWW); 樣板: ..."
-- 即時預覽完整 3 段組合
-- 最終規格框仍可手動編輯
+主要更新(v3.9.2):
+- ★ 「新料號」介面重新設計 — 7 選單預設展開,不再藏在 tab:
+  - 一進「新料號」就直接看到 7 個選單(第 1 段確認語 + 第 2 段 7 選單 + 第 3 段結尾語)
+  - 「從歷史訂單帶入」「從 ERP 多列貼上」改成 expander 預設摺疊
+  - 切換舊料號↔新料號時自動清空殘留內容
+  - NRE 偵測規則收緊(料號 99-開頭 + 描述開頭 NRE/Setup Fee 等,數量=1)
+
+v3.9 變更:
+- 新料號規格 3 段式組合(Working Gerber 確認 / 7 選單 / 結尾標準語)
+- Surface Finish: ENIG 2u" 取代重複的 ENIG/Immersion Gold
 
 v3.8.1 變更:
 - NRE 工程費獨立欄位 + 工廠貨幣自動 (NTD/USD)
@@ -707,15 +703,82 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
             st.session_state[last_type_key] = new_type
 
         if new_type == "新料號":
-            tab_a, tab_b, tab_c = st.tabs([
-                "⚡ 從前一張同料號帶入",
-                "📋 多列貼上(從 ERP)",
-                "✏️ 7 選單 + 補充",
-            ])
+            # ★ v3.9.2: 7 選單預設展開(不再藏在 tab),
+            #            查詢歷史 + 多列貼上 改放底下 expander
+            
+            # ─── 第 1 段:工程確認語 ─
+            st.markdown("**第 1 段:工程確認語**")
+            eng_confirm_key = f"fpo_spec_eng_confirm_{idx}"
+            eng_confirm = st.radio(
+                "工程確認語",
+                options=list(ENGINEERING_CONFIRM_OPTIONS.keys()),
+                index=0,
+                horizontal=True,
+                key=eng_confirm_key,
+                label_visibility="collapsed",
+            )
+            preview_text = ENGINEERING_CONFIRM_OPTIONS.get(eng_confirm, "")
+            if preview_text:
+                st.caption(f"預覽: _{preview_text}_")
+            else:
+                st.caption("(此段不寫)")
+            
+            st.divider()
+            
+            # ─── 第 2 段:7 選單 + 補充 ─
+            st.markdown("**第 2 段:詳細規格**")
+            cols_a = st.columns(4)
+            cols_b = st.columns(4)
+            selections = {}
+            cats = list(SPEC_OPTIONS_FULL.keys())
+            for i, cat in enumerate(cats):
+                target_col = cols_a[i] if i < 4 else cols_b[i - 4]
+                with target_col:
+                    selections[cat] = st.selectbox(
+                        cat, [""] + SPEC_OPTIONS_FULL[cat],
+                        key=f"fpo_spec_full_{idx}_{cat}",
+                    )
 
-            with tab_a:
+            extra = st.text_input(
+                "其他規格 / 補充",
+                placeholder="例如: 排版 4up panel",
+                key=f"fpo_spec_full_extra_{idx}",
+            )
+            
+            st.divider()
+            
+            # ─── 第 3 段:結尾標準語(強制加) ─
+            st.markdown("**第 3 段:結尾標準語(必加)**")
+            st.caption(f"_{FACTORY_PO_FOOTER}_")
+
+            # ─── 組合 + 套用 ─
+            st.divider()
+            preview = build_full_spec_oneline(
+                selections, extra,
+                engineering_confirm=eng_confirm,
+                include_footer=True,
+            )
+            cols_btn = st.columns([3, 1])
+            with cols_btn[0]:
+                if preview:
+                    st.markdown(f"📝 **完整規格預覽**:")
+                    st.code(preview, language=None)
+            with cols_btn[1]:
+                if st.button(
+                    "⬇ 套用到下方規格框",
+                    key=f"fpo_apply_full_{idx}",
+                    disabled=not preview,
+                    use_container_width=True,
+                    type="primary",
+                ):
+                    st.session_state[final_key] = preview
+                    st.rerun()
+            
+            # ─── 進階工具(預設摺疊) ─
+            with st.expander("🔧 進階工具:從歷史訂單帶入 / 從 ERP 多列貼上", expanded=False):
+                st.markdown("##### ⚡ 從歷史訂單帶入規格")
                 st.caption(f"從 Teable 主表 / 歷史訂單檔查 P/N『{item.part_number}』")
-                if st.button(f"🔍 查詢", key=f"fpo_query_btn_{idx}"):
+                if st.button(f"🔍 查詢歷史", key=f"fpo_query_btn_{idx}"):
                     hits = fetch_previous_spec(orders, item.part_number)
                     st.session_state[f"fpo_query_hits_{idx}"] = hits
 
@@ -741,9 +804,11 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                                         st.rerun()
                                 else:
                                     st.caption("(此筆訂單沒填規格)")
-
-            with tab_b:
-                st.caption("從 ERP 一列一列複製貼上(最多 8 列),按下「組合」會用『; 』串成一列")
+                
+                st.divider()
+                
+                st.markdown("##### 📋 從 ERP 多列複製貼上")
+                st.caption("最多 8 列,按下「組合」會用『; 』串成一列")
                 paste_lines = []
                 cols_paste = st.columns(2)
                 for line_idx in range(8):
@@ -760,8 +825,8 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                 cols_btn_b = st.columns([3, 1])
                 with cols_btn_b[0]:
                     if paste_lines:
-                        preview = "; ".join(paste_lines)
-                        st.caption(f"預覽: `{preview}`")
+                        preview_paste = "; ".join(paste_lines)
+                        st.caption(f"預覽: `{preview_paste}`")
                 with cols_btn_b[1]:
                     if st.button(
                         "⬇ 組合並套用",
@@ -773,85 +838,15 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                         st.session_state[final_key] = "; ".join(paste_lines)
                         st.rerun()
 
-            with tab_c:
-                st.caption("組合 3 段規格:工程確認語 + 7 選單 + 結尾標準語(自動加)")
-                
-                # ─── 第 1 段:工程確認語 ─
-                st.markdown("**第 1 段:工程確認語**")
-                eng_confirm_key = f"fpo_spec_eng_confirm_{idx}"
-                eng_confirm = st.radio(
-                    "工程確認語",
-                    options=list(ENGINEERING_CONFIRM_OPTIONS.keys()),
-                    index=0,  # 預設選「Working Gerber 承認」
-                    horizontal=True,
-                    key=eng_confirm_key,
-                    label_visibility="collapsed",
-                )
-                # 顯示完整內容讓 Sandy 看到效果
-                preview_text = ENGINEERING_CONFIRM_OPTIONS.get(eng_confirm, "")
-                if preview_text:
-                    st.caption(f"預覽: _{preview_text}_")
-                else:
-                    st.caption("(此段不寫)")
-                
-                st.divider()
-                
-                # ─── 第 2 段:7 選單 + 補充 ─
-                st.markdown("**第 2 段:詳細規格**")
-                cols_a = st.columns(4)
-                cols_b = st.columns(4)
-                selections = {}
-                cats = list(SPEC_OPTIONS_FULL.keys())
-                for i, cat in enumerate(cats):
-                    target_col = cols_a[i] if i < 4 else cols_b[i - 4]
-                    with target_col:
-                        selections[cat] = st.selectbox(
-                            cat, [""] + SPEC_OPTIONS_FULL[cat],
-                            key=f"fpo_spec_full_{idx}_{cat}",
-                        )
-
-                extra = st.text_input(
-                    "其他規格 / 補充(此段內)",
-                    placeholder="例如: 排版 4up panel",
-                    key=f"fpo_spec_full_extra_{idx}",
-                )
-                
-                st.divider()
-                
-                # ─── 第 3 段:結尾標準語(強制加) ─
-                st.markdown("**第 3 段:結尾標準語(必加)**")
-                st.caption(f"_{FACTORY_PO_FOOTER}_")
-
-                # ─── 組合 + 套用 ─
-                st.divider()
-                preview = build_full_spec_oneline(
-                    selections, extra,
-                    engineering_confirm=eng_confirm,
-                    include_footer=True,
-                )
-                cols_btn_c = st.columns([3, 1])
-                with cols_btn_c[0]:
-                    if preview:
-                        st.markdown(f"📝 **完整規格預覽**:")
-                        st.code(preview, language=None)
-                with cols_btn_c[1]:
-                    if st.button(
-                        "⬇ 套用",
-                        key=f"fpo_apply_full_{idx}",
-                        disabled=not preview,
-                        use_container_width=True,
-                        type="primary",
-                    ):
-                        st.session_state[final_key] = preview
-                        st.rerun()
-
+        st.divider()
         st.markdown("##### 📋 最終規格(印在 PO 上,**可直接在框內打字編輯**)")
         if new_type == "舊料號":
             spec_placeholder = "舊料號\n注意:\n1. ...\n2. ..."
         else:
             spec_placeholder = (
-                "可以直接在這裡打字,或用上方 3 個 tab 工具套用範本後再修改。\n"
-                "範例:\n"
+                "上方 7 選單填好後按「⬇ 套用到下方規格框」會自動填入,可再修改。\n"
+                "或直接在這裡打字。\n\n"
+                "範例(自動產生):\n"
                 "Working Gerber承認後,才可生產!...\n"
                 "Material: 4L; Tg170; Board thickness: 1.6mm; ...\n"
                 "須添加西拓UL logo & date code (YYWW);\n"
@@ -862,7 +857,7 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
             "最終規格",
             key=final_key,
             label_visibility="collapsed",
-            height=180,  # 加高一點,Sandy 比較好看
+            height=180,
             placeholder=spec_placeholder,
         )
 
