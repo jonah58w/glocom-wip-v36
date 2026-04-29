@@ -1,8 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.5。
+建立工廠 PO 頁面 v3.9.7。
 
-主要更新(v3.9.5):
+主要更新(v3.9.7):
+- ★ 新功能:Step 6 加「📑 產 PI」按鈕,產 Proforma Invoice
+- 用 templates/PI_GLOCOM.docx 模板 + core/pi_generator.py
+- 客戶資訊從 data/customers.json 讀(VORNE/WESCO 等)
+- Invoice No. = 主號(去 -01),譬如 G1150034-01 → G1150034
+- 品項 = PCB 主品項 + Setup & Tooling Charge + Bank fee
+- Bank fee 預設 $45,Sandy 可改
+
+v3.9.6 變更:
+- Teable 寫入訊息覆蓋 + 偵錯資訊
+
+v3.9.5 變更:
 - ★ NRE 註記新格式 — 含原單價,讓工廠看到完整計算:
   範例:
     130.000
@@ -1382,12 +1393,38 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
         spec_text = render_spec_input_for_item(idx, it, orders)
         item_specs[it.part_number] = spec_text
 
-    # ─── Step 6: 兩個獨立按鈕 ─
+    # ─── Step 6: 產出按鈕區(產 PDF / 寫回 Teable / 產 PI / 清除)─
     st.divider()
     st.markdown("### Step 6. 產出 / 寫回")
-    st.caption("**產 PDF** 和 **寫回 Teable** 是分開的。建議先產 PDF 預覽 → OK 再寫回 Teable。")
-
-    btn_cols = st.columns([2, 2, 1])
+    st.caption("**產 PDF** / **寫回 Teable** / **產 PI** 是分開的。建議先產 PDF 預覽 → OK 再寫回 Teable / 產 PI。")
+    
+    # ★ v3.9.7: PI 設定區(只在客戶是 USD 客戶時顯示)
+    # 簡化:Sandy 自己決定要不要產 PI,Bank fee 可改
+    pi_settings_expander = st.expander("📑 PI 設定(產 PI 前可調整)", expanded=False)
+    with pi_settings_expander:
+        cols_pi = st.columns(3)
+        with cols_pi[0]:
+            pi_bank_fee = st.number_input(
+                "Bank fee (USD)",
+                min_value=0.0, value=45.0, step=5.0,
+                key="fpo_pi_bank_fee",
+                help="預設 $45,可改",
+            )
+        with cols_pi[1]:
+            pi_terms = st.text_input(
+                "Terms",
+                value="Exwork Taiwan (US$ Exwork Taiwan)",
+                key="fpo_pi_terms",
+            )
+        with cols_pi[2]:
+            pi_to_country = st.text_input(
+                "To Country",
+                value="USA",
+                key="fpo_pi_to_country",
+                help="客戶所在國,例如 USA / Japan",
+            )
+    
+    btn_cols = st.columns([2, 2, 2, 1])
     with btn_cols[0]:
         do_pdf = st.button(
             "📄 產 PDF", type="primary",
@@ -1399,11 +1436,17 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             use_container_width=True, key="fpo_do_writeback",
         )
     with btn_cols[2]:
+        do_pi = st.button(
+            "📑 產 PI", type="secondary",
+            use_container_width=True, key="fpo_do_pi",
+            help="產 Proforma Invoice(給客戶看的英文 PI,USD 報價)",
+        )
+    with btn_cols[3]:
         if st.button("🗑️ 全部清除", use_container_width=True, key="fpo_clear_bottom"):
             _reset_form()
             st.rerun()
 
-    if not (do_pdf or do_writeback):
+    if not (do_pdf or do_writeback or do_pi):
         st.stop()
 
     # ─── 共用驗證 ─
@@ -1671,3 +1714,174 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
                 f"- API 回應沒有正常 records 列表\n\n"
                 f"➡️ 請檢查 Teable API token 是否有效,或開瀏覽器 console 看詳細錯誤。"
             )
+
+    # ─── ★ v3.9.7: 產 PI(Proforma Invoice)─
+    if do_pi:
+        try:
+            from core.pi_generator import generate_pi_files
+        except ImportError:
+            try:
+                from pi_generator import generate_pi_files
+            except ImportError:
+                st.error("❌ 找不到 pi_generator.py,請先部署。")
+                st.stop()
+        
+        # 讀客戶檔(data/customers.json)抓客戶完整資訊
+        import json as _json
+        customers_data = {}
+        try:
+            customer_file_paths = [
+                Path("data/customers.json"),
+                Path("/mount/src/glocom-wip-v36/data/customers.json"),  # Streamlit Cloud
+                Path(__file__).parent / "data" / "customers.json",
+            ]
+            for cust_path in customer_file_paths:
+                if cust_path.exists():
+                    with open(cust_path, "r", encoding="utf-8") as f:
+                        customers_data = _json.load(f)
+                    break
+        except Exception as e:
+            st.warning(f"⚠️ 讀取客戶檔失敗: {e}(會用空白資訊產 PI)")
+        
+        # 找對應客戶資料(用 customer 名稱當 key)
+        customer_key = (parsed.customer or "").strip().upper()
+        customer_info = customers_data.get(customer_key, {})
+        
+        if not customer_info:
+            st.warning(
+                f"⚠️ 客戶檔裡沒有 **{customer_key}** 的資料,PI 上客戶欄位會空白。\n\n"
+                f"請在 GitHub `data/customers.json` 加入此客戶。"
+            )
+        
+        # 算 PI 主號(去掉 -01)
+        pi_invoice_no = new_po_no.split("-")[0] if "-" in new_po_no else new_po_no
+        
+        # 從 NRE 設定 + parsed.items 組 PI items
+        nre_settings_pi = st.session_state.get("_fpo_nre_settings", {}) or {}
+        detected_nre_pns_pi = set(nre_settings_pi.get("detected_nre_pns", []))
+        
+        pi_items = []
+        for it in parsed.items:
+            if it.part_number in detected_nre_pns_pi:
+                # NRE 品項用 Setup & Tooling Charge 形式進 PI
+                pi_items.append({
+                    "item_no": nre_settings_pi.get("nre_target_pn") or it.part_number,
+                    "description": "Setup & Tooling Charge",
+                    "quantity": 1,
+                    "quantity_unit": "set",
+                    "unit_price": float(it.unit_price),
+                    "amount": float(it.amount),
+                    "is_setup": True,
+                })
+            else:
+                # PCB 主品項 - 用 PCB 規格英文化或直接用解析的描述
+                desc = (it.description or "").strip()
+                if not desc:
+                    desc = "Bare Printed Circuit Board"
+                pi_items.append({
+                    "item_no": it.part_number,
+                    "description": desc,
+                    "quantity": int(it.quantity),
+                    "quantity_unit": "pcs",
+                    "unit_price": float(it.unit_price),
+                    "amount": float(it.amount),
+                    "is_setup": False,
+                })
+        
+        # 組 PI context
+        from datetime import date as date_cls
+        pi_ctx = {
+            "invoice_no": pi_invoice_no,
+            "po_no": new_po_no,
+            "customer_po_no": parsed.customer_po_no or "",
+            "customer_short": parsed.customer or "",
+            "customer_code": customer_info.get("code", ""),
+            "date": date_cls.today(),
+            "contact_person": customer_info.get("contact_person", ""),
+            "customer_name": customer_info.get("name_full", parsed.customer or ""),
+            "customer_address1": customer_info.get("address_line1", ""),
+            "customer_address2": customer_info.get("address_line2", ""),
+            "customer_tel": customer_info.get("tel", ""),
+            "customer_fax": customer_info.get("fax", ""),
+            "shipment_text": customer_info.get(
+                "default_shipment_text",
+                "Since the T/T payment is received and WG approved, we will confirm the ship date then",
+            ),
+            "from_country": "Taiwan",
+            "to_country": st.session_state.get("fpo_pi_to_country") or customer_info.get("country", "USA"),
+            "terms_text": st.session_state.get("fpo_pi_terms") or customer_info.get(
+                "default_terms", "Exwork Taiwan (US$ Exwork Taiwan)"
+            ),
+            "items": pi_items,
+            "bank_fee": float(st.session_state.get("fpo_pi_bank_fee", 45.0)),
+            "currency_symbol": "$",
+        }
+        
+        st.divider()
+        st.markdown("#### 📑 產 PI 結果")
+        with st.spinner("產生 Proforma Invoice..."):
+            try:
+                pi_result = generate_pi_files(pi_ctx)
+                
+                if pi_result.get("error"):
+                    st.warning(f"⚠️ {pi_result['error']}")
+                
+                # 提供下載
+                docx_path = pi_result.get("docx_path")
+                pdf_path = pi_result.get("pdf_path")
+                
+                cols_dl = st.columns(2)
+                if pdf_path and Path(pdf_path).exists():
+                    with cols_dl[0]:
+                        with open(pdf_path, "rb") as f:
+                            st.download_button(
+                                "⬇ 下載 PI PDF",
+                                f.read(),
+                                file_name=Path(pdf_path).name,
+                                mime="application/pdf",
+                                use_container_width=True,
+                                type="primary",
+                                key="pi_dl_pdf",
+                            )
+                if docx_path and Path(docx_path).exists():
+                    with cols_dl[1]:
+                        with open(docx_path, "rb") as f:
+                            st.download_button(
+                                "⬇ 下載 PI DOCX(可編輯)",
+                                f.read(),
+                                file_name=Path(docx_path).name,
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                use_container_width=True,
+                                key="pi_dl_docx",
+                            )
+                
+                st.success(
+                    f"✅ Proforma Invoice **{pi_invoice_no}** 已產出\n\n"
+                    f"- 客戶: {pi_ctx['customer_name']}\n"
+                    f"- 客戶 PO: {pi_ctx['customer_po_no']}\n"
+                    f"- 品項數: {len(pi_items)}\n"
+                    f"- Bank fee: ${pi_ctx['bank_fee']}\n"
+                )
+                
+                # 預覽 PI items
+                with st.expander("📋 PI 品項清單(預覽)", expanded=False):
+                    df_pi = pd.DataFrame([
+                        {
+                            "Item No.": it["item_no"],
+                            "Description": it["description"][:60] + ("..." if len(it["description"]) > 60 else ""),
+                            "Qty": f"{it['quantity']} {it['quantity_unit']}",
+                            "Unit Price": f"${it['unit_price']}",
+                            "Amount": f"${it['amount']}",
+                        }
+                        for it in pi_items
+                    ])
+                    st.dataframe(df_pi, use_container_width=True, hide_index=True)
+                    if pi_ctx['bank_fee'] > 0:
+                        st.caption(f"+ Bank fee: ${pi_ctx['bank_fee']}")
+                    total = sum(float(it['amount']) for it in pi_items) + pi_ctx['bank_fee']
+                    st.caption(f"**Total: ${total:,.2f}**")
+            except Exception as e:
+                st.error(f"❌ 產 PI 失敗: {e}")
+                import traceback
+                with st.expander("詳細錯誤"):
+                    st.code(traceback.format_exc())
