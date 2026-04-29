@@ -27,37 +27,45 @@ OUTPUT_DIR = HERE / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # logo 檔位置(優先順序):
-#   1. templates/glocom_logo.png  (PNG 檔)
-#   2. templates/glocom_logo.jpg  (JPG)
-#   3. 從 PO_GLOCOM.docx 解出的 image1.png
-LOGO_CANDIDATES = [
+#   1. PO_GLOCOM.docx 內嵌的 image1.png (真實 logo,含 GLOCOM 字樣)
+#   2. templates/glocom_logo.png  (備用 PNG)
+#   3. templates/glocom_logo.jpg  (備用 JPG)
+LOGO_FALLBACK_CANDIDATES = [
     TEMPLATE_DIR / "glocom_logo.png",
     TEMPLATE_DIR / "glocom_logo.jpg",
 ]
 
 
 def _find_logo_path():
-    for p in LOGO_CANDIDATES:
-        if p.exists():
-            return p
-    # fallback: 從 PO_GLOCOM.docx 拿
+    # 優先 1: 從 PO_GLOCOM.docx 解出 image1 (真實 logo)
     po_template = TEMPLATE_DIR / "PO_GLOCOM.docx"
     if po_template.exists():
         try:
             import zipfile
-            extracted = TEMPLATE_DIR / "_glocom_logo_extracted.png"
-            if not extracted.exists():
-                with zipfile.ZipFile(po_template) as z:
-                    for name in z.namelist():
-                        if name.startswith("word/media/image1."):
-                            extracted = TEMPLATE_DIR / f"_glocom_logo_extracted{Path(name).suffix}"
-                            with z.open(name) as src, open(extracted, "wb") as dst:
-                                dst.write(src.read())
-                            break
-            if extracted.exists():
-                return extracted
+            extracted_png = TEMPLATE_DIR / "_glocom_logo_extracted.png"
+            extracted_jpg = TEMPLATE_DIR / "_glocom_logo_extracted.jpg"
+            
+            if extracted_png.exists():
+                return extracted_png
+            if extracted_jpg.exists():
+                return extracted_jpg
+            
+            with zipfile.ZipFile(po_template) as z:
+                for name in z.namelist():
+                    if name.startswith("word/media/image1."):
+                        ext = Path(name).suffix
+                        extracted = TEMPLATE_DIR / f"_glocom_logo_extracted{ext}"
+                        with z.open(name) as src, open(extracted, "wb") as dst:
+                            dst.write(src.read())
+                        return extracted
         except Exception:
             pass
+    
+    # 優先 2/3: 備用本地檔案
+    for p in LOGO_FALLBACK_CANDIDATES:
+        if p.exists():
+            return p
+    
     return None
 
 
@@ -352,7 +360,7 @@ def render_pi_docx(pi_ctx: dict, output_path: Path = None) -> Path:
     # logo 動態載入(若沒檔則用空白佔位)
     logo_path = _find_logo_path()
     if logo_path:
-        logo_img = InlineImage(doc, str(logo_path), width=Cm(3.0))
+        logo_img = InlineImage(doc, str(logo_path), width=Cm(2.7))
     else:
         logo_img = ""
 
