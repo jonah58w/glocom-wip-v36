@@ -229,10 +229,12 @@ def _iter_runs_in_tr(tr_element):
 # ============================================================
 def _duplicate_item_row_for_multi(docx_path: Path, item_count: int):
     """
-    跟 PO 模板一致 — 把 {{ it.xxx }} 改成 {{ items[0].xxx }},
-    複製 N-1 個 row,改成 items[1..N-1].xxx。
+    把 {{ it.xxx }} 改成 {{ items[0].xxx }},
+    若多品項則複製 N-1 個 row,改成 items[1..N-1].xxx。
+    
+    ★ 即使 item_count = 1 也會改寫第一個 row,確保模板裡沒留 {{ it.xxx }}。
     """
-    if item_count <= 1:
+    if item_count <= 0:
         return
 
     doc = Document(str(docx_path))
@@ -337,9 +339,9 @@ def render_pi_docx(pi_ctx: dict, output_path: Path = None) -> Path:
         })
         total_amount += bank_fee
 
-    # 複製模板 → 取得 N 列 → render
+    # 複製模板 → 改寫 row → render(即使 1 個 item 也要改寫)
     shutil.copy(str(template_path), str(output_path))
-    if len(items_ctx) > 1:
+    if len(items_ctx) >= 1:
         _duplicate_item_row_for_multi(output_path, len(items_ctx))
     
     doc = DocxTemplate(str(output_path))
@@ -372,6 +374,8 @@ def render_pi_docx(pi_ctx: dict, output_path: Path = None) -> Path:
         "from_country": pi_ctx.get("from_country", "Taiwan"),
         "to_country": pi_ctx.get("to_country", ""),
         "terms_text": pi_ctx.get("terms_text", ""),
+        # ★ 三個都帶,確保模板不論用 it / item / items 都能 render
+        "it": items_ctx[0] if items_ctx else {},
         "item": items_ctx[0] if items_ctx else {},
         "items": items_ctx,
         "total_display": _money(total_amount, currency_symbol),
