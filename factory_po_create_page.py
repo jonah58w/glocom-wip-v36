@@ -1,13 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.2。
+建立工廠 PO 頁面 v3.9.3。
 
-主要更新(v3.9.2):
-- ★ 「新料號」介面重新設計 — 7 選單預設展開,不再藏在 tab:
-  - 一進「新料號」就直接看到 7 個選單(第 1 段確認語 + 第 2 段 7 選單 + 第 3 段結尾語)
-  - 「從歷史訂單帶入」「從 ERP 多列貼上」改成 expander 預設摺疊
-  - 切換舊料號↔新料號時自動清空殘留內容
-  - NRE 偵測規則收緊(料號 99-開頭 + 描述開頭 NRE/Setup Fee 等,數量=1)
+主要更新(v3.9.3):
+- ★ NRE 註記改用「(內含 NRE: NTD14,000; NTD28/pcs)」格式(放規格欄最後一行)
+- ★ NT$ → NTD 標準化(原本 factory_data.default_currency 是 NT$ 會被縮成 NT)
+- ★ 修 docx 模板 `&` 消失的 bug:
+  - 模板 spec_text 改用 |safe filter
+  - factory_po_create_page 寫進 docx 前 escape & < > → &amp; &lt; &gt;
+  - UI 顯示給 Sandy 仍是乾淨的 &
+- 工程確認語裡的 (& stencil gerber) 跟結尾 UL logo & date code 都會正確印出
+
+v3.9.2 變更:
+- 「新料號」介面重新設計 — 7 選單預設展開,不再藏在 tab
+- NRE 偵測規則收緊(料號 99-開頭 + 描述開頭 NRE/Setup Fee 等,數量=1)
 
 v3.9 變更:
 - 新料號規格 3 段式組合(Working Gerber 確認 / 7 選單 / 結尾標準語)
@@ -97,6 +103,7 @@ SPEC_OPTIONS_FULL = {
 }
 
 # ★ v3.9: 新料號規格 - 第 1 段(工程確認語)選項
+# 字串保持乾淨 &(顯示給 Sandy),寫進 docx 模板前才會 escape 成 &amp;
 ENGINEERING_CONFIRM_OPTIONS = {
     "Working Gerber 承認": (
         "Working Gerber承認後,才可生產! 請於下午14:00前傳working gerber"
@@ -111,6 +118,18 @@ FACTORY_PO_FOOTER = (
     "須添加西拓UL logo & date code (YYWW);\n"
     "樣板: 除試錫板外,須另外提供樣板供備份."
 )
+
+
+def escape_for_docx(text: str) -> str:
+    """
+    把字串裡的 XML 特殊字元 escape,讓 docxtpl |safe filter 能正確渲染。
+    主要處理:& → &amp;, < → &lt;, > → &gt;
+    \n 不用處理(docxtpl 會自動轉成 <w:br/>)
+    """
+    if not text:
+        return ""
+    # 順序很重要:先 & 再其他,否則 &lt; 會變 &amp;lt;
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 # ─── 工廠主檔 ────────────────────────────────────
@@ -454,19 +473,23 @@ def build_po_context_from_new_order(
         f_due = factory_due_dates.get(it.part_number)
         spec_text = (item_specs.get(it.part_number, "") or "").strip()
         
-        # 只在 GC merge + has_nre 時主品項加註
+        # 只在 GC merge + has_nre 時主品項加註(改格式為「(內含 NRE: ...)」)
         if apply_merge and it.part_number == nre_target_pn and nre_amount > 0 and it.quantity > 0:
             nre_per_pcs = nre_amount / it.quantity
             currency_label = factory_currency if factory_currency != "NTD" else "NTD"
-            nre_note = f"NRE: {currency_label}{nre_amount:,.0f} (= NRE, {currency_label}{nre_per_pcs:.0f}/pcs)"
+            nre_note = f"(內含 NRE: {currency_label}{nre_amount:,.0f}; {currency_label}{nre_per_pcs:.0f}/pcs)"
             if spec_text:
                 spec_text = f"{spec_text}\n{nre_note}"
             else:
                 spec_text = nre_note
         
+        # ★ v3.9.3: spec_text 寫進 docx 前先 escape & < >,
+        # 因為模板用 {{ item.spec_text|safe }} 會直接用原始字串,& 不 escape 會被 jinja2 吃掉
+        spec_text_for_docx = escape_for_docx(spec_text)
+        
         items.append({
             "part_number": it.part_number,
-            "spec_text": spec_text,
+            "spec_text": spec_text_for_docx,
             "quantity": it.quantity,
             "panel_qty": None,
             "unit_price": f_price,
@@ -1085,7 +1108,13 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     #   - ET/EW   → NRE 獨立一行(實質是給 99-9999 那行的工廠單價)
     #   - NRE 金額填 0 或 NA → 完全跳過
     
-    factory_currency = factory_data.get("default_currency", "NTD").replace("$", "").strip().upper() or "NTD"
+    # 工廠貨幣標準化:NT$ / NT → NTD,USD / US$ → USD
+    raw_currency = factory_data.get("default_currency", "NTD")
+    factory_currency = raw_currency.replace("$", "").strip().upper() or "NTD"
+    if factory_currency == "NT":
+        factory_currency = "NTD"
+    elif factory_currency == "US":
+        factory_currency = "USD"
     nre_mode = "merge" if chosen_internal == "G" else "separate"
     nre_mode_label = (
         f"GC 模式:平攤合併"
@@ -1494,11 +1523,11 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             cust_date_str = parsed.po_date or order_date_str
             spec_text = (item_specs.get(it.part_number, "") or "").strip()
             
-            # GC merge + has_nre 時主品項加註
+            # GC merge + has_nre 時主品項加註(新格式「(內含 NRE: ...)」)
             if apply_merge_wb and it.part_number == nre_target_pn_wb and nre_amount_wb > 0 and it.quantity > 0:
                 nre_per_pcs = nre_amount_wb / it.quantity
                 currency_label = factory_currency_wb if factory_currency_wb != "NTD" else "NTD"
-                nre_note = f"NRE: {currency_label}{nre_amount_wb:,.0f} (= NRE, {currency_label}{nre_per_pcs:.0f}/pcs)"
+                nre_note = f"(內含 NRE: {currency_label}{nre_amount_wb:,.0f}; {currency_label}{nre_per_pcs:.0f}/pcs)"
                 if spec_text:
                     spec_text = f"{spec_text}\n{nre_note}"
                 else:
