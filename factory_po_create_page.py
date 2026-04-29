@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.3。
+建立工廠 PO 頁面 v3.9.4。
 
-主要更新(v3.9.3):
-- ★ NRE 註記改用「(內含 NRE: NTD14,000; NTD28/pcs)」格式(放規格欄最後一行)
-- ★ NT$ → NTD 標準化(原本 factory_data.default_currency 是 NT$ 會被縮成 NT)
-- ★ 修 docx 模板 `&` 消失的 bug:
-  - 模板 spec_text 改用 |safe filter
-  - factory_po_create_page 寫進 docx 前 escape & < > → &amp; &lt; &gt;
-  - UI 顯示給 Sandy 仍是乾淨的 &
-- 工程確認語裡的 (& stencil gerber) 跟結尾 UL logo & date code 都會正確印出
+主要更新(v3.9.4):
+- ★ NRE 註記實際移到「單價欄底下」(原本在規格欄末尾):
+  - docx 模板 PO_GLOCOM.docx 微調欄寬:單價 1.7cm → 2.5cm,規格欄保持 5.5cm
+  - 借空間從交期(2.3→2.1)、數量(2.6→2.4)、小計(3.6→3.2)
+  - NRE 註記分 3 行寫:「(內含 NRE: / NTD14,000; / NTD28/pcs)」
+- 需配合 pdf_generator.py 修改:items_ctx 加 unit_price_note 欄位
+
+v3.9.3 變更:
+- NRE 註記改用「(內含 NRE: NTD14,000; NTD28/pcs)」格式
+- NT$ → NTD 標準化
+- 修 docx 模板 `&` 消失 bug
 
 v3.9.2 變更:
 - 「新料號」介面重新設計 — 7 選單預設展開,不再藏在 tab
@@ -473,19 +476,24 @@ def build_po_context_from_new_order(
         f_due = factory_due_dates.get(it.part_number)
         spec_text = (item_specs.get(it.part_number, "") or "").strip()
         
-        # 只在 GC merge + has_nre 時主品項加註(改格式為「(內含 NRE: ...)」)
+        # spec_text 寫進 docx 前先 escape & < >
+        spec_text_for_docx = escape_for_docx(spec_text)
+        
+        # ★ v3.9.4: NRE 註記放單價欄底下(不是規格欄末尾)
+        # 直接做進 unit_price 字串(\n 換行 + escape & < >)
+        # 這樣不用動 pdf_generator,只要模板用 {{ item.unit_price|safe }} 就能渲染
+        # 注意:此 dict 的 unit_price 仍是 float,讓 pdf_generator 自己 format。
+        # NRE 註記則透過另一個欄位 unit_price_note 傳出去,讓上層自己決定怎麼用。
+        unit_price_note = ""
         if apply_merge and it.part_number == nre_target_pn and nre_amount > 0 and it.quantity > 0:
             nre_per_pcs = nre_amount / it.quantity
             currency_label = factory_currency if factory_currency != "NTD" else "NTD"
-            nre_note = f"(內含 NRE: {currency_label}{nre_amount:,.0f}; {currency_label}{nre_per_pcs:.0f}/pcs)"
-            if spec_text:
-                spec_text = f"{spec_text}\n{nre_note}"
-            else:
-                spec_text = nre_note
-        
-        # ★ v3.9.3: spec_text 寫進 docx 前先 escape & < >,
-        # 因為模板用 {{ item.spec_text|safe }} 會直接用原始字串,& 不 escape 會被 jinja2 吃掉
-        spec_text_for_docx = escape_for_docx(spec_text)
+            unit_price_note = (
+                f"\n(內含 NRE:\n"
+                f"{currency_label}{nre_amount:,.0f};\n"
+                f"{currency_label}{nre_per_pcs:.0f}/pcs)"
+            )
+        unit_price_note_for_docx = escape_for_docx(unit_price_note)
         
         items.append({
             "part_number": it.part_number,
@@ -493,6 +501,7 @@ def build_po_context_from_new_order(
             "quantity": it.quantity,
             "panel_qty": None,
             "unit_price": f_price,
+            "unit_price_note": unit_price_note_for_docx,  # ★ v3.9.4 給 pdf_generator 用
             "amount": round(f_price * it.quantity, 2),
             "delivery_date": f_due,
             "delivery_note": "",
