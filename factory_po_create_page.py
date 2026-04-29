@@ -1,13 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.4。
+建立工廠 PO 頁面 v3.9.5。
 
-主要更新(v3.9.4):
-- ★ NRE 註記實際移到「單價欄底下」(原本在規格欄末尾):
-  - docx 模板 PO_GLOCOM.docx 微調欄寬:單價 1.7cm → 2.5cm,規格欄保持 5.5cm
-  - 借空間從交期(2.3→2.1)、數量(2.6→2.4)、小計(3.6→3.2)
-  - NRE 註記分 3 行寫:「(內含 NRE: / NTD14,000; / NTD28/pcs)」
-- 需配合 pdf_generator.py 修改:items_ctx 加 unit_price_note 欄位
+主要更新(v3.9.5):
+- ★ NRE 註記新格式 — 含原單價,讓工廠看到完整計算:
+  範例:
+    130.000
+    (內含
+    單價
+    NTD102/pcs
+    + NRE:
+    NTD14,000;
+    NTD28/pcs)
+  工廠一眼就懂:130 = 102(原 PCB)+ 28(NRE 攤提)
+- 主品項合併前的「原工廠單價」存進 nre_settings.original_unit_price
+
+v3.9.4 變更:
+- NRE 註記移到「單價欄底下」(原本在規格欄末尾)
+- docx 模板欄寬調整:單價 1.7cm → 2.5cm,規格欄保持 5.5cm
 
 v3.9.3 變更:
 - NRE 註記改用「(內含 NRE: NTD14,000; NTD28/pcs)」格式
@@ -448,22 +458,19 @@ def build_po_context_from_new_order(
         }
     """
     nre_settings = nre_settings or {}
-    nre_mode = nre_settings.get("mode", "merge")  # "merge" | "separate"
+    nre_mode = nre_settings.get("mode", "merge")
     has_nre = nre_settings.get("has_nre", False)
     nre_amount = float(nre_settings.get("nre_amount", 0) or 0)
     nre_target_pn = nre_settings.get("nre_target_pn")
     detected_nre_pns = set(nre_settings.get("detected_nre_pns", []))
     factory_currency = nre_settings.get("factory_currency", "NTD")
+    # ★ v3.9.5: 主品項合併 NRE 前的原始工廠單價(顯示在 PDF 註記裡)
+    original_unit_price = float(nre_settings.get("original_unit_price", 0.0) or 0.0)
     
-    # 邏輯:
-    #   GC merge + has_nre   → 過濾 NRE 品項 + 主品項加註
-    #   GC merge + 沒填      → 過濾 NRE 品項(等於 NRE 不要,不印)
-    #   ET separate + has_nre → 不過濾(NRE 那行印,單價是 NRE 金額)
-    #   ET separate + 沒填    → 過濾 NRE 品項(等於 NRE 不要,不印)
     apply_merge = (nre_mode == "merge" and has_nre)
     skip_nre_in_pdf = (
-        (nre_mode == "merge") or                    # GC 任何情況都不印 NRE 行(merge 進主品項或不要)
-        (nre_mode == "separate" and not has_nre)    # ET/EW 沒填 NRE 也不印
+        (nre_mode == "merge") or
+        (nre_mode == "separate" and not has_nre)
     )
     
     items = []
@@ -479,19 +486,25 @@ def build_po_context_from_new_order(
         # spec_text 寫進 docx 前先 escape & < >
         spec_text_for_docx = escape_for_docx(spec_text)
         
-        # ★ v3.9.4: NRE 註記放單價欄底下(不是規格欄末尾)
-        # 直接做進 unit_price 字串(\n 換行 + escape & < >)
-        # 這樣不用動 pdf_generator,只要模板用 {{ item.unit_price|safe }} 就能渲染
-        # 注意:此 dict 的 unit_price 仍是 float,讓 pdf_generator 自己 format。
-        # NRE 註記則透過另一個欄位 unit_price_note 傳出去,讓上層自己決定怎麼用。
+        # ★ v3.9.5: NRE 註記改新格式 — 含「原單價 + NRE 攤提」完整計算過程
+        # 範例:
+        #   (內含
+        #   單價
+        #   NTD102/pcs
+        #   + NRE:
+        #   NTD14,000;
+        #   NTD28/pcs)
         unit_price_note = ""
         if apply_merge and it.part_number == nre_target_pn and nre_amount > 0 and it.quantity > 0:
             nre_per_pcs = nre_amount / it.quantity
-            currency_label = factory_currency if factory_currency != "NTD" else "NTD"
+            cur = factory_currency  # 已經是 NTD 或 USD
             unit_price_note = (
-                f"\n(內含 NRE:\n"
-                f"{currency_label}{nre_amount:,.0f};\n"
-                f"{currency_label}{nre_per_pcs:.0f}/pcs)"
+                f"\n(內含\n"
+                f"單價\n"
+                f"{cur}{original_unit_price:.0f}/pcs\n"
+                f"+ NRE:\n"
+                f"{cur}{nre_amount:,.0f};\n"
+                f"{cur}{nre_per_pcs:.0f}/pcs)"
             )
         unit_price_note_for_docx = escape_for_docx(unit_price_note)
         
@@ -501,7 +514,7 @@ def build_po_context_from_new_order(
             "quantity": it.quantity,
             "panel_qty": None,
             "unit_price": f_price,
-            "unit_price_note": unit_price_note_for_docx,  # ★ v3.9.4 給 pdf_generator 用
+            "unit_price_note": unit_price_note_for_docx,
             "amount": round(f_price * it.quantity, 2),
             "delivery_date": f_due,
             "delivery_note": "",
@@ -1276,6 +1289,11 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             )
             if target_item and target_item.quantity > 0:
                 nre_per_pcs = nre_amount / target_item.quantity
+                # ★ v3.9.5: 先記住「原本的工廠單價」(沒攤 NRE),寫進 session_state
+                # 這樣 build_po_context 才有辦法在 NRE 註記裡顯示「單價NTD102/pcs」
+                original_unit_price = factory_unit_prices.get(nre_target_pn, 0.0)
+                st.session_state["_fpo_nre_original_unit_price"] = original_unit_price
+                
                 factory_unit_prices[nre_target_pn] = (
                     factory_unit_prices.get(nre_target_pn, 0.0) + nre_per_pcs
                 )
@@ -1325,6 +1343,8 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
         "nre_target_pn": nre_target_pn,
         "detected_nre_pns": [it.part_number for it in detected_nre_items],
         "factory_currency": factory_currency,
+        # ★ v3.9.5: 主品項原本工廠單價(攤 NRE 之前),用來顯示在 PDF 的「單價NTD102/pcs」
+        "original_unit_price": st.session_state.get("_fpo_nre_original_unit_price", 0.0),
     }
 
     # ─── Step 5: 每品項規格(3 Tab) ─
@@ -1532,11 +1552,17 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             cust_date_str = parsed.po_date or order_date_str
             spec_text = (item_specs.get(it.part_number, "") or "").strip()
             
-            # GC merge + has_nre 時主品項加註(新格式「(內含 NRE: ...)」)
+            # ★ v3.9.5: GC merge + has_nre 時主品項加註(新格式含原單價)
+            #   寫進 Teable「客戶要求注意事項」欄位用單行版本(逗號分隔,不換行)
             if apply_merge_wb and it.part_number == nre_target_pn_wb and nre_amount_wb > 0 and it.quantity > 0:
                 nre_per_pcs = nre_amount_wb / it.quantity
-                currency_label = factory_currency_wb if factory_currency_wb != "NTD" else "NTD"
-                nre_note = f"(內含 NRE: {currency_label}{nre_amount_wb:,.0f}; {currency_label}{nre_per_pcs:.0f}/pcs)"
+                cur = factory_currency_wb if factory_currency_wb != "NTD" else "NTD"
+                # 取原單價(攤 NRE 之前的)
+                orig_price = float(nre_settings.get("original_unit_price", 0.0) or 0.0)
+                nre_note = (
+                    f"(內含 單價{cur}{orig_price:.0f}/pcs"
+                    f" + NRE: {cur}{nre_amount_wb:,.0f}; {cur}{nre_per_pcs:.0f}/pcs)"
+                )
                 if spec_text:
                     spec_text = f"{spec_text}\n{nre_note}"
                 else:
