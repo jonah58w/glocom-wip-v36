@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-PDF 產生器 v2:接 PO 上下文 → 渲染 docx → 轉 PDF。
+PDF 產生器 v3:接 PO 上下文 → 渲染 docx → 轉 PDF。
+
+v3 更新:
+- ★ 支援 unit_price_note 欄位 (v3.9.4):
+  NRE 註記放單價欄底下(模板用 {{ item.unit_price }}{{ item.unit_price_note|safe }})
+  build_po_context_from_new_order 會把 NRE 文字塞進這個欄位
 
 v2 更新:
 - 支援 REVISED 印章:當 po_ctx['is_revised']=True 時,
@@ -70,8 +75,9 @@ def _duplicate_item_row_for_multi(docx_path: Path, item_count: int):
     item_row = main_table.rows[item_row_idx]
     item_tr = item_row._tr
 
+    # ★ v3.9.4: fields 加 unit_price_note
     fields = ["part_number", "spec_text", "delivery_display",
-              "quantity_display", "unit_price", "amount"]
+              "quantity_display", "unit_price", "unit_price_note", "amount"]
 
     for run in _iter_runs_in_tr(item_tr):
         for f in fields:
@@ -152,6 +158,7 @@ def render_docx_from_po_ctx(po_ctx: dict, output_path: Path | None = None) -> Pa
                 it.get("delivery_date"), it.get("delivery_note", "")
             ),
             "unit_price": f"{it['unit_price']:,.3f}",
+            "unit_price_note": it.get("unit_price_note", ""),  # ★ v3.9.4: NRE 註記放單價欄底下
             "amount": f"{it['amount']:,.2f}",
         }
         for it in items_data
