@@ -1,0 +1,28 @@
+{
+  "VORNE": {
+    "code": "GC290",
+    "name_full": "Vorne Industries Incorporated",
+    "contact_person": "Ana Castaneda",
+    "address_line1": "1445 Industrial Drive Itasca,",
+    "address_line2": "IL 60143-1849",
+    "tel": "(630) 875-3600",
+    "fax": "(630) 875-3609",
+    "country": "USA",
+    "currency": "USD",
+    "default_terms": "Exwork Taiwan (US$ Exwork Taiwan)",
+    "default_shipment_text": "Since the T/T payment is received and WG approved, we will confirm the ship date then"
+  },
+  "WESCO": {
+    "code": "",
+    "name_full": "WESCO International",
+    "contact_person": "",
+    "address_line1": "",
+    "address_line2": "",
+    "tel": "",
+    "fax": "",
+    "country": "USA",
+    "currency": "USD",
+    "default_terms": "Exwork Taiwan (US$ Exwork Taiwan)",
+    "default_shipment_text": "Since the T/T payment is received and WG approved, we will confirm the ship date then"
+  }
+}
