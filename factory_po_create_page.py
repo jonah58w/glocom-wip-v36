@@ -1744,7 +1744,7 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             st.warning(f"⚠️ 讀取客戶檔失敗: {e}(會用空白資訊產 PI)")
         
         # 找對應客戶資料(用 customer 名稱當 key)
-        customer_key = (parsed.customer or "").strip().upper()
+        customer_key = (parsed.customer_name or "").strip().upper()
         customer_info = customers_data.get(customer_key, {})
         
         if not customer_info:
@@ -1794,11 +1794,11 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             "invoice_no": pi_invoice_no,
             "po_no": new_po_no,
             "customer_po_no": parsed.customer_po_no or "",
-            "customer_short": parsed.customer or "",
+            "customer_short": parsed.customer_name or "",
             "customer_code": customer_info.get("code", ""),
             "date": date_cls.today(),
             "contact_person": customer_info.get("contact_person", ""),
-            "customer_name": customer_info.get("name_full", parsed.customer or ""),
+            "customer_name": customer_info.get("name_full", parsed.customer_name or ""),
             "customer_address1": customer_info.get("address_line1", ""),
             "customer_address2": customer_info.get("address_line2", ""),
             "customer_tel": customer_info.get("tel", ""),
