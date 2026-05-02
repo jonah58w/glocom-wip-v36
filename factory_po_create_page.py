@@ -1,17 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.12。
+建立工廠 PO 頁面 v3.9.13。
 
-主要更新(v3.9.12):
-- ★ 修「規格內容重複『舊料號』」bug:
-       原本 default_text 加 "舊料號\\n\\n注意:\\n" 前綴,但歷史 spec_text 第一行
-       本來就是「舊料號;...」開頭 → 變成兩個「舊料號」。
-       改成:第一行已是「舊料號」開頭就直接用,沒有才加前綴。
-- ★ 工廠單價自動抓前批:
-       Step 4 從 Teable 主表查同 P/N 最近一筆 銷貨金額÷Order Q'TY,
-       帶入工廠單價當 default(沒歷史才空白)。
-       同字首+同工廠優先(雙條件排序,跟規格 default 邏輯一致)。
-- ★ 換 PDF / 切工廠 / 切字首 → 工廠單價也自動重抓
+主要更新(v3.9.13):
+- ★ 修「切工廠就把單價歸零」bug:
+       v3.9.12 sentinel 包含 factory_short + prefix,Sandy 在 Step 3 切工廠
+       會把剛填的單價清掉。改成 sentinel 只看 PDF identity,
+       切工廠/字首時保留 Sandy 已填的單價,只更新「💡 前批單價」提示。
+- ★ Step 4 加 debug expander:顯示每個品項在 Teable 主表的查詢結果
+       (找到幾筆 / 算出多少單價),方便確認為什麼是 0.000
+- ★ Step 6 寫回 / 產 PDF 前加品項摘要表:每個 P/N 的單價/規格摘要
+       一目了然,確保 docx 模板輸入確實有完整品項
+
+v3.9.12 變更:
+- 修「規格內容重複舊料號」bug
+- 工廠單價自動抓前批(同字首+同工廠優先)
 
 v3.9.11 變更:
 - 歷史 default 也按字首(GC/ET/EW)抓
@@ -1592,13 +1595,11 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     # ─── Step 4 ─
     st.markdown("### Step 4. 每品項:工廠單價 + 工廠交期")
 
-    # ★ v3.9.12: PDF / 工廠 / 字首變了 → 清掉所有 fpo_fprice_* + _fpo_prev_price_*
-    # 這樣下面的 number_input default 才會生效(streamlit widget value 在 session_state 存在時會被忽略)
-    step4_sentinel = (
-        f"{parsed.customer_po_no or ''}|{factory_short}|"
-        f"{chosen_internal}|{len(parsed.items)}"
-    )
+    # ★ v3.9.13: sentinel 只看 PDF identity(不再包含工廠/字首),
+    # 換 PDF 才清 widget;切工廠/字首時保留 Sandy 已填的單價。
+    step4_sentinel = f"{parsed.customer_po_no or ''}|{len(parsed.items)}"
     if st.session_state.get("_fpo_step4_sentinel") != step4_sentinel:
+        # 新 PDF → 清掉 widget value 跟所有 prev_price cache
         for k in list(st.session_state.keys()):
             if k.startswith("fpo_fprice_") or k.startswith("_fpo_prev_price_"):
                 try:
@@ -1610,14 +1611,31 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     factory_unit_prices = {}
     factory_due_dates = {}
     current_po_prefix_for_step4 = display_prefix(chosen_internal)  # GC / ET / EW
+
+    # ★ v3.9.13: debug 用 — 收集每個品項的查詢結果
+    debug_prev_price_log = []
+
     for idx, it in enumerate(parsed.items):
-        # ★ v3.9.12: 抓前批工廠單價當 default(同字首+同工廠優先)
-        prev_price_key = f"_fpo_prev_price_{idx}"
-        if prev_price_key not in st.session_state:
-            st.session_state[prev_price_key] = fetch_previous_factory_price(
+        # ★ v3.9.13: prev_price cache key 包含 (idx, factory, prefix)
+        # 切工廠/字首時自動重新計算,顯示更新的提示,但不會把 widget value 歸零
+        prev_price_cache_key = (
+            f"_fpo_prev_price_{idx}_{factory_short}_{current_po_prefix_for_step4}"
+        )
+        if prev_price_cache_key not in st.session_state:
+            calc_result = fetch_previous_factory_price(
                 orders, it.part_number, factory_short, current_po_prefix_for_step4
             )
-        prev_price = st.session_state[prev_price_key]
+            st.session_state[prev_price_cache_key] = calc_result
+        prev_price = st.session_state[prev_price_cache_key]
+
+        # debug log
+        debug_prev_price_log.append({
+            "idx": idx,
+            "P/N": it.part_number,
+            "Step3 工廠": factory_short,
+            "Step3 字首": current_po_prefix_for_step4,
+            "前批單價": prev_price if prev_price else "(沒找到)",
+        })
 
         p_cols = st.columns([2, 1, 1, 2])
         with p_cols[0]:
@@ -1625,22 +1643,35 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
         with p_cols[1]:
             st.text_input("數量", value=str(it.quantity), disabled=True, key=f"fpo_disp_qty_{idx}")
         with p_cols[2]:
-            default_price = float(prev_price) if prev_price else 0.0
+            # ★ v3.9.13: 只在 widget 還沒被建立過時用 prev_price 當 default
+            #   (streamlit number_input 在 session_state 已存在時 value 參數會被忽略,
+            #    所以 Sandy 編輯過的單價會被保留)
+            widget_key = f"fpo_fprice_{idx}"
+            if widget_key not in st.session_state:
+                default_price = float(prev_price) if prev_price else 0.0
+                # 顯式 set 進 session_state,讓 number_input 第一次看到就有值
+                st.session_state[widget_key] = default_price
             f_price = st.number_input(
                 "工廠單價",
                 min_value=0.0,
-                value=default_price,
                 step=0.01,
                 format="%.4f",
-                key=f"fpo_fprice_{idx}",
+                key=widget_key,
                 help=(
-                    f"💡 已自動帶入前批單價: {prev_price}"
+                    f"💡 前批單價: {prev_price}(切工廠/字首會重新計算這個值)"
                     if prev_price
                     else "(沒前批紀錄,需手動填)"
                 ),
             )
             if prev_price:
-                st.caption(f"💡 前批單價: **{prev_price}**")
+                # 如果 widget value 跟 prev_price 不同,顯示一個提示
+                if abs(float(f_price) - float(prev_price)) < 0.001:
+                    st.caption(f"💡 前批單價: **{prev_price}**(已自動帶入)")
+                else:
+                    st.caption(
+                        f"💡 前批單價: **{prev_price}** "
+                        f"(目前單價 {f_price} 跟前批不同,Sandy 已手動編輯)"
+                    )
         with p_cols[3]:
             default_due = date.today()
             if it.delivery_date:
@@ -1651,6 +1682,37 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             f_due = st.date_input("工廠交期", value=default_due, key=f"fpo_fdue_{idx}")
         factory_unit_prices[it.part_number] = f_price
         factory_due_dates[it.part_number] = f_due
+
+    # ★ v3.9.13: debug expander — 看 fetch_previous_factory_price 對每個品項的結果
+    with st.expander("🔍 Debug: 前批單價查詢結果 (展開看 fetch_previous_factory_price 的詳情)", expanded=False):
+        debug_df = pd.DataFrame(debug_prev_price_log)
+        st.dataframe(debug_df, use_container_width=True, hide_index=True)
+        # 順便顯示 orders DataFrame 的關鍵欄位
+        if orders is not None and not orders.empty:
+            st.caption(f"Teable orders 共 {len(orders)} 筆,欄位:")
+            cols_debug = list(orders.columns)
+            st.code(", ".join(cols_debug), language=None)
+            # 對每個品項抽出該 P/N 在 orders 的紀錄
+            for it in parsed.items:
+                pn_target = str(it.part_number).strip()
+                if "P/N" in orders.columns:
+                    matches = orders[orders["P/N"].astype(str).str.strip() == pn_target]
+                    st.write(f"**{pn_target}** 在 orders 找到 **{len(matches)}** 筆")
+                    if len(matches) > 0:
+                        # 顯示關鍵欄位
+                        show_cols = [c for c in [
+                            COL_GLOCOM_PO, "P/N", "工廠",
+                            "Order Q'TY\n (PCS)", "Order Q'TY (PCS)", "Q'TY (PCS)",
+                            "銷貨金額", "工廠下單日期",
+                        ] if c in matches.columns]
+                        if show_cols:
+                            st.dataframe(
+                                matches[show_cols].head(5),
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+        else:
+            st.warning("orders DataFrame 是空的(側邊欄可能要 Refresh)")
 
     factory_total = sum(
         factory_unit_prices.get(it.part_number, 0.0) * it.quantity
@@ -2045,6 +2107,37 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             order_date=order_date_input, is_revised=is_revised,
             nre_settings=st.session_state.get("_fpo_nre_settings"),  # ★ v3.8
         )
+
+        # ★ v3.9.13: 產 PDF 前先顯示 items 摘要 — 確認 docx 模板會收到的所有品項
+        with st.expander(
+            f"🔍 產 PDF 前確認 — items list 共 **{len(po_ctx.get('items', []))}** 個品項",
+            expanded=True,
+        ):
+            items_summary = []
+            for it_ctx in po_ctx.get("items", []):
+                spec_preview = (it_ctx.get("spec_text") or "").replace("\u200B", "").split("\n")[0][:50]
+                items_summary.append({
+                    "P/N": it_ctx["part_number"],
+                    "數量": it_ctx["quantity"],
+                    "工廠單價": it_ctx["unit_price"],
+                    "小計": it_ctx["amount"],
+                    "規格首行": spec_preview,
+                })
+            if items_summary:
+                st.dataframe(
+                    pd.DataFrame(items_summary),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                expected_total = sum(float(it.get("amount", 0)) for it in po_ctx["items"])
+                st.caption(
+                    f"⚠️ 如果 PDF 上的品項列數跟這裡不一致(譬如這裡有 {len(items_summary)} 筆 "
+                    f"但 PDF 只印 1 筆),問題在 `templates/PO_GLOCOM.docx` 的 "
+                    f"`{{% tr for item in items %}}` 迴圈,需要修模板。  \n"
+                    f"預期合計:`{po_ctx.get('currency', 'NT$')} {expected_total:,.2f}`"
+                )
+            else:
+                st.error("⚠️ items list 是空的!產 PDF 會失敗。")
 
         try:
             from core.pdf_generator import generate_po_files
