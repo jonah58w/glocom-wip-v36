@@ -1,14 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.11。
+建立工廠 PO 頁面 v3.9.12。
 
-主要更新(v3.9.11):
-- ★ 歷史 default 也按「字首(GC/ET/EW)」抓:
-       同字首+同工廠 > 同字首 > 同工廠 > smart_spec
-       (Sandy 切字首時 default 會 follow 字首)
-- ★ 歷史工廠 expander 每筆加字首 badge(🟦GC / 🟩ET / 🟧EW)
-- ★ NRE 真的預設「0」— 每次換 PDF 自動清 session_state,
-       不再被前一筆的數字 stick 住
+主要更新(v3.9.12):
+- ★ 修「規格內容重複『舊料號』」bug:
+       原本 default_text 加 "舊料號\\n\\n注意:\\n" 前綴,但歷史 spec_text 第一行
+       本來就是「舊料號;...」開頭 → 變成兩個「舊料號」。
+       改成:第一行已是「舊料號」開頭就直接用,沒有才加前綴。
+- ★ 工廠單價自動抓前批:
+       Step 4 從 Teable 主表查同 P/N 最近一筆 銷貨金額÷Order Q'TY,
+       帶入工廠單價當 default(沒歷史才空白)。
+       同字首+同工廠優先(雙條件排序,跟規格 default 邏輯一致)。
+- ★ 換 PDF / 切工廠 / 切字首 → 工廠單價也自動重抓
+
+v3.9.11 變更:
+- 歷史 default 也按字首(GC/ET/EW)抓
+- 歷史工廠 expander 每筆加字首 badge
+- NRE 真的預設 0(每次換 PDF 強制重置)
 
 v3.9.10 變更:
 - 修正:final_key 為空時自動重新套 default
@@ -268,6 +276,24 @@ def _merge_spec_with_change(history_spec: str, change_text: str) -> str:
     return f"舊料號; {change}\n{history}"
 
 
+def _ensure_starts_with_jiu_liao(spec_text: str) -> str:
+    """
+    ★ v3.9.12: 確保 spec_text 第一行以「舊料號」開頭。
+    - 第一行已是「舊料號」開頭(包含「舊料號」/「舊料號;...」/「舊料號;...」/...)→ 原樣回傳
+    - 第一行不是 → prepend「舊料號; 」
+
+    這樣可以避免之前 default_text 加 "舊料號\\n\\n注意:\\n" 前綴
+    跟歷史 spec_text 本身第一行的「舊料號;...」重複,造成 PO 印兩個「舊料號」。
+    """
+    text = (spec_text or "").lstrip()
+    if not text:
+        return "舊料號"
+    first_line = text.split("\n", 1)[0]
+    if first_line.startswith("舊料號"):
+        return text
+    return f"舊料號; {text}"
+
+
 def _po_prefix(po_no: str) -> str:
     """
     ★ v3.9.11: 從 PO 編號取字首類型。
@@ -443,6 +469,83 @@ def calc_next_po_number_from_df(orders_df: pd.DataFrame, prefix: str) -> str:
 
 
 # ─── Teable 寫入 ─────────────────────────────────
+def fetch_previous_factory_price(
+    orders: pd.DataFrame,
+    part_number: str,
+    factory_short: str = "",
+    po_prefix: str = "",
+) -> float | None:
+    """
+    ★ v3.9.12: 從 Teable 主表查同 P/N 最近一筆的工廠單價。
+
+    計算方法:銷貨金額 ÷ Order Q'TY (PCS)
+    排序:同字首 +10, 同工廠 +5, 再按工廠下單日期降冪。
+
+    回傳:單價(float, 保留 4 位小數)或 None(沒歷史)
+    """
+    if orders is None or orders.empty:
+        return None
+
+    pn_col = "P/N"
+    if pn_col not in orders.columns:
+        return None
+
+    # 找數量欄位(可能是 Order Q'TY\n (PCS) 或 Q'TY (PCS) 等)
+    qty_col_candidates = [
+        "Order Q'TY\n (PCS)", "Order Q'TY (PCS)", "Order QTY (PCS)",
+        "Q'TY (PCS)", "Q'TY", "Qty", "數量", "PCS",
+    ]
+    qty_col = next((c for c in qty_col_candidates if c in orders.columns), None)
+    if not qty_col:
+        return None
+
+    amt_col = "銷貨金額" if "銷貨金額" in orders.columns else None
+    if not amt_col:
+        return None
+
+    po_col = COL_GLOCOM_PO if COL_GLOCOM_PO in orders.columns else None
+    factory_col = "工廠" if "工廠" in orders.columns else None
+    date_col = "工廠下單日期" if "工廠下單日期" in orders.columns else None
+
+    pn_target = str(part_number).strip()
+    matches = orders[orders[pn_col].astype(str).str.strip() == pn_target].copy()
+    if matches.empty:
+        return None
+
+    # 算每筆的匹配分數
+    def _row_score(row):
+        score = 0
+        if factory_col and factory_short:
+            rec_factory = str(row.get(factory_col, "") or "").strip()
+            if rec_factory == factory_short:
+                score += 5
+        if po_col and po_prefix:
+            rec_po = str(row.get(po_col, "") or "").strip()
+            if _po_prefix(rec_po) == po_prefix:
+                score += 10
+        return score
+
+    matches["_score"] = matches.apply(_row_score, axis=1)
+    if date_col and date_col in matches.columns:
+        matches["_date"] = pd.to_datetime(matches[date_col], errors="coerce")
+        matches = matches.sort_values(["_score", "_date"], ascending=[False, False])
+    else:
+        matches = matches.sort_values("_score", ascending=False)
+
+    # 從最佳匹配往下找,第一個有效的(qty>0 且 amt>0)就回傳
+    for _, row in matches.iterrows():
+        try:
+            qty_raw = row.get(qty_col, 0)
+            amt_raw = row.get(amt_col, 0)
+            qty = float(qty_raw) if qty_raw not in (None, "") else 0.0
+            amt = float(amt_raw) if amt_raw not in (None, "") else 0.0
+            if qty > 0 and amt > 0:
+                return round(amt / qty, 4)
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
 def create_teable_records(table_url: str, headers: dict, fields_list: list) -> dict:
     result = {"success": 0, "failed": 0, "errors": [], "created_ids": []}
     if not fields_list:
@@ -862,10 +965,12 @@ def render_spec_input_for_item(
                         chosen_spec = _normalize_spec_text(
                             (chosen.get("spec_text") or "").strip()
                         )
-                        default_text = f"舊料號\n\n注意:\n{chosen_spec}"
+                        # ★ v3.9.12: 不加重複前綴 — 歷史 spec_text 第一行通常就是「舊料號;...」開頭
+                        default_text = _ensure_starts_with_jiu_liao(chosen_spec)
                     else:
                         # 沒任何匹配 → smart_spec 合併版
-                        default_text = f"舊料號\n\n注意:\n{smart_spec}"
+                        # ★ v3.9.12: 同樣處理
+                        default_text = _ensure_starts_with_jiu_liao(smart_spec)
                     
                     # ★ v3.9.9: 同時把所有歷史工廠 + 對應規格存起來,供「歷史工廠」UI 使用
                     factory_choices = []
@@ -915,7 +1020,8 @@ def render_spec_input_for_item(
                     # 沒找到任何歷史 — fallback 到原本邏輯查 Teable
                     hist_hits = fetch_previous_spec(orders, item.part_number, factory_short=current_factory)
                     if hist_hits and hist_hits[0].get("spec"):
-                        default_text = f"舊料號\n\n注意:\n{hist_hits[0]['spec'].strip()}"
+                        # ★ v3.9.12: 不加重複前綴
+                        default_text = _ensure_starts_with_jiu_liao(hist_hits[0]['spec'].strip())
                         # ★ v3.9.9: Teable fallback 也建 factory_choices
                         factory_choices = []
                         seen_keys = set()
@@ -1485,19 +1591,56 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
 
     # ─── Step 4 ─
     st.markdown("### Step 4. 每品項:工廠單價 + 工廠交期")
+
+    # ★ v3.9.12: PDF / 工廠 / 字首變了 → 清掉所有 fpo_fprice_* + _fpo_prev_price_*
+    # 這樣下面的 number_input default 才會生效(streamlit widget value 在 session_state 存在時會被忽略)
+    step4_sentinel = (
+        f"{parsed.customer_po_no or ''}|{factory_short}|"
+        f"{chosen_internal}|{len(parsed.items)}"
+    )
+    if st.session_state.get("_fpo_step4_sentinel") != step4_sentinel:
+        for k in list(st.session_state.keys()):
+            if k.startswith("fpo_fprice_") or k.startswith("_fpo_prev_price_"):
+                try:
+                    del st.session_state[k]
+                except KeyError:
+                    pass
+        st.session_state["_fpo_step4_sentinel"] = step4_sentinel
+
     factory_unit_prices = {}
     factory_due_dates = {}
+    current_po_prefix_for_step4 = display_prefix(chosen_internal)  # GC / ET / EW
     for idx, it in enumerate(parsed.items):
+        # ★ v3.9.12: 抓前批工廠單價當 default(同字首+同工廠優先)
+        prev_price_key = f"_fpo_prev_price_{idx}"
+        if prev_price_key not in st.session_state:
+            st.session_state[prev_price_key] = fetch_previous_factory_price(
+                orders, it.part_number, factory_short, current_po_prefix_for_step4
+            )
+        prev_price = st.session_state[prev_price_key]
+
         p_cols = st.columns([2, 1, 1, 2])
         with p_cols[0]:
             st.text_input("P/N", value=it.part_number, disabled=True, key=f"fpo_disp_pn_{idx}")
         with p_cols[1]:
             st.text_input("數量", value=str(it.quantity), disabled=True, key=f"fpo_disp_qty_{idx}")
         with p_cols[2]:
+            default_price = float(prev_price) if prev_price else 0.0
             f_price = st.number_input(
-                "工廠單價", min_value=0.0, value=0.0, step=0.01, format="%.4f",
+                "工廠單價",
+                min_value=0.0,
+                value=default_price,
+                step=0.01,
+                format="%.4f",
                 key=f"fpo_fprice_{idx}",
+                help=(
+                    f"💡 已自動帶入前批單價: {prev_price}"
+                    if prev_price
+                    else "(沒前批紀錄,需手動填)"
+                ),
             )
+            if prev_price:
+                st.caption(f"💡 前批單價: **{prev_price}**")
         with p_cols[3]:
             default_due = date.today()
             if it.delivery_date:
