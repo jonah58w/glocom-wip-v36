@@ -1,11 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.8。
+建立工廠 PO 頁面 v3.9.9。
 
-主要更新(v3.9.8):
-- ★ 修正:歷史 spec_text 載入時自動清洗 tab(去掉 "1.\t..." 對齊用 tab),
+主要更新(v3.9.9):
+- ★ PDF 排版修正:在每個「數字. 」開頭的行前面加零寬空格 \\u200B,
+       避免 Word/LibreOffice 把它認成 numbered list 自動套 tab stop
+       (這就是規格欄出現「1.   板子」大空白的元凶)
+- ★ 新功能:Step 5 舊料號區塊加「🏭 歷史工廠」expander,
+       列出此料號歷史做過的所有工廠 + 各自規格,可一鍵切換
+       (Sandy 想看哪家工廠的版本就點哪家)
+- ★ NRE 金額預設改成 "0"(不再依客戶 PDF 自動帶,避免 Sandy 漏改)
+
+v3.9.8 變更:
+- 修正:歷史 spec_text 載入時自動清洗 tab(去掉 "1.\t..." 對齊用 tab),
        印到 PDF 不再有編號項目後的大空白
-- ★ 新功能:Step 5 舊料號區塊加「📝 規格變更」欄位
+- 新功能:Step 5 舊料號區塊加「📝 規格變更」欄位
        - 用在「舊料號但這次規格有變更」(譬如表面處理改 ENIG 2u")
        - 按「⬇ 套用變更」會把變更插到歷史規格頂端「舊料號」後
        - 寫回 Teable 後也會更新 spec_history.json,下次同料號自動帶新版
@@ -183,6 +192,28 @@ def _normalize_spec_text(text: str) -> str:
     lines = text.split("\n")
     normalized = [re.sub(r" +", " ", line).rstrip() for line in lines]
     return "\n".join(normalized)
+
+
+def _add_zwsp_to_numbered_lines(text: str) -> str:
+    """
+    ★ v3.9.9: 在「數字. 」開頭的行前面加零寬空格 \\u200B,
+    避免 Word/LibreOffice 把它認成 numbered list 起始,
+    導致段落自動套上 list paragraph 樣式 + hanging indent + tab stop
+    (這正是規格欄出現「1.   板子...」大空白的元凶 — 即使 source 沒 tab,
+     渲染器自己會加)。
+
+    零寬空格在 PDF/Word 上完全看不到,但段落第一個字元變成 ZWSP
+    就不會觸發 list 偵測。
+    """
+    if not text:
+        return text
+    # 用 lambda 避免 re.sub replacement string 的 \\u200B escape 問題
+    return re.sub(
+        r"^(\s*)(\d+\. )",
+        lambda m: m.group(1) + "\u200B" + m.group(2),
+        text,
+        flags=re.MULTILINE,
+    )
 
 
 def _merge_spec_with_change(history_spec: str, change_text: str) -> str:
@@ -586,7 +617,12 @@ def build_po_context_from_new_order(
         f_price = float(factory_unit_prices.get(it.part_number, 0.0))
         f_due = factory_due_dates.get(it.part_number)
         spec_text = (item_specs.get(it.part_number, "") or "").strip()
-        
+
+        # ★ v3.9.9: 保險再 normalize 一次(去 tab + 多餘空白)
+        spec_text = _normalize_spec_text(spec_text)
+        # ★ v3.9.9: 編號項目前加 ZWSP,避免 Word/LibreOffice list auto-format
+        spec_text = _add_zwsp_to_numbered_lines(spec_text)
+
         # spec_text 寫進 docx 前先 escape & < >
         spec_text_for_docx = escape_for_docx(spec_text)
         
@@ -724,6 +760,27 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                     smart_spec = _normalize_spec_text(smart_spec)
                     default_text = f"舊料號\n\n注意:\n{smart_spec}"
                     
+                    # ★ v3.9.9: 同時把所有歷史工廠 + 對應規格存起來,供「歷史工廠」UI 使用
+                    factory_choices = []
+                    seen_keys = set()
+                    for r in history_records:
+                        factory = (r.get("factory") or "").strip()
+                        po = (r.get("po") or "").strip()
+                        date_str = (r.get("date") or "").strip()
+                        spec = _normalize_spec_text((r.get("spec_text") or "").strip())
+                        # 同 (工廠+規格) 視為同一筆,避免重複
+                        dedup_key = (factory, spec)
+                        if dedup_key in seen_keys:
+                            continue
+                        seen_keys.add(dedup_key)
+                        factory_choices.append({
+                            "factory": factory or "(未填工廠)",
+                            "po": po,
+                            "date": date_str,
+                            "spec_text": spec,
+                        })
+                    st.session_state[f"_fpo_factory_choices_{idx}"] = factory_choices
+
                     # 存分析結果到 session_state(下面 UI 會顯示)
                     st.session_state[f"_fpo_v37_analysis_{idx}"] = {
                         "matched_pn": matched_pn,
@@ -751,6 +808,24 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                     hist_hits = fetch_previous_spec(orders, item.part_number, factory_short=current_factory)
                     if hist_hits and hist_hits[0].get("spec"):
                         default_text = f"舊料號\n\n注意:\n{hist_hits[0]['spec'].strip()}"
+                        # ★ v3.9.9: Teable fallback 也建 factory_choices
+                        factory_choices = []
+                        seen_keys = set()
+                        for h in hist_hits:
+                            factory = (h.get("factory") or "").strip()
+                            spec = (h.get("spec") or "").strip()
+                            dedup_key = (factory, spec)
+                            if dedup_key in seen_keys or not spec:
+                                continue
+                            seen_keys.add(dedup_key)
+                            factory_choices.append({
+                                "factory": factory or "(未填工廠)",
+                                "po": h.get("po_no", ""),
+                                "date": h.get("date", ""),
+                                "spec_text": spec,
+                            })
+                        st.session_state[f"_fpo_factory_choices_{idx}"] = factory_choices
+
                         st.session_state[f"_fpo_v37_analysis_{idx}"] = {
                             "matched_pn": item.part_number,
                             "is_fuzzy": False,
@@ -766,6 +841,7 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                     else:
                         default_text = "舊料號"
                         st.session_state[f"_fpo_v37_analysis_{idx}"] = None
+                        st.session_state[f"_fpo_factory_choices_{idx}"] = []  # ★ v3.9.9
                 
                 st.session_state[final_key] = default_text
                 # ★ v3.9.8: 同時保存 history_default 原版,供規格變更按鈕重組用
@@ -836,6 +912,53 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
 
             # ─── ★ v3.9.8: 規格變更欄位 ─────────────
             st.divider()
+
+            # ─── ★ v3.9.9: 歷史工廠 expander ─────────
+            factory_choices = st.session_state.get(f"_fpo_factory_choices_{idx}", []) or []
+            if factory_choices:
+                current_factory_step3 = st.session_state.get("fpo_factory_short", "")
+                # 同工廠優先 — 排在最前面
+                same_factory = [c for c in factory_choices if c.get("factory") == current_factory_step3]
+                other = [c for c in factory_choices if c.get("factory") != current_factory_step3]
+                ordered_choices = same_factory + other
+
+                expander_label = (
+                    f"🏭 歷史工廠({len(ordered_choices)} 筆,可切換看不同工廠的規格,並一鍵套用)"
+                )
+                # 如果有同工廠的歷史筆數,展開預設攤開讓 Sandy 看到;
+                # 否則摺疊避免畫面太雜
+                with st.expander(expander_label, expanded=bool(same_factory)):
+                    for c_idx, choice in enumerate(ordered_choices):
+                        is_same = (choice.get("factory") == current_factory_step3 and current_factory_step3)
+                        badge = "🟢 同工廠 " if is_same else "⚪ "
+                        sub_cols = st.columns([4, 1])
+                        with sub_cols[0]:
+                            st.markdown(
+                                f"{badge}**{choice['factory']}** | "
+                                f"`{choice['po']}` | {choice.get('date', '') or '(無日期)'}"
+                            )
+                            if choice.get("spec_text"):
+                                st.code(choice["spec_text"], language=None)
+                            else:
+                                st.caption("(此筆沒填規格)")
+                        with sub_cols[1]:
+                            st.write("")  # 對齊
+                            if st.button(
+                                "⬇ 套用此筆",
+                                key=f"fpo_apply_factory_{idx}_{c_idx}",
+                                use_container_width=True,
+                                disabled=not choice.get("spec_text"),
+                            ):
+                                new_default = f"舊料號\n\n注意:\n{choice['spec_text'].strip()}"
+                                st.session_state[final_key] = new_default
+                                # 同步更新 history_default,讓「規格變更」按鈕從這個新 base 重組
+                                st.session_state[history_default_key] = new_default
+                                # 清掉「規格變更」欄位內容(避免殘留上一次的變更)
+                                st.session_state[f"fpo_spec_change_{idx}"] = ""
+                                st.rerun()
+                        st.divider()
+
+            # ─── 📝 這次規格變更 ──────────────────────
             st.markdown("##### 📝 這次規格變更(選填)")
             st.caption(
                 "👉 用在「舊料號但這次規格有變更」的情況,譬如 "
@@ -1356,26 +1479,15 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     nre_cols = st.columns([2, 2, 3])
     
     with nre_cols[0]:
-        # NRE 金額(支援 0 / NA / 數字)
-        # 預設值:如果有偵測到 NRE 品項,試著從客戶 PDF 抓金額(換算成工廠貨幣)
-        default_nre_str = ""
-        if detected_nre_items:
-            cust_amount = detected_nre_items[0].amount
-            # 客戶價是 USD,工廠是 NTD → 估 ×32 給 Sandy 改
-            if parsed.currency == "USD" and factory_currency == "NTD":
-                default_nre_str = f"{round(cust_amount * 32, 0):.0f}"
-            elif parsed.currency == "USD" and factory_currency == "USD":
-                default_nre_str = f"{cust_amount:.2f}"
-            elif parsed.currency in ("NTD", "NT$") and factory_currency == "NTD":
-                default_nre_str = f"{cust_amount:.0f}"
-            else:
-                default_nre_str = f"{cust_amount:.2f}"
-        
+        # ★ v3.9.9: NRE 金額預設「0」(不再依客戶 PDF 自動帶估算值,避免 Sandy 沒注意就送出)
+        # GC / ET / EW 三種模式統一預設「0」,Sandy 真有 NRE 才手動填數字
+        default_nre_str = "0"
+
         nre_input_str = st.text_input(
             f"NRE 金額 ({factory_currency})",
             value=default_nre_str,
             key="fpo_nre_amount_str",
-            help=f"工廠開的 NRE 金額。填 0 / NA / 留空 → 不處理 NRE",
+            help=f"工廠開的 NRE 金額。預設 0(無 NRE)。要處理 NRE 才把 0 改成實際金額。",
             placeholder="例: 14000 / 0 / NA",
         )
         
