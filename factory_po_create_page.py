@@ -1637,6 +1637,8 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     # ★ v3.9.19: 整段包 try/except,任何意外不讓 page 崩
     try:
         spec_history_data_for_panel = load_spec_history()
+    from legacy_history import merge_legacy_into_spec_history
+        spec_history_data = merge_legacy_into_spec_history(spec_history_data)
     except Exception as e:
         spec_history_data_for_panel = {}
         st.warning(f"⚠️ 載入 spec_history.json 失敗(已 fallback 空 dict):{e}")
