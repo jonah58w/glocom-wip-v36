@@ -1,15 +1,27 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.9。
+建立工廠 PO 頁面 v3.9.11。
 
-主要更新(v3.9.9):
-- ★ PDF 排版修正:在每個「數字. 」開頭的行前面加零寬空格 \\u200B,
+主要更新(v3.9.11):
+- ★ 歷史 default 也按「字首(GC/ET/EW)」抓:
+       同字首+同工廠 > 同字首 > 同工廠 > smart_spec
+       (Sandy 切字首時 default 會 follow 字首)
+- ★ 歷史工廠 expander 每筆加字首 badge(🟦GC / 🟩ET / 🟧EW)
+- ★ NRE 真的預設「0」— 每次換 PDF 自動清 session_state,
+       不再被前一筆的數字 stick 住
+
+v3.9.10 變更:
+- 修正:final_key 為空時自動重新套 default
+- 修正:Step 3 切工廠時,Step 5 自動用「同工廠最近一筆」當 default
+- 新功能:「規格變更」text_input 加 on_change callback,按 Enter 自動套用
+- 改進:歷史工廠 expander 永遠預設展開
+
+v3.9.9 變更:
+- PDF 排版修正:在每個「數字. 」開頭的行前面加零寬空格 \\u200B,
        避免 Word/LibreOffice 把它認成 numbered list 自動套 tab stop
-       (這就是規格欄出現「1.   板子」大空白的元凶)
-- ★ 新功能:Step 5 舊料號區塊加「🏭 歷史工廠」expander,
+- 新功能:Step 5 舊料號區塊加「🏭 歷史工廠」expander,
        列出此料號歷史做過的所有工廠 + 各自規格,可一鍵切換
-       (Sandy 想看哪家工廠的版本就點哪家)
-- ★ NRE 金額預設改成 "0"(不再依客戶 PDF 自動帶,避免 Sandy 漏改)
+- NRE 金額預設改成 "0"
 
 v3.9.8 變更:
 - 修正:歷史 spec_text 載入時自動清洗 tab(去掉 "1.\t..." 對齊用 tab),
@@ -254,6 +266,42 @@ def _merge_spec_with_change(history_spec: str, change_text: str) -> str:
 
     # case 3: 第一行不是舊料號開頭 → prepend 新的一行
     return f"舊料號; {change}\n{history}"
+
+
+def _po_prefix(po_no: str) -> str:
+    """
+    ★ v3.9.11: 從 PO 編號取字首類型。
+    - "G1150030-01" → "GC"
+    - "ET1150009-01" → "ET"
+    - "EW1140005-01" → "EW"
+    - 空字串或不認得 → ""
+
+    用來:
+    1. default 套用時依「同字首」優先排序
+    2. 歷史工廠 expander 每筆顯示 GC/ET/EW badge
+    """
+    po = (po_no or "").strip().upper()
+    if po.startswith("ET"):
+        return "ET"
+    if po.startswith("EW"):
+        return "EW"
+    if po.startswith("G"):
+        return "GC"
+    return ""
+
+
+def _on_spec_change_apply(history_default_key: str, change_key: str, final_key: str):
+    """
+    ★ v3.9.10: 「規格變更」text_input 的 on_change callback。
+    Sandy 按 Enter / 失焦時自動觸發,不用再點按鈕。
+
+    從 history_default_key(原版規格)重組,避免重複按時 double 套上去。
+    """
+    change_text = (st.session_state.get(change_key, "") or "").strip()
+    if not change_text:
+        return  # 空字串就不動,讓 Sandy 自己控制
+    history_default = st.session_state.get(history_default_key, "") or ""
+    st.session_state[final_key] = _merge_spec_with_change(history_default, change_text)
 
 
 # ─── 工廠主檔 ────────────────────────────────────
@@ -691,7 +739,12 @@ def _reset_form():
 
 
 # ─── Step 5 規格輸入(每品項)──────────────────
-def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
+def render_spec_input_for_item(
+    idx: int,
+    item,
+    orders: pd.DataFrame,
+    current_po_prefix: str = "",  # ★ v3.9.11: GC / ET / EW
+) -> str:
     final_key = f"fpo_spec_final_{idx}"
     if final_key not in st.session_state:
         st.session_state[final_key] = ""
@@ -718,8 +771,38 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
             with cols_type[1]:
                 st.caption("👉 系統會從歷史訂單檔(模糊比對同料號)智能分析,自動帶入合併版規格。請檢查紅色疑點。")
 
-            if not st.session_state.get(applied_old_default_key, False):
-                current_factory = st.session_state.get("fpo_factory_short", "")
+            # ★ v3.9.10: needs_apply 條件 — 比舊版的單一旗標更 robust
+            #   1. 從來沒套過(applied_old_default_key=False)→ 套
+            #   2. final_key 為空(切過新料號清空後切回來)→ 重套
+            #   3. Step 3 工廠變了,且 Sandy 還沒手動編輯過 final_key → 重套(切到同工廠版本)
+            # ★ v3.9.11 加上:字首(GC/ET/EW)變了 → 也觸發重套
+            current_factory_step3 = st.session_state.get("fpo_factory_short", "")
+            already_applied = st.session_state.get(applied_old_default_key, False)
+            current_final_value = (st.session_state.get(final_key, "") or "").strip()
+            last_history_default = (st.session_state.get(history_default_key, "") or "").strip()
+            last_factory_for_default_key = f"_fpo_spec_last_factory_{idx}"
+            last_factory_for_default = st.session_state.get(last_factory_for_default_key, "__INITIAL__")
+            last_prefix_for_default_key = f"_fpo_spec_last_prefix_{idx}"  # ★ v3.9.11
+            last_prefix_for_default = st.session_state.get(last_prefix_for_default_key, "__INITIAL__")
+
+            factory_changed = (
+                last_factory_for_default != "__INITIAL__"
+                and last_factory_for_default != current_factory_step3
+            )
+            prefix_changed = (  # ★ v3.9.11
+                last_prefix_for_default != "__INITIAL__"
+                and last_prefix_for_default != current_po_prefix
+            )
+            final_unchanged_by_user = (current_final_value == last_history_default)
+
+            needs_apply = (
+                (not already_applied)                                       # 從來沒套過
+                or (not current_final_value)                                # final 為空 → 重套
+                or ((factory_changed or prefix_changed) and final_unchanged_by_user)  # 工廠/字首變且沒被改過
+            )
+
+            if needs_apply:
+                current_factory = current_factory_step3
                 
                 # ─── ★ v3.7: 智能歷史分析(模糊料號 + 行頻率分析) ─
                 from core.spec_intelligence import (
@@ -758,7 +841,31 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                     smart_spec = build_smart_spec(analysis)
                     # ★ v3.9.8: smart_spec 也保險再 normalize 一次
                     smart_spec = _normalize_spec_text(smart_spec)
-                    default_text = f"舊料號\n\n注意:\n{smart_spec}"
+
+                    # ★ v3.9.11: 雙條件排序 — 同字首+同工廠 > 同字首 > 同工廠 > 其他
+                    #   Sandy 切 GC/ET/EW 字首 + 切工廠時都會 follow
+                    def _match_score(record):
+                        score = 0
+                        rec_factory = (record.get("factory") or "").strip()
+                        rec_prefix = _po_prefix(record.get("po", ""))
+                        if current_po_prefix and rec_prefix == current_po_prefix:
+                            score += 10  # 同字首加 10
+                        if current_factory and rec_factory == current_factory:
+                            score += 5   # 同工廠加 5
+                        return (score, record.get("date") or "")
+
+                    sorted_recs = sorted(history_records, key=_match_score, reverse=True)
+                    top_score = _match_score(sorted_recs[0])[0] if sorted_recs else 0
+                    if sorted_recs and top_score > 0:
+                        # 至少有同字首 OR 同工廠 → 用該筆
+                        chosen = sorted_recs[0]
+                        chosen_spec = _normalize_spec_text(
+                            (chosen.get("spec_text") or "").strip()
+                        )
+                        default_text = f"舊料號\n\n注意:\n{chosen_spec}"
+                    else:
+                        # 沒任何匹配 → smart_spec 合併版
+                        default_text = f"舊料號\n\n注意:\n{smart_spec}"
                     
                     # ★ v3.9.9: 同時把所有歷史工廠 + 對應規格存起來,供「歷史工廠」UI 使用
                     factory_choices = []
@@ -778,6 +885,7 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                             "po": po,
                             "date": date_str,
                             "spec_text": spec,
+                            "po_prefix": _po_prefix(po),  # ★ v3.9.11
                         })
                     st.session_state[f"_fpo_factory_choices_{idx}"] = factory_choices
 
@@ -823,6 +931,7 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                                 "po": h.get("po_no", ""),
                                 "date": h.get("date", ""),
                                 "spec_text": spec,
+                                "po_prefix": _po_prefix(h.get("po_no", "")),  # ★ v3.9.11
                             })
                         st.session_state[f"_fpo_factory_choices_{idx}"] = factory_choices
 
@@ -847,6 +956,10 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                 # ★ v3.9.8: 同時保存 history_default 原版,供規格變更按鈕重組用
                 st.session_state[history_default_key] = default_text
                 st.session_state[applied_old_default_key] = True
+                # ★ v3.9.10: 記住套用 default 時的工廠,下次切工廠時偵測差異
+                st.session_state[last_factory_for_default_key] = current_factory_step3
+                # ★ v3.9.11: 記住套用 default 時的字首,下次切字首時偵測差異
+                st.session_state[last_prefix_for_default_key] = current_po_prefix
             
             # ─── 顯示 v3.7 分析結果 ─
             v37 = st.session_state.get(f"_fpo_v37_analysis_{idx}")
@@ -925,16 +1038,30 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                 expander_label = (
                     f"🏭 歷史工廠({len(ordered_choices)} 筆,可切換看不同工廠的規格,並一鍵套用)"
                 )
-                # 如果有同工廠的歷史筆數,展開預設攤開讓 Sandy 看到;
-                # 否則摺疊避免畫面太雜
-                with st.expander(expander_label, expanded=bool(same_factory)):
+                # ★ v3.9.10: 永遠預設展開,讓 Sandy 一進 Step 5 就看到歷史工廠
+                with st.expander(expander_label, expanded=True):
+                    st.caption(
+                        "💡 切 Step 3 工廠時,如果歷史有同工廠紀錄,系統會自動帶該工廠的最近一筆。"
+                        "想看不同工廠的版本就點下面對應的「⬇ 套用此筆」。"
+                    )
                     for c_idx, choice in enumerate(ordered_choices):
                         is_same = (choice.get("factory") == current_factory_step3 and current_factory_step3)
                         badge = "🟢 同工廠 " if is_same else "⚪ "
+                        # ★ v3.9.11: 字首 badge
+                        prefix_emoji = {
+                            "GC": "🟦 GC",
+                            "ET": "🟩 ET",
+                            "EW": "🟧 EW",
+                        }.get(choice.get("po_prefix", ""), "⬛ ?")
+                        # 如果這筆字首跟 Step 3 選的字首一樣,加 ★ 標記
+                        is_same_prefix = (choice.get("po_prefix", "") == current_po_prefix and current_po_prefix)
+                        prefix_star = " ★" if is_same_prefix else ""
+
                         sub_cols = st.columns([4, 1])
                         with sub_cols[0]:
                             st.markdown(
-                                f"{badge}**{choice['factory']}** | "
+                                f"{badge}{prefix_emoji}{prefix_star} | "
+                                f"**{choice['factory']}** | "
                                 f"`{choice['po']}` | {choice.get('date', '') or '(無日期)'}"
                             )
                             if choice.get("spec_text"):
@@ -963,8 +1090,8 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
             st.caption(
                 "👉 用在「舊料號但這次規格有變更」的情況,譬如 "
                 '`表面處理改 ENIG 2u"` / `改為 4 up array` / `板厚改 1.6mm`。  \n'
-                "按「⬇ 套用變更」會把變更插到最終規格頂端「舊料號」後面。  \n"
-                "**寫回 Teable 後也會更新 `spec_history.json`,下次同料號自動帶新版規格。**"
+                "**打完按 Enter 就會自動套用**(也可按右邊「⬇ 套用變更」)。  \n"
+                "寫回 Teable 後也會更新 `spec_history.json`,下次同料號自動帶新版規格。"
             )
             change_key = f"fpo_spec_change_{idx}"
             cols_chg = st.columns([4, 1])
@@ -974,22 +1101,19 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                     key=change_key,
                     placeholder='例: 表面處理改 ENIG 2u"',
                     label_visibility="collapsed",
+                    # ★ v3.9.10: 按 Enter 自動觸發 callback,不用再點按鈕
+                    on_change=_on_spec_change_apply,
+                    args=(history_default_key, change_key, final_key),
                 )
             with cols_chg[1]:
                 if st.button(
                     "⬇ 套用變更",
                     key=f"fpo_apply_change_{idx}",
-                    disabled=not (spec_change_text or "").strip(),
                     use_container_width=True,
                     type="primary",
                 ):
-                    # 從歷史 default 原版重組,避免重複按造成 double
-                    history_default = st.session_state.get(
-                        history_default_key, st.session_state.get(final_key, "")
-                    )
-                    st.session_state[final_key] = _merge_spec_with_change(
-                        history_default, spec_change_text
-                    )
+                    # 跟 callback 同樣的邏輯(備援用,有些使用者習慣點按鈕)
+                    _on_spec_change_apply(history_default_key, change_key, final_key)
                     st.rerun()
 
         else:  # 新料號
@@ -1413,6 +1537,14 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     )
     
     st.markdown(f"### Step 4-1. NRE 工程費 — `{nre_mode_label}` · 工廠貨幣 `{factory_currency}`")
+
+    # ★ v3.9.11: 換 PDF 時強制重置 NRE 為 "0"
+    # 用 (customer_po_no + po_date + 品項數) 當 sentinel,變了就清 NRE session_state
+    pdf_sentinel = f"{parsed.customer_po_no or ''}|{parsed.po_date or ''}|{len(parsed.items)}"
+    if st.session_state.get("_fpo_pdf_sentinel", None) != pdf_sentinel:
+        # 新 PDF → 清 NRE 欄位(streamlit text_input 的 widget value 殘留)
+        st.session_state["fpo_nre_amount_str"] = "0"
+        st.session_state["_fpo_pdf_sentinel"] = pdf_sentinel
     
     if nre_mode == "merge":
         st.caption(
@@ -1624,6 +1756,8 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     )
 
     item_specs = {}
+    # ★ v3.9.11: 把 Step 3 選的字首傳到每個品項的規格輸入,讓 default 按字首抓
+    current_po_prefix_for_items = display_prefix(chosen_internal)  # "GC" / "ET" / "EW"
     for idx, it in enumerate(parsed.items):
         if it.part_number in skip_nre_pns_step5:
             with st.container(border=True):
@@ -1636,7 +1770,10 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
                 st.caption(msg)
             item_specs[it.part_number] = ""
             continue
-        spec_text = render_spec_input_for_item(idx, it, orders)
+        spec_text = render_spec_input_for_item(
+            idx, it, orders,
+            current_po_prefix=current_po_prefix_for_items,  # ★ v3.9.11
+        )
         item_specs[it.part_number] = spec_text
 
     # ─── Step 6: 產出按鈕區(產 PDF / 寫回 Teable / 產 PI / 清除)─
