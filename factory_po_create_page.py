@@ -1,22 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.16。
+建立工廠 PO 頁面 v3.9.17。
 
-主要更新(v3.9.16):
-- ★ 新功能「📋 舊料號歷史工廠建議」面板:
-       PDF 上傳並 parse 完後立刻顯示,在 Step 3 之前。
-       對每個品項統計 GC/ET/EW 三個字首下的歷史工廠分佈,
-       並建議「多數歷史」的 (工廠+字首) 組合。
-       提供「✅ 一鍵套用建議」按鈕,自動 set Step 3 的工廠/發出公司/字首,
-       Sandy 不用再自己想「這個料號之前是誰做的」。
+主要更新(v3.9.17):
+- ★ 「歷史工廠」改成自動套用,不用按按鈕:
+       PDF 上傳並 parse 完後,系統自動把 Step 3 切到歷史最多的
+       工廠 + 字首 + 發出公司。同一份 PDF 只自動套一次,Sandy
+       手動切換後不會被覆蓋。
+- ★ 面板永遠顯示(就算沒歷史也顯示):
+       讓 Sandy 一眼確認「為什麼沒自動切」 — 是因為 spec_history
+       裡這個料號沒紀錄,還是其他原因。
+- ★ 新增「🔍 spec_history.json 診斷」expander:
+       顯示 spec_history.json 路徑、總料號數、查到當前品項的紀錄。
+       Sandy 可以驗證歷史檔案有沒有正確載入。
 
-【模板修補完成 v3.9.15(已部署)】
-- ✅ PDF 第二品項問題已解決:templates/PO_GLOCOM.docx 已加入
-   {%tr for item in items %}{%tr endfor %} jinja2 迴圈標籤(放在
-   不同的 <w:tr> row 裡,docxtpl 才能正確展開所有品項)。
-
-v3.9.15 變更:
-- 加「🔧 模板診斷」工具(Step 6 expander)
+v3.9.16 變更:
+- 加「📋 舊料號歷史工廠建議」面板(原本要按按鈕套用)
 
 v3.9.14 變更:
 - 產 PDF 後記錄並顯示「這份 PDF 是用哪家工廠/字首/編號產的」
@@ -1596,27 +1595,91 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             except: pass
             parsed.items[i].delivery_date = str(row["客戶交期"]).strip() or None
 
-    # ─── ★ v3.9.16: 舊料號歷史工廠建議面板 ─
-    # PDF 上傳後立刻顯示「這個料號之前是哪家工廠做的」(GC/ET/EW 三個字首分別列)
-    # 按一下「✅ 套用建議」→ 自動把 Step 3 切到該工廠+字首
+    # ─── ★ v3.9.17: 舊料號歷史工廠 — 自動套用 + 面板總是顯示 ─
     spec_history_data_for_panel = load_spec_history()
     pn_suggestions = _compute_old_pn_factory_suggestions(
         parsed.items, spec_history_data_for_panel
     )
     has_any_history = any(s["total"] > 0 for s in pn_suggestions.values())
-    if has_any_history:
-        with st.container(border=True):
-            st.markdown("##### 📋 舊料號歷史工廠建議")
-            st.caption(
-                "根據 spec_history.json 統計每個品項在 GC/ET/EW 字首下的歷史工廠分佈。"
-                "★ 表示這個 (工廠+字首) 跟 Step 3 你目前選的一致。"
-            )
+    votes = _aggregate_factory_prefix_votes(pn_suggestions)
 
-            # 取「目前選的」當對照(從 session_state 取上次 rerun 的值,可能還沒選過)
+    # PDF identity sentinel — 同一份 PDF 只自動套一次,避免 Sandy 手動切後又被覆蓋
+    auto_applied_key = "_fpo_auto_applied_factory_sentinel"
+    pdf_sentinel = (
+        f"{parsed.customer_po_no or ''}|{len(parsed.items)}|"
+        f"{parsed.items[0].part_number if parsed.items else ''}"
+    )
+
+    auto_applied_now = False  # 本次 rerun 是否剛剛自動套
+    auto_applied_combo = None  # (factory, prefix)
+    auto_applied_count = 0
+
+    if votes:
+        best, best_count = votes.most_common(1)[0]
+        best_factory, best_prefix = best
+        last_applied_for = st.session_state.get(auto_applied_key)
+        cur_factory = st.session_state.get("fpo_factory_short", "")
+        cur_prefix = st.session_state.get("fpo_prefix", "")
+
+        # 自動套用條件:
+        # 1. 沒對這份 PDF 自動套過(用 sentinel 鎖)
+        # 2. 工廠存在 factories.json
+        # 3. 當前 Step 3 不是已經選對的(避免無謂 set)
+        needs_auto = (
+            last_applied_for != pdf_sentinel
+            and best_factory in factories
+            and (cur_factory != best_factory or cur_prefix != best_prefix)
+        )
+        if needs_auto:
+            # set session_state 在 Step 3 widget render 之前,widget 會 pick up 該值
+            st.session_state["fpo_factory_short"] = best_factory
+            st.session_state["fpo_prefix"] = best_prefix
+            if best_prefix == "GC":
+                st.session_state["fpo_issuing"] = "GLOCOM"
+            elif best_prefix in ("ET", "EW"):
+                st.session_state["fpo_issuing"] = "EUSWAY"
+            st.session_state[auto_applied_key] = pdf_sentinel
+            auto_applied_now = True
+            auto_applied_combo = best
+            auto_applied_count = best_count
+
+    # ─── 面板:永遠顯示(就算沒歷史也顯示診斷訊息)
+    with st.container(border=True):
+        st.markdown("##### 📋 舊料號歷史工廠")
+
+        if not has_any_history:
+            # 沒任何歷史 → 顯示診斷訊息讓 Sandy 知道為什麼沒自動切
+            pn_list = ", ".join([f"`{it.part_number}`" for it in parsed.items])
+            st.warning(
+                f"⚠️ 在 spec_history.json 裡找不到這些料號的歷史:{pn_list}  \n"
+                f"→ 系統無法自動建議工廠。請手動在下方 Step 3 選擇。"
+            )
+        else:
+            if auto_applied_now and auto_applied_combo:
+                af, ap = auto_applied_combo
+                st.success(
+                    f"✨ **已自動切到歷史最多的工廠 + 字首** —  \n"
+                    f"工廠 **{af}** + 字首 **{ap}**(共 {auto_applied_count} 筆紀錄)"
+                )
+            elif votes:
+                best, best_count = votes.most_common(1)[0]
+                af, ap = best
+                cur_f = st.session_state.get("fpo_factory_short", "")
+                cur_p = st.session_state.get("fpo_prefix", "")
+                if cur_f == af and cur_p == ap:
+                    st.success(
+                        f"✅ Step 3 已是多數歷史的選擇:**{af}** + **{ap}**"
+                        f"(共 {best_count} 筆紀錄)"
+                    )
+                else:
+                    st.info(
+                        f"💡 多數歷史建議:**{af}** + **{ap}**(共 {best_count} 筆紀錄)  \n"
+                        f"目前 Step 3 是:**{cur_f}** + **{cur_p}**(Sandy 已手動切換,不再自動覆蓋)"
+                    )
+
+            # 細節表格:每個品項在 GC/ET/EW 三個字首下的歷史工廠分佈
             current_factory_for_panel = st.session_state.get("fpo_factory_short", "")
             current_prefix_for_panel = st.session_state.get("fpo_prefix", "")
-
-            # 表格:每個品項 × 3 個字首
             rows = []
             for pn, sug in pn_suggestions.items():
                 row = {"P/N": pn}
@@ -1624,7 +1687,6 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
                     emoji = {"GC": "🟦", "ET": "🟩", "EW": "🟧"}[prefix]
                     top_list = sug["by_prefix"][prefix].most_common(3)
                     if top_list:
-                        # 顯示前 3 名工廠跟次數
                         parts = []
                         for f, c in top_list:
                             badge = " ★" if (
@@ -1635,7 +1697,6 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
                         row[f"{emoji} {prefix}"] = " · ".join(parts)
                     else:
                         row[f"{emoji} {prefix}"] = "—"
-                # 總筆數
                 row["共"] = f"{sug['total']} 筆"
                 rows.append(row)
             st.dataframe(
@@ -1644,54 +1705,54 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
                 hide_index=True,
             )
 
-            # 投票最佳組合(所有品項的 (工廠, 字首) 票數加總)
-            votes = _aggregate_factory_prefix_votes(pn_suggestions)
-            if votes:
-                best, best_count = votes.most_common(1)[0]
-                best_factory, best_prefix = best
-                already_using = (
-                    best_factory == current_factory_for_panel
-                    and best_prefix == current_prefix_for_panel
+        # ★ v3.9.17: 診斷 expander — 顯示 spec_history.json 內容
+        with st.expander("🔍 spec_history.json 診斷(展開看載入了什麼)", expanded=False):
+            history_path = Path("data/spec_history.json")
+            alt_paths = [
+                history_path,
+                Path("/mount/src/glocom-wip-v36/data/spec_history.json"),
+                Path(__file__).parent / "data" / "spec_history.json",
+            ]
+            actual_path = next((p for p in alt_paths if p.exists()), None)
+            if actual_path:
+                file_size = actual_path.stat().st_size
+                st.caption(
+                    f"檔案路徑:`{actual_path}` · 大小:{file_size:,} bytes · "
+                    f"總料號數:{len(spec_history_data_for_panel)}"
                 )
-                if already_using:
-                    st.success(
-                        f"✅ 你目前選的「**{current_factory_for_panel}** + "
-                        f"**{current_prefix_for_panel}**」就是多數歷史的選擇"
-                        f"(共 {best_count} 筆紀錄)"
+            else:
+                st.error(
+                    f"⚠️ 找不到 spec_history.json!試過的路徑:{', '.join(str(p) for p in alt_paths)}"
+                )
+
+            for it in parsed.items:
+                pn = it.part_number
+                records = spec_history_data_for_panel.get(pn, [])
+                if records:
+                    st.write(f"**`{pn}`** — 找到 **{len(records)}** 筆紀錄")
+                    detail_rows = []
+                    for r in records:
+                        detail_rows.append({
+                            "工廠": r.get("factory", ""),
+                            "PO 編號": r.get("po", ""),
+                            "字首": _po_prefix(r.get("po", "")),
+                            "日期": r.get("date", ""),
+                            "規格首行": (r.get("spec_text") or "").split("\n", 1)[0][:60],
+                        })
+                    st.dataframe(
+                        pd.DataFrame(detail_rows),
+                        use_container_width=True,
+                        hide_index=True,
                     )
                 else:
-                    apply_cols = st.columns([3, 1])
-                    with apply_cols[0]:
-                        cur_disp = (
-                            f"**{current_factory_for_panel}** + **{current_prefix_for_panel}**"
-                            if current_factory_for_panel
-                            else "(還沒選)"
-                        )
-                        st.info(
-                            f"💡 **多數歷史建議**:工廠「**{best_factory}**」"
-                            f" + 字首「**{best_prefix}**」(共 {best_count} 筆紀錄)  \n"
-                            f"目前 Step 3 選的:{cur_disp}"
-                        )
-                    with apply_cols[1]:
-                        # 安全檢查:工廠要存在 factories.json 才能套用
-                        can_apply = best_factory in factories
-                        if not can_apply:
-                            st.caption(f"⚠️ `{best_factory}` 不在工廠清單")
-                        else:
-                            if st.button(
-                                f"✅ 套用建議",
-                                use_container_width=True,
-                                key="apply_factory_prefix_suggestion",
-                                help=f"自動切到 {best_factory} + {best_prefix}",
-                            ):
-                                st.session_state["fpo_factory_short"] = best_factory
-                                st.session_state["fpo_prefix"] = best_prefix
-                                # 順便把發出公司也設對
-                                if best_prefix == "GC":
-                                    st.session_state["fpo_issuing"] = "GLOCOM"
-                                elif best_prefix in ("ET", "EW"):
-                                    st.session_state["fpo_issuing"] = "EUSWAY"
-                                st.rerun()
+                    st.write(f"**`{pn}`** — ❌ 沒有任何歷史紀錄")
+                    # 顯示 spec_history 裡幾個料號當參考(看有沒有名稱長得像的)
+                    similar_keys = [
+                        k for k in spec_history_data_for_panel.keys()
+                        if pn[:6] in k or k[:6] in pn
+                    ][:5]
+                    if similar_keys:
+                        st.caption(f"  spec_history 裡名稱接近的料號:{', '.join(similar_keys)}")
 
     # ─── Step 3 ─
     st.markdown("### Step 3. 工廠 / 發出公司 / 字首 / 編號")
