@@ -1,16 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.13。
+建立工廠 PO 頁面 v3.9.14。
 
-主要更新(v3.9.13):
-- ★ 修「切工廠就把單價歸零」bug:
-       v3.9.12 sentinel 包含 factory_short + prefix,Sandy 在 Step 3 切工廠
-       會把剛填的單價清掉。改成 sentinel 只看 PDF identity,
-       切工廠/字首時保留 Sandy 已填的單價,只更新「💡 前批單價」提示。
-- ★ Step 4 加 debug expander:顯示每個品項在 Teable 主表的查詢結果
-       (找到幾筆 / 算出多少單價),方便確認為什麼是 0.000
-- ★ Step 6 寫回 / 產 PDF 前加品項摘要表:每個 P/N 的單價/規格摘要
-       一目了然,確保 docx 模板輸入確實有完整品項
+主要更新(v3.9.14):
+- ★ 產 PDF 後明確記錄並顯示「這份 PDF 是用哪家工廠+字首+編號產的」
+       避免 Sandy 切工廠後看 PDF 以為是新版,實際是之前那次的快取
+- ★ Step 6 加「PDF 即將使用的工廠資料」預覽 — 按產 PDF 前可確認
+- ★ Step 5 default 來源資訊改放最終規格上方,Sandy 一眼看到
+       「此規格來自:全興 / ET1140053-02 / 2025-07-30」
+
+【已知未修問題 — 需要 Sandy 配合】
+- ❗ PDF 只印一筆品項(但合計算對) → 是 templates/PO_GLOCOM.docx 的
+   {% tr for item in items %} 迴圈寫錯。Sandy 必須上傳模板給 Claude
+   才能診斷修復(用 python-docx 看 XML 才知道 tag 位置錯在哪)。
+
+v3.9.13 變更:
+- 切工廠不再把單價歸零(sentinel 簡化)
+- Step 4 / Step 6 加 debug expander
 
 v3.9.12 變更:
 - 修「規格內容重複舊料號」bug
@@ -1086,8 +1092,12 @@ def render_spec_input_for_item(
                     src_info += f" / {v37['latest_factory']}"
                 if v37.get("latest_date"):
                     src_info += f" / {v37['latest_date']}"
-                
-                st.caption(f"📌 注意事項來源:{src_info}({src_label})")
+
+                # ★ v3.9.14: 用 success 框讓來源資訊更顯眼
+                st.success(
+                    f"📌 **此規格 default 來源**:{src_info}({src_label})  \n"
+                    f"💡 切 Step 3 工廠/字首會自動用「同字首+同工廠優先」的雙條件重新抓。"
+                )
                 
                 # 統計徽章
                 total_h = v37.get("total_history", 0)
@@ -1985,6 +1995,37 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     st.divider()
     st.markdown("### Step 6. 產出 / 寫回")
     st.caption("**產 PDF** / **寫回 Teable** / **產 PI** 是分開的。建議先產 PDF 預覽 → OK 再寫回 Teable / 產 PI。")
+
+    # ★ v3.9.14: 顯示「PDF 即將使用的工廠/字首/編號」— Sandy 一眼確認
+    with st.container(border=True):
+        st.markdown("##### 📋 PDF 即將使用的設定(按下「產 PDF」會用這些值)")
+        preview_cols = st.columns(4)
+        preview_cols[0].markdown(f"**工廠**  \n`{factory_short}`")
+        preview_cols[1].markdown(f"**字首**  \n`{prefix_chosen}` / {issuing_company}")
+        preview_cols[2].markdown(f"**編號**  \n`{new_po_no}`")
+        preview_cols[3].markdown(f"**合計**  \n`{factory_data.get('default_currency', 'NT$')} {factory_total:,.2f}`")
+        # 顯示工廠基本資料(模板會用)
+        st.caption(
+            f"工廠資料:**{factory_data.get('factory_name', '(未設定)')}** | "
+            f"{factory_data.get('address', '(未設定地址)')} | "
+            f"{factory_data.get('phone', '(未設定電話)')}"
+        )
+
+    # ★ v3.9.14: 如果有上次產的 PDF 快照,且跟當前 Step 3 不同 → 顯示警告
+    last_snap = st.session_state.get("_fpo_last_pdf_snapshot")
+    if last_snap:
+        is_stale = (
+            last_snap.get("factory_short") != factory_short
+            or last_snap.get("prefix") != prefix_chosen
+            or last_snap.get("po_no") != new_po_no
+        )
+        if is_stale:
+            st.warning(
+                f"⚠️ **上次產的 PDF (`{last_snap['po_no']}`) 跟現在的設定不同** —  \n"
+                f"上次:`{last_snap['factory_short']}` / `{last_snap['prefix']}` / `{last_snap['po_no']}`  \n"
+                f"現在:`{factory_short}` / `{prefix_chosen}` / `{new_po_no}`  \n"
+                f"**要套新設定請按「📄 產 PDF」重新產一次**。"
+            )
     
     # ★ v3.9.7: PI 設定區(只在客戶是 USD 客戶時顯示)
     # 簡化:Sandy 自己決定要不要產 PI,Bank fee 可改
@@ -2162,6 +2203,30 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
             st.stop()
 
         st.success(f"✅ PDF / DOCX 已產生(訂單編號 {new_po_no})")
+
+        # ★ v3.9.14: 記錄這份 PDF 是用什麼工廠/字首產的(避免 Sandy 切工廠後看 PDF 誤以為是新版)
+        st.session_state["_fpo_last_pdf_snapshot"] = {
+            "po_no": new_po_no,
+            "factory_short": factory_short,
+            "factory_name": factory_data.get("factory_name", ""),
+            "prefix": prefix_chosen,
+            "issuing_company": issuing_company,
+            "items_count": len(po_ctx.get("items", [])),
+            "total_amount": po_ctx.get("total_amount", 0),
+            "currency": po_ctx.get("currency", "NT$"),
+        }
+
+        # 顯示 PDF 快照資訊(讓 Sandy 一眼看到 PDF 是用什麼產的)
+        snap = st.session_state["_fpo_last_pdf_snapshot"]
+        st.info(
+            f"📋 **這份 PDF 的快照** —  \n"
+            f"• 編號:**`{snap['po_no']}`**  \n"
+            f"• 工廠:**{snap['factory_short']}**({snap['factory_name']})  \n"
+            f"• 字首/發出公司:**{snap['prefix']} / {snap['issuing_company']}**  \n"
+            f"• 品項數:**{snap['items_count']}** 筆  \n"
+            f"• 合計:**{snap['currency']} {snap['total_amount']:,.2f}**\n\n"
+            f"⚠️ 之後如果切了 Step 3 工廠/字首,要再按一次「📄 產 PDF」才會用新值產。"
+        )
 
         d_cols = st.columns(2)
         if docx_path and Path(docx_path).exists():
