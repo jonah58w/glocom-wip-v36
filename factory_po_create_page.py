@@ -1,18 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.14。
+建立工廠 PO 頁面 v3.9.15。
 
-主要更新(v3.9.14):
-- ★ 產 PDF 後明確記錄並顯示「這份 PDF 是用哪家工廠+字首+編號產的」
-       避免 Sandy 切工廠後看 PDF 以為是新版,實際是之前那次的快取
-- ★ Step 6 加「PDF 即將使用的工廠資料」預覽 — 按產 PDF 前可確認
-- ★ Step 5 default 來源資訊改放最終規格上方,Sandy 一眼看到
-       「此規格來自:全興 / ET1140053-02 / 2025-07-30」
+主要更新(v3.9.15):
+- ★ 加「🔧 模板診斷」工具:Step 6 多一個 expander,Sandy 可以
+       一鍵下載 templates/PO_GLOCOM.docx + 看模板的 table/row/cell 結構
+       這樣 Claude 不用 Sandy 從 GitHub 找檔案就能拿到模板修迴圈 bug
 
-【已知未修問題 — 需要 Sandy 配合】
-- ❗ PDF 只印一筆品項(但合計算對) → 是 templates/PO_GLOCOM.docx 的
-   {% tr for item in items %} 迴圈寫錯。Sandy 必須上傳模板給 Claude
-   才能診斷修復(用 python-docx 看 XML 才知道 tag 位置錯在哪)。
+【已知未修問題 — 仍待 Sandy 操作】
+- ❗ PDF 只印一筆品項(但程式有送 2 筆) → 是 docx 模板 jinja2 迴圈問題
+   v3.9.13 的「items list 共 2 個品項」expander 已證實程式邏輯沒錯
+   v3.9.15 加一鍵下載按鈕 → 請點按鈕下載模板上傳給 Claude
+
+v3.9.14 變更:
+- 產 PDF 後記錄並顯示「這份 PDF 是用哪家工廠/字首/編號產的」
+- Step 6 加「PDF 即將使用的工廠資料」預覽
+- Step 5 default 來源資訊改放最終規格上方
 
 v3.9.13 變更:
 - 切工廠不再把單價歸零(sentinel 簡化)
@@ -1995,6 +1998,118 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
     st.divider()
     st.markdown("### Step 6. 產出 / 寫回")
     st.caption("**產 PDF** / **寫回 Teable** / **產 PI** 是分開的。建議先產 PDF 預覽 → OK 再寫回 Teable / 產 PI。")
+
+    # ★ v3.9.15: 模板診斷工具 — 為了 debug PDF 第二品項被吞 bug
+    with st.expander(
+        "🔧 PO_GLOCOM.docx 模板診斷工具(展開後可下載模板給 Claude 看)",
+        expanded=False,
+    ):
+        st.warning(
+            "**❗ PDF 只印一筆品項 bug 必看** — 程式已經送 2 筆品項給模板"
+            "(看上面「產 PDF 前確認」expander 證實),但 docx 模板 jinja2 迴圈寫錯,"
+            "只展開了第一筆。這個 bug 必須修模板,**請按下面按鈕下載模板給 Claude**。"
+        )
+
+        # 找 docx 模板路徑
+        template_paths_to_try = [
+            Path("templates/PO_GLOCOM.docx"),
+            Path("/mount/src/glocom-wip-v36/templates/PO_GLOCOM.docx"),  # Streamlit Cloud
+            Path(__file__).parent / "templates" / "PO_GLOCOM.docx",
+        ]
+        template_path = None
+        for p in template_paths_to_try:
+            if p.exists():
+                template_path = p
+                break
+
+        if not template_path:
+            st.error(
+                "⚠️ 找不到 templates/PO_GLOCOM.docx。"
+                "請從 GitHub 下載 → "
+                "https://github.com/jonah58w/glocom-wip-v36/raw/main/templates/PO_GLOCOM.docx"
+            )
+        else:
+            st.caption(f"找到模板:`{template_path}`")
+            cols_diag = st.columns(2)
+            with cols_diag[0]:
+                # 一鍵下載當前 Streamlit Cloud 上跑的 docx 模板
+                try:
+                    with open(template_path, "rb") as f:
+                        st.download_button(
+                            "📥 下載 PO_GLOCOM.docx 給 Claude 看",
+                            f.read(),
+                            file_name="PO_GLOCOM.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True,
+                            type="primary",
+                            key="dl_template_for_claude",
+                        )
+                except Exception as e:
+                    st.error(f"讀模板失敗:{e}")
+
+            with cols_diag[1]:
+                show_structure = st.button(
+                    "🔍 顯示模板結構(table/row/cell)",
+                    use_container_width=True,
+                    key="show_template_structure",
+                )
+
+            if show_structure:
+                try:
+                    from docx import Document
+                except ImportError:
+                    st.error("python-docx 未安裝")
+                else:
+                    try:
+                        doc = Document(str(template_path))
+                        st.write(f"**Tables 數**: {len(doc.tables)}")
+                        diag_lines = [f"# Template: {template_path}"]
+                        diag_lines.append(f"Tables: {len(doc.tables)}\n")
+
+                        for t_idx, table in enumerate(doc.tables):
+                            diag_lines.append(
+                                f"\n## Table {t_idx} — "
+                                f"{len(table.rows)} rows × {len(table.columns)} cols"
+                            )
+                            for r_idx, row in enumerate(table.rows):
+                                row_height = ""
+                                try:
+                                    if row.height:
+                                        row_height = f" (height: {row.height})"
+                                except Exception:
+                                    pass
+                                diag_lines.append(f"\n  ### Row {r_idx}{row_height}")
+                                for c_idx, cell in enumerate(row.cells):
+                                    cell_text = cell.text
+                                    diag_lines.append(
+                                        f"    Cell {c_idx}: {repr(cell_text[:300])}"
+                                    )
+                                    # 偵測 jinja2 tag
+                                    if "{%" in cell_text or "{{" in cell_text:
+                                        tags = []
+                                        if "{%tr for" in cell_text or "{% tr for" in cell_text:
+                                            tags.append("✅ 有 tr-for")
+                                        if "{%tr endfor" in cell_text or "{% tr endfor" in cell_text:
+                                            tags.append("✅ 有 tr-endfor")
+                                        if "{% for item" in cell_text and "{%tr" not in cell_text and "{% tr" not in cell_text:
+                                            tags.append("⚠️ 用了 {% for %} 但沒 tr 前綴!")
+                                        if "{{ item." in cell_text or "{{item." in cell_text:
+                                            tags.append("📦 含 item placeholder")
+                                        if tags:
+                                            diag_lines.append(f"      → {' | '.join(tags)}")
+
+                        text_output = "\n".join(diag_lines)
+                        st.code(text_output, language="text")
+                        st.download_button(
+                            "💾 下載診斷報告 (.txt)",
+                            text_output,
+                            file_name="po_glocom_template_diagnostic.txt",
+                            key="dl_diag_report",
+                        )
+                    except Exception as e:
+                        st.error(f"診斷失敗:{e}")
+                        with st.expander("詳細錯誤"):
+                            st.code(traceback.format_exc())
 
     # ★ v3.9.14: 顯示「PDF 即將使用的工廠/字首/編號」— Sandy 一眼確認
     with st.container(border=True):
