@@ -1,0 +1,1970 @@
+{
+  "_meta": {
+    "source": "113~114 年舊訂單 RTF/DOCX",
+    "total_files": 108,
+    "parsed_files": 99,
+    "unique_part_numbers": 82,
+    "total_records": 137,
+    "factory_distribution": {
+      "全興": 56,
+      "優技": 12,
+      "宏棋": 43,
+      "柏承": 5,
+      "星晨": 12,
+      "百為": 5,
+      "雙銘": 1,
+      "龍偉": 3
+    },
+    "prefix_distribution": {
+      "ET": 45,
+      "G": 92
+    },
+    "errors": [],
+    "skipped_ew_files": 9
+  },
+  "110-1175-900C_B851": [
+    {
+      "po_no": "ET1130137-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-12-10",
+      "spec_text": "舊料號; 1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "400pcs",
+      "unit_price": "130.00",
+      "subtotal": "52000.00",
+      "delivery": "APR. 7, 2025",
+      "source_file": "ET1130137-01__全興_.rtf"
+    },
+    {
+      "po_no": "ET1130091-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-08-19",
+      "spec_text": "舊料號; 1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "400pcs",
+      "unit_price": "130.00",
+      "subtotal": "52000.00",
+      "delivery": "OCT. 9, 2024",
+      "source_file": "ET1130091-01__全興_.rtf"
+    }
+  ],
+  "110-2018-001J_B826": [
+    {
+      "po_no": "ET1130118-02",
+      "prefix": "ET",
+      "factory": "優技",
+      "factory_full": "優技電子股份有限公司",
+      "date": "2024-10-24",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "1200pcs",
+      "unit_price": "245.000",
+      "subtotal": "294000.00",
+      "delivery": "JAN. 20, 2025\n交期儘早!",
+      "source_file": "ET1130118-02__優技_.rtf"
+    },
+    {
+      "po_no": "ET1130108-01",
+      "prefix": "ET",
+      "factory": "優技",
+      "factory_full": "優技電子股份有限公司",
+      "date": "2024-09-25",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "500pcs",
+      "unit_price": "245.000",
+      "subtotal": "122500.00",
+      "delivery": "OCT. 18, 2024",
+      "source_file": "ET1130108-01__優技_.rtf"
+    },
+    {
+      "po_no": "ET1130101-02",
+      "prefix": "ET",
+      "factory": "優技",
+      "factory_full": "優技電子股份有限公司",
+      "date": "2024-09-13",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "1,000pcs",
+      "unit_price": "245.000",
+      "subtotal": "245000.00",
+      "delivery": "Oct. 8, 2024",
+      "source_file": "ET1130101-02__優技_.rtf"
+    },
+    {
+      "po_no": "ET1130091-02",
+      "prefix": "ET",
+      "factory": "優技",
+      "factory_full": "優技電子股份有限公司",
+      "date": "2024-08-19",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "600pcs",
+      "unit_price": "245.000",
+      "subtotal": "147000.00",
+      "delivery": "NOV. 6, 2024",
+      "source_file": "ET1130091-02__優技_.rtf"
+    }
+  ],
+  "110-1216-002J_B310": [
+    {
+      "po_no": "ET1130118-03",
+      "prefix": "ET",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-10-24",
+      "spec_text": "舊料號；5up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 銅厚要求，務必以客戶規格要求製作!\n3. 板子不可有MADE IN USA\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "2,250pcs\n(450panels)",
+      "unit_price": "43.00",
+      "subtotal": "96750.00",
+      "delivery": "OCT. 2, 2024",
+      "source_file": "ET1130118-03__宏棋_.rtf"
+    },
+    {
+      "po_no": "ET1130101-01",
+      "prefix": "ET",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-09-13",
+      "spec_text": "舊料號；5up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 銅厚要求，務必以客戶規格要求製作!\n3. 板子不可有MADE IN USA\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "2,250pcs\n(450panels)",
+      "unit_price": "43.00",
+      "subtotal": "96750.00",
+      "delivery": "OCT. 2, 2024",
+      "source_file": "ET1130101-01__宏棋_.rtf"
+    },
+    {
+      "po_no": "ET1130091-03",
+      "prefix": "ET",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-08-19",
+      "spec_text": "舊料號；5up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 銅厚要求，務必以客戶規格要求製作!\n3. 板子不可有MADE IN USA\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "1,200pcs\n(240panels)",
+      "unit_price": "43.00",
+      "subtotal": "51600.00",
+      "delivery": "DEC. 11, 2024",
+      "source_file": "ET1130091-03__宏棋_.rtf"
+    }
+  ],
+  "BRS600-0-0-NN-02": [
+    {
+      "po_no": "ET1130103-01",
+      "prefix": "ET",
+      "factory": "柏承",
+      "factory_full": "柏承科技股份有限公司",
+      "date": "2024-09-18",
+      "spec_text": "舊料號: 10up",
+      "quantity": "2,000pcs\n(200panels)",
+      "unit_price": "48.500",
+      "subtotal": "97000.00",
+      "delivery": "OCT. 9, 2024\nor sooner!",
+      "source_file": "ET1130103-01.rtf"
+    },
+    {
+      "po_no": "ET1130094-01",
+      "prefix": "ET",
+      "factory": "柏承",
+      "factory_full": "柏承科技股份有限公司",
+      "date": "2024-08-20",
+      "spec_text": "舊料號: 10up",
+      "quantity": "2,000pcs\n(200panels)",
+      "unit_price": "48.500",
+      "subtotal": "97000.00",
+      "delivery": "SEP. 6, 2024",
+      "source_file": "ET1130094-01.rtf"
+    }
+  ],
+  "10100078 Rev B": [
+    {
+      "po_no": "ET1130096-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-08-22",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "400pcs",
+      "unit_price": "180.00",
+      "subtotal": "72000.00",
+      "delivery": "SEP. 6, 2024",
+      "source_file": "ET1130096-01.rtf"
+    }
+  ],
+  "111-0302-00A_C128": [
+    {
+      "po_no": "ET1130118-02",
+      "prefix": "ET",
+      "factory": "優技",
+      "factory_full": "優技電子股份有限公司",
+      "date": "2024-10-24",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "500pcs",
+      "unit_price": "133.000",
+      "subtotal": "66500.00",
+      "delivery": "NOV. 20, 2024\n交期儘早!",
+      "source_file": "ET1130118-02__優技_.rtf"
+    },
+    {
+      "po_no": "ET1130097-01",
+      "prefix": "ET",
+      "factory": "優技",
+      "factory_full": "優技電子股份有限公司",
+      "date": "2024-08-27",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "500pcs",
+      "unit_price": "133.000",
+      "subtotal": "66500.00",
+      "delivery": "SEP. 23, 2024",
+      "source_file": "ET1130097-01__優技_.rtf"
+    }
+  ],
+  "110-0217-902A_C019": [
+    {
+      "po_no": "ET1140012-01",
+      "prefix": "ET",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2025-02-13",
+      "spec_text": "舊料號；2up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "400pcs\n(200panels)",
+      "unit_price": "133.00",
+      "subtotal": "53200.00",
+      "delivery": "APR. 1, 2025",
+      "source_file": "ET1140012-01__宏棋_.rtf"
+    },
+    {
+      "po_no": "ET1130101-01",
+      "prefix": "ET",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-09-13",
+      "spec_text": "舊料號；2up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "400pcs\n(200panels)",
+      "unit_price": "133.00",
+      "subtotal": "53200.00",
+      "delivery": "OCT. 2, 2024",
+      "source_file": "ET1130101-01__宏棋_.rtf"
+    },
+    {
+      "po_no": "ET1130098-01",
+      "prefix": "ET",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-09-04",
+      "spec_text": "舊料號；2up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "400pcs\n(200panels)",
+      "unit_price": "133.00",
+      "subtotal": "53200.00",
+      "delivery": "DEC. 9, 2024",
+      "source_file": "ET1130098-01__宏棋_.rtf"
+    }
+  ],
+  "110-0244-001A_B939": [
+    {
+      "po_no": "ET1130118-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-10-24",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "2,400pcs",
+      "unit_price": "116.00",
+      "subtotal": "278400.00",
+      "delivery": "DEC. 16, 2024",
+      "source_file": "ET1130118-01__全興_.rtf"
+    },
+    {
+      "po_no": "ET1130100-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-09-09",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "1,200pcs",
+      "unit_price": "116.00",
+      "subtotal": "139200.00",
+      "delivery": "DEC. 2, 2024",
+      "source_file": "ET1130100-01__全興_.rtf"
+    }
+  ],
+  "111-5035-02A _C115": [
+    {
+      "po_no": "ET1130120-01",
+      "prefix": "ET",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-11-04",
+      "spec_text": "舊料號: 1up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "100pcs",
+      "unit_price": "116.000",
+      "subtotal": "11600.00",
+      "delivery": "NOV. 18, 2024",
+      "source_file": "ET1130120-01__宏棋_.rtf"
+    },
+    {
+      "po_no": "ET1130100-02",
+      "prefix": "ET",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-09-09",
+      "spec_text": "舊料號: 1up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "100pcs",
+      "unit_price": "116.000",
+      "subtotal": "11600.00",
+      "delivery": "SEP. 20, 2024",
+      "source_file": "ET1130100-02__宏棋_.rtf"
+    }
+  ],
+  "440-3823-00": [
+    {
+      "po_no": "ET1130101-03",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-09-13",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. 須添加可剝膠!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "200pcs",
+      "unit_price": "380.00",
+      "subtotal": "76000.00",
+      "delivery": "OCT. 2, 2024",
+      "source_file": "ET1130101-03__全興_.rtf"
+    }
+  ],
+  "442-0901-02": [
+    {
+      "po_no": "ET1130118-03",
+      "prefix": "ET",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-10-24",
+      "spec_text": "舊料號；4up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "100pcs\n(25panels)",
+      "unit_price": "一組",
+      "subtotal": "13000.00",
+      "delivery": "NOV. 13, 2024",
+      "source_file": "ET1130118-03__宏棋_.rtf"
+    },
+    {
+      "po_no": "ET1130102-01",
+      "prefix": "ET",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-09-18",
+      "spec_text": "舊料號；4up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "100pcs\n(25panels)",
+      "unit_price": "一組",
+      "subtotal": "13000.00",
+      "delivery": "SEP. 26, 2024",
+      "source_file": "ET1130102-01__宏棋_.rtf"
+    }
+  ],
+  "BCE600-0-0-NN-02": [
+    {
+      "po_no": "ET1130130-01",
+      "prefix": "ET",
+      "factory": "柏承",
+      "factory_full": "柏承科技股份有限公司",
+      "date": "2024-12-03",
+      "spec_text": "舊料號；4up\n注意：\n1. 須注意郵票孔內漆!\n2. 曾發生一片板子, BGA pads 無法上錫, 須注意出貨品質!\n3. 同上批, 片與片之間開槽, 需加2個breakoff tabs",
+      "quantity": "2,000pcs\n(500panels)",
+      "unit_price": "187.000",
+      "subtotal": "374000.00",
+      "delivery": "DEC. 31, 2024\nor sooner!",
+      "source_file": "ET1130130-01.rtf"
+    },
+    {
+      "po_no": "ET1130103-01",
+      "prefix": "ET",
+      "factory": "柏承",
+      "factory_full": "柏承科技股份有限公司",
+      "date": "2024-09-18",
+      "spec_text": "舊料號；4up\n注意：\n1. 須注意郵票孔內漆!\n2. 曾發生一片板子, BGA pads 無法上錫, 須注意出貨品質!\n3. 同上批, 片與片之間開槽, 需加2個breakoff tabs",
+      "quantity": "2,000pcs\n(500panels)",
+      "unit_price": "187.000",
+      "subtotal": "374000.00",
+      "delivery": "OCT. 9, 2024\nor sooner!",
+      "source_file": "ET1130103-01.rtf"
+    }
+  ],
+  "110-0211E_B702": [
+    {
+      "po_no": "ET1130132-01",
+      "prefix": "ET",
+      "factory": "優技",
+      "factory_full": "優技電子股份有限公司",
+      "date": "2024-12-16",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "1,000pcs",
+      "unit_price": "122.000",
+      "subtotal": "122000.00",
+      "delivery": "JAN. 9, 2025\nor sooner!",
+      "source_file": "ET1130132-01__優技_.rtf"
+    },
+    {
+      "po_no": "ET1130104-01",
+      "prefix": "ET",
+      "factory": "優技",
+      "factory_full": "優技電子股份有限公司",
+      "date": "2024-09-19",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "2,000pcs",
+      "unit_price": "118.000",
+      "subtotal": "236000.00",
+      "delivery": "OCT. 16, 2024\nOr sooner!",
+      "source_file": "ET1130104-01__優技_.rtf"
+    }
+  ],
+  "110-2018-002A_A705": [
+    {
+      "po_no": "ET1130132-01",
+      "prefix": "ET",
+      "factory": "優技",
+      "factory_full": "優技電子股份有限公司",
+      "date": "2024-12-16",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "600pcs",
+      "unit_price": "110.000",
+      "subtotal": "66000.00",
+      "delivery": "JAN. 9, 2025\nor sooner!",
+      "source_file": "ET1130132-01__優技_.rtf"
+    },
+    {
+      "po_no": "ET1130109-01",
+      "prefix": "ET",
+      "factory": "優技",
+      "factory_full": "優技電子股份有限公司",
+      "date": "2024-10-04",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "300pcs",
+      "unit_price": "106.000",
+      "subtotal": "31800.00",
+      "delivery": "OCT. 30, 2024\nor sooner!",
+      "source_file": "ET1130109-01__優技_.rtf"
+    }
+  ],
+  "PCBJEA02000": [
+    {
+      "po_no": "ET1130110-01",
+      "prefix": "ET",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-10-04",
+      "spec_text": "舊料號；4up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定\n有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "1,400pcs\n(350panels)\n\n\n1,200pcs\n(300panels)",
+      "unit_price": "31.00\n\n\n\n31.00",
+      "subtotal": "43400.00\n\n\n\n37200.00",
+      "delivery": "NOV. 18, 2024\n\n\n\nMAY. 26, 2025",
+      "source_file": "ET1130110-01__宏棋_.rtf"
+    }
+  ],
+  "150-14500 REV A": [
+    {
+      "po_no": "ET1130111-01",
+      "prefix": "ET",
+      "factory": "星晨",
+      "factory_full": "星晨電路股份有限公司",
+      "date": "2024-10-04",
+      "spec_text": "舊料號:8up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "1,000pcs\n(125panels)",
+      "unit_price": "17.90",
+      "subtotal": "17900.00",
+      "delivery": "NOV. 4, 2024",
+      "source_file": "ET1130111-01_星晨.rtf"
+    }
+  ],
+  "DTA-2115 Rev 5.0": [
+    {
+      "po_no": "ET1130113-01",
+      "prefix": "ET",
+      "factory": "柏承",
+      "factory_full": "柏承科技股份有限公司",
+      "date": "2024-10-08",
+      "spec_text": "舊料號；1up\n若出庫存板，Date code必須在規定有效期內",
+      "quantity": "250pcs",
+      "unit_price": "530.00",
+      "subtotal": "132500.00",
+      "delivery": "JAN. 6, 2025",
+      "source_file": "ET1130113-01.rtf"
+    }
+  ],
+  "ATP3 Rev G (0800ATP3G-Blue)": [
+    {
+      "po_no": "ET1130114-01",
+      "prefix": "ET",
+      "factory": "優技",
+      "factory_full": "優技電子股份有限公司",
+      "date": "2024-10-22",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n(注意防焊為: Blue)\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "500pcs",
+      "unit_price": "211.000",
+      "subtotal": "105500.00",
+      "delivery": "NOV. 20, 2024\nor sooner!\n交期儘早",
+      "source_file": "ET1130114-01.rtf"
+    }
+  ],
+  "440-0802-01": [
+    {
+      "po_no": "ET1130116-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-10-23",
+      "spec_text": "舊料號；15up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "1,005pcs\n(67panels)",
+      "unit_price": "15.60",
+      "subtotal": "15678.00",
+      "delivery": "NOV. 6, 2024",
+      "source_file": "ET1130116-01__全興_.rtf"
+    }
+  ],
+  "110-2217-900C_B923": [
+    {
+      "po_no": "ET1130118-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-10-24",
+      "spec_text": "舊料號; 1up, 但須添加乾燥劑與濕度指示卡\n1. S/M請用深綠色(dark green)，不可假性露銅，\n並注意出貨板彎翹!\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "250pcs",
+      "unit_price": "88.55",
+      "subtotal": "22137.50",
+      "delivery": "NOV. 13, 2024",
+      "source_file": "ET1130118-01__全興_.rtf"
+    }
+  ],
+  "111-5004-04A_C034": [
+    {
+      "po_no": "ET1130118-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-10-24",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "150pcs",
+      "unit_price": "70.00",
+      "subtotal": "10500.00",
+      "delivery": "NOV. 13, 2024",
+      "source_file": "ET1130118-01__全興_.rtf"
+    }
+  ],
+  "440-2001-02": [
+    {
+      "po_no": "ET1130118-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-10-24",
+      "spec_text": "舊料號；6up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "402pcs\n(67panels)",
+      "unit_price": "65.00",
+      "subtotal": "26130.00",
+      "delivery": "NOV. 13, 2024",
+      "source_file": "ET1130118-01__全興_.rtf"
+    }
+  ],
+  "TS-Moba Dist_3.1 Rev A": [
+    {
+      "po_no": "ET1130124-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-11-18",
+      "spec_text": "舊料號; 1up, 請依附件版本製作, 應與目前相同,\n請先傳工作檔承認再製作, thanks!\n注意:\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "235pcs",
+      "unit_price": "215.00",
+      "subtotal": "50525.00",
+      "delivery": "DEC. 4, 2024\nor sooner!",
+      "source_file": "ET1130124-01.rtf"
+    }
+  ],
+  "TS-Moba CPU_3.1 Rev A": [
+    {
+      "po_no": "ET1130124-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-11-18",
+      "spec_text": "舊料號; 1up, 請依附件版本製作, 應與目前相同,\n請先傳工作檔承認再製作, thanks!\n注意:\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "302pcs",
+      "unit_price": "145.00",
+      "subtotal": "43790.00",
+      "delivery": "DEC. 4, 2024\nor sooner!",
+      "source_file": "ET1130124-01.rtf"
+    }
+  ],
+  "160-00035 Rev C": [
+    {
+      "po_no": "ET1140019-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2025-03-14",
+      "spec_text": "舊料號: 6up, 但須工作檔承認後才可生產!\n注意:\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "10,008pcs\n(1668panels)",
+      "unit_price": "11.60",
+      "subtotal": "116092.80",
+      "delivery": "APR. 14, 2025",
+      "source_file": "ET1140019-01__全興_.rtf"
+    },
+    {
+      "po_no": "ET1130125-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-11-20",
+      "spec_text": "舊料號: 6up, 但須工作檔承認後才可生產!\n注意:\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "5,004pcs\n(834panels)",
+      "unit_price": "12.880",
+      "subtotal": "64451.52",
+      "delivery": "DEC. 9, 2024",
+      "source_file": "ET1130125-01__全興_.rtf"
+    }
+  ],
+  "PCBWOO005000": [
+    {
+      "po_no": "ET1130131-01",
+      "prefix": "ET",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-12-13",
+      "spec_text": "舊料號；8up, 但須添加乾燥劑與濕度指示卡\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內\n3. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "6,000pcs\n(750panels)",
+      "unit_price": "11.20",
+      "subtotal": "67200.00",
+      "delivery": "JAN. 2, 2025",
+      "source_file": "ET1130131-01.rtf"
+    }
+  ],
+  "701471-BB": [
+    {
+      "po_no": "ET1130133-01",
+      "prefix": "ET",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-12-17",
+      "spec_text": "舊料號；8up, 但須添加乾燥劑與濕度指示卡\n1. 曾發生品質異常, 請注意\n2. 板子不可有MADE IN USA\n3. 若出庫存板，Date code必須在規定有效期內\n4. PCB須添加乾燥劑與濕度指示卡",
+      "quantity": "504pcs\n(63panels)",
+      "unit_price": "19.00",
+      "subtotal": "9576.00",
+      "delivery": "JAN. 2, 2025",
+      "source_file": "ET1130133-01.rtf"
+    }
+  ],
+  "F41100031V101_26V100": [
+    {
+      "po_no": "G1130129-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-11-29",
+      "spec_text": "舊料號；1up\n(Only New Date Code;不收庫存板!)\n注意：\n1. 真空包裝10panels一包\n2. No X-outs",
+      "quantity": "50panels",
+      "unit_price": "460.000",
+      "subtotal": "23000.00",
+      "delivery": "DEC. 16, 2024",
+      "source_file": "G1130129-01.rtf"
+    },
+    {
+      "po_no": "G1130090-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-08-15",
+      "spec_text": "舊料號；1up\n(Only New Date Code;不收庫存板!)\n注意：\n1. 真空包裝10panels一包\n2. No X-outs",
+      "quantity": "50panels",
+      "unit_price": "460.000",
+      "subtotal": "23000.00",
+      "delivery": "SEP. 4, 2024\n or sooner!",
+      "source_file": "G1130090-02.rtf"
+    },
+    {
+      "po_no": "G1130045-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-04-30",
+      "spec_text": "舊料號；1up\n(Only New Date Code;不收庫存板!)\n注意：\n1. 真空包裝10panels一包\n2. No X-outs",
+      "quantity": "50panels",
+      "unit_price": "460.000",
+      "subtotal": "23000.00",
+      "delivery": "MAY. 16, 2024\n or sooner!",
+      "source_file": "G1130045-01.rtf"
+    },
+    {
+      "po_no": "G1130001-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-01-03",
+      "spec_text": "舊料號；1up\n(Only New Date Code;不收庫存板!)\n注意：\n1. 真空包裝10panels一包\n2. No X-outs",
+      "quantity": "50panels",
+      "unit_price": "460.000",
+      "subtotal": "23000.00",
+      "delivery": "JAN. 19, 2024",
+      "source_file": "G1130001-01.rtf"
+    }
+  ],
+  "9-725-9002-000": [
+    {
+      "po_no": "G1130015-01",
+      "prefix": "G",
+      "factory": "星晨",
+      "factory_full": "星晨電路股份有限公司",
+      "date": "2024-02-16",
+      "spec_text": "舊料號；6up\n(No X-outs)",
+      "quantity": "204pcs\n(34panels)",
+      "unit_price": "75.00",
+      "subtotal": "15300.00",
+      "delivery": "Mar. 5, 2024\nor sooner!",
+      "source_file": "G1130015-01.rtf"
+    },
+    {
+      "po_no": "G1130006-01",
+      "prefix": "G",
+      "factory": "星晨",
+      "factory_full": "星晨電路股份有限公司",
+      "date": "2024-01-18",
+      "spec_text": "舊料號；6up\n(No X-outs)",
+      "quantity": "366pcs\n(61panels)",
+      "unit_price": "75.00",
+      "subtotal": "27450.00",
+      "delivery": "Feb. 6, 2024\nor sooner!",
+      "source_file": "G1130006-01.rtf"
+    }
+  ],
+  "9-725-9009-000": [
+    {
+      "po_no": "G1130135-01",
+      "prefix": "G",
+      "factory": "星晨",
+      "factory_full": "星晨電路股份有限公司",
+      "date": "2024-12-24",
+      "spec_text": "舊料號；2up\n(NO X-outs)\n注意品質，尤其D/F顯影不潔與內層線細造成Open via's的問題\n(板子不可有MADE IN USA ! )",
+      "quantity": "46pcs\n(23panels)",
+      "unit_price": "194.00\n(清庫存)",
+      "subtotal": "8924.00",
+      "delivery": "Jan. 2, 2025",
+      "source_file": "G1130135-01.rtf"
+    },
+    {
+      "po_no": "G1130006-01",
+      "prefix": "G",
+      "factory": "星晨",
+      "factory_full": "星晨電路股份有限公司",
+      "date": "2024-01-18",
+      "spec_text": "舊料號；2up\n(NO X-outs)\n注意品質，尤其D/F顯影不潔與內層線細造成Open via's的問題\n(板子不可有MADE IN USA ! )",
+      "quantity": "1,018pcs\n(509panels)",
+      "unit_price": "194.00",
+      "subtotal": "197492.00",
+      "delivery": "Feb. 6, 2024\nor sooner!",
+      "source_file": "G1130006-01.rtf"
+    }
+  ],
+  "31_50_203": [
+    {
+      "po_no": "G1130016-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-02-19",
+      "spec_text": "舊料號1up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層",
+      "quantity": "350pcs",
+      "unit_price": "260.00",
+      "subtotal": "91000.00",
+      "delivery": "MAR. 5, 2024",
+      "source_file": "G1130016-01.rtf"
+    },
+    {
+      "po_no": "G1130010-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-01-29",
+      "spec_text": "舊料號1up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層",
+      "quantity": "350pcs",
+      "unit_price": "260.00",
+      "subtotal": "91000.00",
+      "delivery": "FEB. 19, 2024\nor sooner!",
+      "source_file": "G1130010-01.rtf"
+    }
+  ],
+  "00013315 V1.0": [
+    {
+      "po_no": "G1130011-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-01-29",
+      "spec_text": "舊料號: 1up\n注意：\n1. 真空包裝10panels一包",
+      "quantity": "200pcs",
+      "unit_price": "77.00",
+      "subtotal": "15400.00",
+      "delivery": "FEB. 19, 2024\nor sooner!",
+      "source_file": "G1130011-01.rtf"
+    }
+  ],
+  "F41140082V110": [
+    {
+      "po_no": "G1130123-01",
+      "prefix": "G",
+      "factory": "百為",
+      "factory_full": "百為實業有限公司",
+      "date": "2024-11-15",
+      "spec_text": "舊料號；1up\n(Only New Date Code, 不收庫存板!)\n注意：\n1. 曾發生DATE CODE異常\n2. 真空包裝10panels一包",
+      "quantity": "50pcs",
+      "unit_price": "335.00",
+      "subtotal": "16750.00",
+      "delivery": "NOV. 27, 2024\n or sooner!\n(須與其他料號併\n貨,交期請儘早!)",
+      "source_file": "G1130123-01.rtf"
+    },
+    {
+      "po_no": "G1130045-02",
+      "prefix": "G",
+      "factory": "百為",
+      "factory_full": "百為實業有限公司",
+      "date": "2024-04-30",
+      "spec_text": "舊料號；1up\n(Only New Date Code, 不收庫存板!)\n注意：\n1. 曾發生DATE CODE異常\n2. 真空包裝10panels一包",
+      "quantity": "50pcs",
+      "unit_price": "335.00",
+      "subtotal": "16750.00",
+      "delivery": "MAY. 16, 2024\n or sooner!",
+      "source_file": "G1130045-02.rtf"
+    },
+    {
+      "po_no": "G1130012-01",
+      "prefix": "G",
+      "factory": "百為",
+      "factory_full": "百為實業有限公司",
+      "date": "2024-02-05",
+      "spec_text": "舊料號；1up\n(Only New Date Code, 不收庫存板!)\n注意：\n1. 曾發生DATE CODE異常\n2. 真空包裝10panels一包",
+      "quantity": "50pcs",
+      "unit_price": "335.00",
+      "subtotal": "16750.00",
+      "delivery": "FEB. 26, 2024",
+      "source_file": "G1130012-01.rtf"
+    }
+  ],
+  "21_47_501": [
+    {
+      "po_no": "G1130014-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-02-16",
+      "spec_text": "舊料號5up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "500pc\n(100panels)",
+      "unit_price": "39.00",
+      "subtotal": "19500.00",
+      "delivery": "MAR. 5,2024\nor sooner!",
+      "source_file": "G1130014-01.rtf"
+    }
+  ],
+  "28_35_702": [
+    {
+      "po_no": "G1130127-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-11-20",
+      "spec_text": "舊料號10up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "2,000pcs\n(200panels)",
+      "unit_price": "32.00",
+      "subtotal": "64000.00",
+      "delivery": "DEC. 6, 2024",
+      "source_file": "G1130127-01.rtf"
+    },
+    {
+      "po_no": "G1130106-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-09-20",
+      "spec_text": "舊料號10up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "2,000pcs\n(200panels)",
+      "unit_price": "32.00",
+      "subtotal": "64000.00",
+      "delivery": "OCT. 7, 2024",
+      "source_file": "G1130106-01.rtf"
+    },
+    {
+      "po_no": "G1130065-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-06-21",
+      "spec_text": "舊料號10up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "2,000pcs\n(200panels)",
+      "unit_price": "32.00",
+      "subtotal": "64000.00",
+      "delivery": "JUL. 10, 2024",
+      "source_file": "G1130065-01.rtf"
+    },
+    {
+      "po_no": "G1130016-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-02-19",
+      "spec_text": "舊料號10up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "2,000pcs\n(200panels)",
+      "unit_price": "32.00",
+      "subtotal": "64000.00",
+      "delivery": "MAR. 5, 2024",
+      "source_file": "G1130016-01.rtf"
+    }
+  ],
+  "27_14_804": [
+    {
+      "po_no": "G1130127-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-11-20",
+      "spec_text": "舊料號4up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,000pcs\n(250panels)",
+      "unit_price": "76.320",
+      "subtotal": "76320.00",
+      "delivery": "DEC. 6, 2024",
+      "source_file": "G1130127-01.rtf"
+    },
+    {
+      "po_no": "G1130119-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-10-30",
+      "spec_text": "舊料號4up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,000pcs\n(250panels)",
+      "unit_price": "76.320",
+      "subtotal": "76320.00",
+      "delivery": "NOV. 18, 2024",
+      "source_file": "G1130119-01.rtf"
+    },
+    {
+      "po_no": "G1130092-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-08-19",
+      "spec_text": "舊料號4up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,000pcs\n(250panels)",
+      "unit_price": "76.320",
+      "subtotal": "76320.00",
+      "delivery": "SEP. 5, 2024",
+      "source_file": "G1130092-01.rtf"
+    },
+    {
+      "po_no": "G1130086-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-08-06",
+      "spec_text": "舊料號4up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1000pcs\n(250panels)",
+      "unit_price": "76.320",
+      "subtotal": "76320.00",
+      "delivery": "AUG. 26, 2024",
+      "source_file": "G1130086-01.rtf"
+    },
+    {
+      "po_no": "G1130065-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-06-21",
+      "spec_text": "舊料號4up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1000pcs\n(250panels)",
+      "unit_price": "76.320",
+      "subtotal": "76320.00",
+      "delivery": "JUL. 10, 2024",
+      "source_file": "G1130065-01.rtf"
+    },
+    {
+      "po_no": "G1130047-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-05-02",
+      "spec_text": "舊料號4up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1000pcs\n(250panels)",
+      "unit_price": "76.320",
+      "subtotal": "76320.00",
+      "delivery": "MAY. 20, 2024",
+      "source_file": "G1130047-01.rtf"
+    },
+    {
+      "po_no": "G1130037-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-04-18",
+      "spec_text": "舊料號4up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1000pcs\n(250panels)",
+      "unit_price": "76.320",
+      "subtotal": "76320.00",
+      "delivery": "MAY. 7, 2024",
+      "source_file": "G1130037-01.rtf"
+    },
+    {
+      "po_no": "G1130018-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-02-21",
+      "spec_text": "舊料號4up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1000pcs\n(250panels)",
+      "unit_price": "76.320",
+      "subtotal": "76320.00",
+      "delivery": "MAR. 11, 2024\nor sooner!",
+      "source_file": "G1130018-01.rtf"
+    }
+  ],
+  "28_33_601": [
+    {
+      "po_no": "G1130018-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-02-21",
+      "spec_text": "舊料號14up；但須添加E497845\n& UL Logo, “94V-0”於防焊層, 並回傳工作檔備份\nNo X-outs!",
+      "quantity": "756pcs\n(54panels)",
+      "unit_price": "24.000",
+      "subtotal": "18144.00",
+      "delivery": "MAR. 11, 2024\nor sooner!",
+      "source_file": "G1130018-02.rtf"
+    }
+  ],
+  "F41040069V20": [
+    {
+      "po_no": "G1130027-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-03-15",
+      "spec_text": "舊料號；1up\n(Only New Date Code;不收庫存板!)\n注意：真空包裝10panels一包",
+      "quantity": "50panels",
+      "unit_price": "240.00",
+      "subtotal": "12000.00",
+      "delivery": "APR. 1, 2024\nor sooner",
+      "source_file": "G1130027-01.rtf"
+    }
+  ],
+  "P4085200": [
+    {
+      "po_no": "G1130093-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-08-19",
+      "spec_text": "舊料號；3up\n注意：\n1. 曾發生板子與 Working Gerber 的中間留邊間距不同，相差各2mm，造成客戶鋼板無法使用。\n2. 真空包裝10panels一包",
+      "quantity": "300pcs\n(100panels)",
+      "unit_price": "135.00",
+      "subtotal": "40500.00",
+      "delivery": "SEP. 9, 2024",
+      "source_file": "G1130093-01__全興_.rtf"
+    },
+    {
+      "po_no": "G1130027-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-03-15",
+      "spec_text": "舊料號；3up\n注意：\n1. 曾發生板子與 Working Gerber 的中間留邊間距不同，相差各2mm，造成客戶鋼板無法使用。\n2. 真空包裝10panels一包",
+      "quantity": "300pcs\n(100panels)",
+      "unit_price": "135.00",
+      "subtotal": "40500.00",
+      "delivery": "APR. 1, 2024\nor sooner",
+      "source_file": "G1130027-01.rtf"
+    }
+  ],
+  "P2004400": [
+    {
+      "po_no": "G1130027-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-03-15",
+      "spec_text": "舊料號；5up\n注意：真空包裝10panels一包",
+      "quantity": "150pcs\n(30panels)",
+      "unit_price": "一組",
+      "subtotal": "11000.00",
+      "delivery": "APR. 1, 2024\nor sooner",
+      "source_file": "G1130027-01.rtf"
+    }
+  ],
+  "P4086200": [
+    {
+      "po_no": "G1130027-02",
+      "prefix": "G",
+      "factory": "星晨",
+      "factory_full": "星晨電路股份有限公司",
+      "date": "2024-03-15",
+      "spec_text": "舊料號；5up\n真空包裝10panels一包",
+      "quantity": "300pcs\n(60panels)",
+      "unit_price": "41.400",
+      "subtotal": "12420.00",
+      "delivery": "APR. 1, 2024\nor sooner!",
+      "source_file": "G1130027-02.rtf"
+    }
+  ],
+  "P2003300": [
+    {
+      "po_no": "G1130027-03",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-03-15",
+      "spec_text": "Working Gerber承認後，才可生產！ 請今天10:30前傳working gerber (& stencil gerber)給我司，如有工程問題請一併詢問，謝謝！\nMaterial: 2L; FR4\nBoard thickness: 1.6mm\nCopper thickness: 1oz finish\n排版: 12up (panel_instr_P2003300); No X-outs!\nSurface Finish: Lead-free HASL\nS/M: Green, S/L: White\n須添加西拓UL logo & date code ( WWYY ) on the silkscreen layer at any clear place.\n樣板: 除試鍚板外，須另外於出貨時提供樣板一片送本司備份.\n真空包裝: 板厚1.6mm (含) 以下, 10PNL一包!",
+      "quantity": "156pcs\n(13panels)",
+      "unit_price": "一組",
+      "subtotal": "8250.00",
+      "delivery": "MAR. 26, 2024\nor sooner!",
+      "source_file": "G1130027-03.rtf"
+    }
+  ],
+  "32_20_601 (EPC8226 Mess21)": [
+    {
+      "po_no": "G1130029-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-03-15",
+      "spec_text": "Working Gerber承認後，才可生產!  請於今天14:00前傳working gerber (& stencil gerber)給我司，如有工程問題請一併詢問，謝謝！\nMaterial: 2L; FR4\nBoard thickness: 1.6mm\nCopper thickness: Cu: 1oz start\n排版: 6up (as gerbers/drawing); No X-outs!\nSurface Finish: Immersion Gold: 3u”\nS/M: Green, S/L: White\n須添加西拓UL logo & E497845 on the solder mask layer at any clear place.\n樣板: 除試鍚板外，須另外於出貨時提供樣板一片送本司備份.",
+      "quantity": "252pcs\n(42panels)",
+      "unit_price": "95.7461\n(此價格含單價NT64.00 & NRE：NT8000.00，首次出貨請以此單價開立發票)",
+      "subtotal": "24128",
+      "delivery": "APR. 1, 2024\nor sooner!",
+      "source_file": "G1130029-01.rtf"
+    }
+  ],
+  "28_80_201 (EPC87Netz)": [
+    {
+      "po_no": "G1130030-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-03-15",
+      "spec_text": "Working Gerber承認後，才可生產! 請於今天14:00前傳working gerber (& stencil gerber)給我司，如有工程問題請一併詢問，謝謝！\nMaterial: 2L; FR4\nBoard thickness: 1.6mm\nCopper thickness: Cu: 1oz start\n排版: 4up (as gerbers/drawing); No X-outs!\nSurface Finish: Immersion Gold: 3u”\nS/M: Green, S/L: White\n須添加西拓UL logo & E497845 on the solder mask layer at any clear place.\n樣板: 除試鍚板外，須另外於出貨時提供樣板一片送本司備份\nEQ參考:\nQ1. The holes 1.2mm *208 places on the drill table are PTH. However, the holes marked in yellow for a total of 192 places (= 48 places * 4up = 192 places) not connecting with the circuit pad, and please confirm if it's ok to build these holes as NPTH *192 places? Yes, NPTH\nThe balance holes of 1.2mm *16 places (mark blue) as PTH, OK? Yes PTH",
+      "quantity": "252pcs\n(63panels)",
+      "unit_price": "92.7461\n(此價格含單價NT61.00 & NRE：NT8000.00，首次出貨請以此單價開立發票)",
+      "subtotal": "23372",
+      "delivery": "APR. 1, 2024\nor sooner!",
+      "source_file": "G1130030-01.rtf"
+    }
+  ],
+  "K2K/K2I SMT BARE PCB rev 009": [
+    {
+      "po_no": "G1130035-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-04-12",
+      "spec_text": "舊料號；1up\n1. 板子不可有MADE IN USA !\n2. 若出庫存板, Date code必須在規定有效期內",
+      "quantity": "500pcs",
+      "unit_price": "45.000",
+      "subtotal": "22.500.00",
+      "delivery": "APR. 29, 2024",
+      "source_file": "G1130035-01.rtf"
+    }
+  ],
+  "29_30_701": [
+    {
+      "po_no": "G1130106-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-09-20",
+      "spec_text": "舊料號5up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,000pcs\n(200panels)",
+      "unit_price": "88.000",
+      "subtotal": "88000.00",
+      "delivery": "OCT. 7, 2024",
+      "source_file": "G1130106-01.rtf"
+    },
+    {
+      "po_no": "G1130037-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-04-18",
+      "spec_text": "舊料號5up ; 須再添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,000pcs\n(200panels)",
+      "unit_price": "88.000",
+      "subtotal": "88000.00",
+      "delivery": "MAY. 7, 2024",
+      "source_file": "G1130037-01.rtf"
+    }
+  ],
+  "27_21_701": [
+    {
+      "po_no": "G1130126-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-11-20",
+      "spec_text": "舊料號14up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,008pcs\n(72panels)",
+      "unit_price": "21.000",
+      "subtotal": "21168.00",
+      "delivery": "DEC. 6, 2024",
+      "source_file": "G1130126-01.rtf"
+    },
+    {
+      "po_no": "G1130119-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-10-30",
+      "spec_text": "舊料號14up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,008pcs\n(72panels)",
+      "unit_price": "21.000",
+      "subtotal": "21168.00",
+      "delivery": "NOV. 18, 2024",
+      "source_file": "G1130119-02.rtf"
+    },
+    {
+      "po_no": "G1130092-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-08-19",
+      "spec_text": "舊料號14up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,008pcs\n(72panels)",
+      "unit_price": "21.000",
+      "subtotal": "21168.00",
+      "delivery": "SEP. 5, 2024",
+      "source_file": "G1130092-02.rtf"
+    },
+    {
+      "po_no": "G1130086-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-08-06",
+      "spec_text": "舊料號14up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,008pcs\n(72panels)",
+      "unit_price": "21.000",
+      "subtotal": "21168.00",
+      "delivery": "AUG. 26, 2024",
+      "source_file": "G1130086-02.rtf"
+    },
+    {
+      "po_no": "G1130047-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-05-02",
+      "spec_text": "舊料號14up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,008pcs\n(72panels)",
+      "unit_price": "21.000",
+      "subtotal": "21168.00",
+      "delivery": "MAY. 20, 2024",
+      "source_file": "G1130047-02.rtf"
+    },
+    {
+      "po_no": "G1130037-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-04-18",
+      "spec_text": "舊料號14up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,008pcs\n(72panels)",
+      "unit_price": "21.000",
+      "subtotal": "21168.00",
+      "delivery": "MAY. 7, 2024",
+      "source_file": "G1130037-02.rtf"
+    }
+  ],
+  "27_22_301": [
+    {
+      "po_no": "G1130126-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-11-20",
+      "spec_text": "舊料號1up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,000pcs",
+      "unit_price": "64.000",
+      "subtotal": "64000.00",
+      "delivery": "DEC. 6, 2024",
+      "source_file": "G1130126-01.rtf"
+    },
+    {
+      "po_no": "G1130092-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-08-19",
+      "spec_text": "舊料號1up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,000pcs",
+      "unit_price": "64.000",
+      "subtotal": "64000.00",
+      "delivery": "SEP. 5, 2024",
+      "source_file": "G1130092-02.rtf"
+    },
+    {
+      "po_no": "G1130086-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-08-06",
+      "spec_text": "舊料號1up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,000pcs",
+      "unit_price": "64.000",
+      "subtotal": "64000.00",
+      "delivery": "AUG. 26, 2024",
+      "source_file": "G1130086-02.rtf"
+    },
+    {
+      "po_no": "G1130065-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-06-21",
+      "spec_text": "舊料號1up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,000pcs",
+      "unit_price": "64.000",
+      "subtotal": "64000.00",
+      "delivery": "JUL. 10, 2024",
+      "source_file": "G1130065-02.rtf"
+    },
+    {
+      "po_no": "G1130047-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-05-02",
+      "spec_text": "舊料號1up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "1,000pcs",
+      "unit_price": "64.000",
+      "subtotal": "64000.00",
+      "delivery": "MAY. 20, 2024",
+      "source_file": "G1130047-02.rtf"
+    },
+    {
+      "po_no": "G1130037-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-04-18",
+      "spec_text": "舊料號1up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層",
+      "quantity": "1,000pcs",
+      "unit_price": "56.000",
+      "subtotal": "56000.00",
+      "delivery": "MAY. 7, 2024",
+      "source_file": "G1130037-02.rtf"
+    }
+  ],
+  "F41100151V100 &": [
+    {
+      "po_no": "G1130038-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-04-19",
+      "spec_text": "舊料號；1up panel\nOnly New Date Code; 不收庫存板!\n注意：\n1. 真空包裝10panels一包\n2. No X-outs",
+      "quantity": "50panels",
+      "unit_price": "425.00",
+      "subtotal": "21250.00",
+      "delivery": "MAY. 8, 2024",
+      "source_file": "G1130038-01.rtf"
+    }
+  ],
+  "P4171100": [
+    {
+      "po_no": "G1130038-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-04-19",
+      "spec_text": "舊料號；2up\n注意：\n1. 真空包裝10panels一包\n2. No X-outs",
+      "quantity": "100pcs\n(50panels)",
+      "unit_price": "130.000",
+      "subtotal": "13000.00",
+      "delivery": "MAY. 8, 2024",
+      "source_file": "G1130038-01.rtf"
+    }
+  ],
+  "00006713v1.1 REV 2": [
+    {
+      "po_no": "G1130038-02",
+      "prefix": "G",
+      "factory": "星晨",
+      "factory_full": "星晨電路股份有限公司",
+      "date": "2024-04-19",
+      "spec_text": "舊料號；1up\n注意：\n1. 僅接受新Date Code ! 不能出庫存板\n2. 真空包裝10 panels一包!",
+      "quantity": "200pcs",
+      "unit_price": "71.300",
+      "subtotal": "14260.00",
+      "delivery": "MAY. 8, 2024",
+      "source_file": "G1130038-02.rtf"
+    }
+  ],
+  "GSM_68 pcb-New Shape": [
+    {
+      "po_no": "G1130040-01",
+      "prefix": "G",
+      "factory": "雙銘",
+      "factory_full": "雙銘工業有限公司",
+      "date": "2024-12-20",
+      "spec_text": "舊料號:1up\n注意:發票日期應同實際出貨日",
+      "quantity": "1,000pcs",
+      "unit_price": "6.9000",
+      "subtotal": "6900.00",
+      "delivery": "DEC. 27, 2023",
+      "source_file": "G1130040-01.rtf"
+    }
+  ],
+  "F41080008V30": [
+    {
+      "po_no": "G1130107-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-09-20",
+      "spec_text": "舊料號；14up\n(Only New Date Code, 不收庫存板!)\n注意: 真空包裝要求: 5 panels (70 pcs) /每包!",
+      "quantity": "70pcs\n(5panels)",
+      "unit_price": "一組",
+      "subtotal": "12000.00",
+      "delivery": "OCT. 4, 2024",
+      "source_file": "G1130107-02.rtf"
+    },
+    {
+      "po_no": "G1130045-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-04-30",
+      "spec_text": "舊料號；14up\nOnly New Date Code, 不收庫存板!\n注意: 真空包裝要求: 5 panels (70 pcs) /每包!",
+      "quantity": "70pcs\n(5panels)",
+      "unit_price": "一組",
+      "subtotal": "12000.00",
+      "delivery": "MAY. 16, 2024\n or sooner!",
+      "source_file": "G1130045-01.rtf"
+    }
+  ],
+  "F41140096V160": [
+    {
+      "po_no": "G1130115-01",
+      "prefix": "G",
+      "factory": "龍偉",
+      "factory_full": "龍偉電子股份有限公司",
+      "date": "2024-10-23",
+      "spec_text": "舊料號；1up panel\nOnly New Date Code; 不收庫存板!\n注意：\n1. 有氣泡(爆板)異常發生，注意品質!\n2. 曾發生真空包裝破裂異常! 出貨真空包裝10panels一包",
+      "quantity": "50pcs",
+      "unit_price": "911.000",
+      "subtotal": "45550.00",
+      "delivery": "NOV. 14, 2024",
+      "source_file": "G1130115-01__龍_.rtf"
+    },
+    {
+      "po_no": "G1130090-03",
+      "prefix": "G",
+      "factory": "龍偉",
+      "factory_full": "龍偉電子股份有限公司",
+      "date": "2024-08-15",
+      "spec_text": "舊料號；1up panel\nOnly New Date Code; 不收庫存板!\n注意：\n1. 有氣泡(爆板)異常發生，注意品質!\n2. 曾發生真空包裝破裂異常! 出貨真空包裝10panels一包",
+      "quantity": "50pcs",
+      "unit_price": "911.000",
+      "subtotal": "45550.00",
+      "delivery": "SEP. 9, 2024\n or sooner!",
+      "source_file": "G1130090-03__龍_.rtf"
+    },
+    {
+      "po_no": "G1130045-03",
+      "prefix": "G",
+      "factory": "龍偉",
+      "factory_full": "龍偉電子股份有限公司",
+      "date": "2024-04-30",
+      "spec_text": "舊料號；1up panel\nOnly New Date Code; 不收庫存板!\n注意：\n1. 有氣泡(爆板)異常發生，注意品質!\n2. 曾發生真空包裝破裂異常! 出貨真空包裝10panels一包",
+      "quantity": "50pcs",
+      "unit_price": "911.000",
+      "subtotal": "45550.00",
+      "delivery": "MAY. 17, 2024\n or sooner!",
+      "source_file": "G1130045-03__龍_.rtf"
+    }
+  ],
+  "PHAZOR SMT BARE PCB 010": [
+    {
+      "po_no": "G1130134-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-12-17",
+      "spec_text": "舊料號:1up\n1. 板子不可有MADE IN USA !\n2. 若出庫存板, Date code必須在規定有效期內",
+      "quantity": "500pcs",
+      "unit_price": "135.000",
+      "subtotal": "67500.00",
+      "delivery": "JAN. 6, 2025",
+      "source_file": "G1130134-01.rtf"
+    },
+    {
+      "po_no": "G1130057-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-05-29",
+      "spec_text": "舊料號:1up\n1. 板子不可有MADE IN USA !\n2. 若出庫存板, Date code必須在規定有效期內",
+      "quantity": "500pcs",
+      "unit_price": "135.000",
+      "subtotal": "67500.00",
+      "delivery": "JUN. 14, 2024",
+      "source_file": "G1130057-01.rtf"
+    }
+  ],
+  "29_78_001": [
+    {
+      "po_no": "G1130059-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-06-05",
+      "spec_text": "舊料號1up ; 但須添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "250pcs",
+      "unit_price": "100.00",
+      "subtotal": "25000.00",
+      "delivery": "JUN. 24, 2024\nor sooner!",
+      "source_file": "G1130059-01.rtf"
+    }
+  ],
+  "27_46_201": [
+    {
+      "po_no": "G1130065-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-06-21",
+      "spec_text": "舊料號5up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "500pcs\n(100panels)",
+      "unit_price": "39.100",
+      "subtotal": "19550.00",
+      "delivery": "JUL. 10, 2024",
+      "source_file": "G1130065-02.rtf"
+    }
+  ],
+  "26_45_101": [
+    {
+      "po_no": "G1130069-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-07-01",
+      "spec_text": "舊料號50up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "500pcs\n(10panels)",
+      "unit_price": "一組",
+      "subtotal": "9000.00",
+      "delivery": "JUL. 16, 2024",
+      "source_file": "G1130069-01.rtf"
+    }
+  ],
+  "25_39_805": [
+    {
+      "po_no": "G1130069-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-07-01",
+      "spec_text": "舊料號8up ; 但須添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "256pcs\n(32panels)",
+      "unit_price": "66.000",
+      "subtotal": "16896.00",
+      "delivery": "JUL. 16, 2024",
+      "source_file": "G1130069-01.rtf"
+    }
+  ],
+  "17_02_701_Display 19Zoll V1.0": [
+    {
+      "po_no": "G1130069-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-07-01",
+      "spec_text": "舊料號；10up ; 但須添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "250pcs\n(25panels)",
+      "unit_price": "一組",
+      "subtotal": "9000.00",
+      "delivery": "JUL. 16, 2024",
+      "source_file": "G1130069-01.rtf"
+    }
+  ],
+  "25_71_104": [
+    {
+      "po_no": "G1130069-02",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-07-01",
+      "spec_text": "舊料號2up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "250pcs\n(125panels)",
+      "unit_price": "168.500",
+      "subtotal": "42125.00",
+      "delivery": "JUL. 16, 2024",
+      "source_file": "G1130069-02.rtf"
+    }
+  ],
+  "31-00-801": [
+    {
+      "po_no": "G1130127-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-11-20",
+      "spec_text": "舊料號40up ; 已添加E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "760pcs\n(19panels)",
+      "unit_price": "17.500",
+      "subtotal": "13300.00",
+      "delivery": "DEC. 6, 2024",
+      "source_file": "G1130127-01.rtf"
+    },
+    {
+      "po_no": "G1130069-02",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-07-01",
+      "spec_text": "舊料號40up ; 已添加E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "760pcs\n(19panels)",
+      "unit_price": "17.500",
+      "subtotal": "13300.00",
+      "delivery": "JUL. 16, 2024",
+      "source_file": "G1130069-02.rtf"
+    }
+  ],
+  "F41080024V3.0": [
+    {
+      "po_no": "G1130074-01",
+      "prefix": "G",
+      "factory": "星晨",
+      "factory_full": "星晨電路股份有限公司",
+      "date": "2024-07-18",
+      "spec_text": "舊料號:3up\n(Only New Date Code;不收庫存板!)\n注意：\n1. Leadfree HASL\n2. 真空包裝10 panels一包!",
+      "quantity": "150pcs\n((50panels)",
+      "unit_price": "一組",
+      "subtotal": "8000.00",
+      "delivery": "AUG. 1, 2024",
+      "source_file": "G1130074-01.rtf"
+    }
+  ],
+  "F41100159v100": [
+    {
+      "po_no": "G1130136-03",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-12-20",
+      "spec_text": "舊料號；24up\nOnly New Date Code; 不收庫存板!\n注意：\n1. 真空包裝10panels一包\n2. No X-outs",
+      "quantity": "168pcs\n(7panels)",
+      "unit_price": "一組",
+      "subtotal": "9000.00",
+      "delivery": "JAN. 8, 2025\nor sooner!",
+      "source_file": "G1130136-03.rtf"
+    },
+    {
+      "po_no": "G1130074-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-07-18",
+      "spec_text": "舊料號；24up\nOnly New Date Code; 不收庫存板!\n注意：\n1. 真空包裝10panels一包\n2. No X-outs",
+      "quantity": "168pcs\n(7panels)",
+      "unit_price": "一組",
+      "subtotal": "9000.00",
+      "delivery": "AUG. 1, 2024",
+      "source_file": "G1130074-02.rtf"
+    }
+  ],
+  "KB-1 TX REV 008": [
+    {
+      "po_no": "G1130078-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-07-25",
+      "spec_text": "舊料號；1up\n1. 板子不可有MADE IN USA\n2. 若出庫存板，Date code必須在規定有效期內",
+      "quantity": "250pcs",
+      "unit_price": "80.00",
+      "subtotal": "20000.00",
+      "delivery": "AUG. 12, 2024\nor sooner!",
+      "source_file": "G1130078-01全興.rtf"
+    }
+  ],
+  "29_06_702": [
+    {
+      "po_no": "G1130086-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-08-06",
+      "spec_text": "舊料號6up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "252pcs\n (42panels)",
+      "unit_price": "80.000",
+      "subtotal": "20160.00",
+      "delivery": "AUG. 26, 2024",
+      "source_file": "G1130086-01.rtf"
+    }
+  ],
+  "F41080034V2.1": [
+    {
+      "po_no": "G1130090-01",
+      "prefix": "G",
+      "factory": "星晨",
+      "factory_full": "星晨電路股份有限公司",
+      "date": "2024-08-15",
+      "spec_text": "舊料號；3up\n(Only New Date Code;不收庫存板!)\n注意：\n1. Leadfree HASL\n2. 真空包裝10panels一包",
+      "quantity": "81pcs\n(27panels)",
+      "unit_price": "一組",
+      "subtotal": "8000.00",
+      "delivery": "SEP. 4, 2024\nor sooner!",
+      "source_file": "G1130090-01.rtf"
+    }
+  ],
+  "P3050400": [
+    {
+      "po_no": "G1130090-01",
+      "prefix": "G",
+      "factory": "星晨",
+      "factory_full": "星晨電路股份有限公司",
+      "date": "2024-08-15",
+      "spec_text": "舊料號；3up\n請依附件Working gerber & 原始Gerber製作!\n*SPECs (已確認):\nFR4, 1.6mm, Cu: 1oz all layers, 3up,\nPanel: 174mm * 161mm, Unit size: 147mm *52mm, S/M: Red, S/L: White, Immersion gold: 1~3u”\nNo X-outs!",
+      "quantity": "15pcs\n  (5panels)",
+      "unit_price": "一組",
+      "subtotal": "13000.00",
+      "delivery": "SEP. 4, 2024\nor sooner!",
+      "source_file": "G1130090-01.rtf"
+    }
+  ],
+  "P3021601": [
+    {
+      "po_no": "G1130090-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-08-15",
+      "spec_text": "舊料號；3up\n(No X-outs)\n注意：真空包裝10 panels一包!",
+      "quantity": "300pcs\n(100panels)",
+      "unit_price": "91.000",
+      "subtotal": "27300.00",
+      "delivery": "SEP. 4, 2024\nor sooner!",
+      "source_file": "G1130090-02.rtf"
+    }
+  ],
+  "P3058301": [
+    {
+      "po_no": "G1130090-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-08-15",
+      "spec_text": "舊料號；1up\n注意：\n1. 真空包裝10panels一包",
+      "quantity": "100pcs",
+      "unit_price": "240.000",
+      "subtotal": "24000.00",
+      "delivery": "SEP. 4, 2024\nor sooner!",
+      "source_file": "G1130090-02.rtf"
+    }
+  ],
+  "0464406 Rev S": [
+    {
+      "po_no": "G1130095-01",
+      "prefix": "G",
+      "factory": "優技",
+      "factory_full": "優技電子股份有限公司",
+      "date": "2024-08-20",
+      "spec_text": "舊料號；1up\n注意：\n1. Build to IPC Class 3 standard\n2. This is a rated order certified for National Defense use and you are required to follow all provisions of the DPAS regulation (15CFR700)\" DO-A3",
+      "quantity": "630pcs",
+      "unit_price": "210.000",
+      "subtotal": "132300.00",
+      "delivery": "SEP. 12, 2024",
+      "source_file": "G1130095-01__優技_.rtf"
+    }
+  ],
+  "26_26_702": [
+    {
+      "po_no": "G1130106-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-09-20",
+      "spec_text": "舊料號:6up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "504pcs\n(84panels)",
+      "unit_price": "43.460",
+      "subtotal": "21903.84",
+      "delivery": "OCT. 7, 2024",
+      "source_file": "G1130106-01.rtf"
+    }
+  ],
+  "P2004503": [
+    {
+      "po_no": "G1130136-02",
+      "prefix": "G",
+      "factory": "百為",
+      "factory_full": "百為實業有限公司",
+      "date": "2024-12-20",
+      "spec_text": "舊料號；10up\n注意：\n1. 真空包裝10panels一包\n2. No X-outs",
+      "quantity": "600pcs\n(60panels)",
+      "unit_price": "一組",
+      "subtotal": "19800.00",
+      "delivery": "JAN. 8, 2025\nor sooner!",
+      "source_file": "G1130136-02__百_.rtf"
+    },
+    {
+      "po_no": "G1130107-01",
+      "prefix": "G",
+      "factory": "百為",
+      "factory_full": "百為實業有限公司",
+      "date": "2024-09-20",
+      "spec_text": "Working Gerber承認後，才可生產！請於今天下午14:00傳working gerber (& stencil gerber)給我司，如有工程問題請一併詢問，謝謝！\nMaterial: 4L; FR4\nBoard thickness: 1.6mm\nCopper thickness: 1oz (35um) all layers\n排版 & 疊構: 10up (比照panel_instr_P2004503 &\n參考前版Working Gerber - P2004502); No X-outs!\nSurface Finish: Immersion gold: 1~3u”\nS/M: Green, S/L: White\n須添加西拓UL logo & date code ( WWYY ) on the silkscreen layer at any clear place.\n樣板: 除試鍚板外，須另外於出貨時提供樣板一片\n送本司備份.\n真空包裝: 板厚1.6mm (含) 以下, 10PNL一包!",
+      "quantity": "100pcs\n(10panels)",
+      "unit_price": "一組",
+      "subtotal": "14000.00",
+      "delivery": "OCT. 3, 2024\n or sooner!",
+      "source_file": "G1130107-01__百_.rtf"
+    }
+  ],
+  "F41080041 V1.1": [
+    {
+      "po_no": "G1130107-02",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-09-20",
+      "spec_text": "舊料號；32up\n(Only New Date Code;不收庫存板!)\n注意：\n1. 真空包裝10panels一包\n2. 表面處理為”無鉛噴錫”",
+      "quantity": "128pcs\n(4panels)",
+      "unit_price": "一組",
+      "subtotal": "9000.00",
+      "delivery": "OCT. 4, 2024",
+      "source_file": "G1130107-02.rtf"
+    }
+  ],
+  "28_80_802": [
+    {
+      "po_no": "G1130112-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-10-07",
+      "spec_text": "舊料號10up ; 但須添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "500pcs\n(50panels)",
+      "unit_price": "54.00",
+      "subtotal": "27000.00",
+      "delivery": "OCT.22, 2024",
+      "source_file": "G1130112-01.rtf"
+    }
+  ],
+  "B0463820-ROHS": [
+    {
+      "po_no": "G1130122-01",
+      "prefix": "G",
+      "factory": "星晨",
+      "factory_full": "星晨電路股份有限公司",
+      "date": "2024-11-13",
+      "spec_text": "舊料號；4up\n注意：\n1. 真空包裝10panels一包",
+      "quantity": "600pcs\n(150panels)",
+      "unit_price": "30.100",
+      "subtotal": "18060.00",
+      "delivery": "NOV. 27, 2024",
+      "source_file": "G1130122-01.rtf"
+    }
+  ],
+  "16_96_603": [
+    {
+      "po_no": "G1130127-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-11-20",
+      "spec_text": "舊料號4up 但須添加 E497845\n& UL Logo, “94V-0”於防焊層,\n並回傳工作檔備份!\nNo X-outs!",
+      "quantity": "252pcs\n(63panels)",
+      "unit_price": "93.00",
+      "subtotal": "23436.00",
+      "delivery": "DEC. 6, 2024",
+      "source_file": "G1130127-01.rtf"
+    }
+  ],
+  "30_40_501": [
+    {
+      "po_no": "G1130127-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-11-20",
+      "spec_text": "舊料號5up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "250pcs\n(50panels)",
+      "unit_price": "60.00",
+      "subtotal": "15000.00",
+      "delivery": "DEC. 6, 2024",
+      "source_file": "G1130127-01.rtf"
+    }
+  ],
+  "30_40_801": [
+    {
+      "po_no": "G1130127-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-11-20",
+      "spec_text": "舊料號4up ; 已添加 E497845\n& UL Logo, “94V-0”於防焊層\nNo X-outs!",
+      "quantity": "252pcs\n(63panels)",
+      "unit_price": "114.00",
+      "subtotal": "28728.00",
+      "delivery": "DEC. 6, 2024",
+      "source_file": "G1130127-01.rtf"
+    }
+  ],
+  "F41150083V100": [
+    {
+      "po_no": "G1130128-01",
+      "prefix": "G",
+      "factory": "全興",
+      "factory_full": "全興電子有限公司",
+      "date": "2024-11-20",
+      "spec_text": "舊料號；1up\n(Only New Date Code;不收庫存板!)\n注意：\n1. 真空包裝10panels一包",
+      "quantity": "50pcs",
+      "unit_price": "300.000",
+      "subtotal": "15000.00",
+      "delivery": "DEC. 6, 2024",
+      "source_file": "G1130128-01全.rtf"
+    }
+  ],
+  "P4079300": [
+    {
+      "po_no": "G1130136-01",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-12-20",
+      "spec_text": "舊料號；3up\n注意：\n1. 真空包裝10panels一包\n2. No X-outs",
+      "quantity": "300pcs\n(100panels)",
+      "unit_price": "119.66667\n (此價格含單價\n NT93.00 & NRE：\n NT8000.00，首次\n 出貨請以此單價\n 開立發票)",
+      "subtotal": "35900",
+      "delivery": "JAN. 8, 2025\nor sooner!",
+      "source_file": "G1130136-01.rtf"
+    },
+    {
+      "po_no": "G1130129-02",
+      "prefix": "G",
+      "factory": "宏棋",
+      "factory_full": "宏棋科技有限公司",
+      "date": "2024-11-29",
+      "spec_text": "Working Gerber承認後，才可生產！請於今天中午前傳working gerber (& stencil gerber)給我司，如有工程問題請一併詢問，謝謝！\nMaterial: 4L; FR4\nBoard thickness: 1.6mm\nCopper thickness: 1oz finish (35um) all layers\n排版: 3up (依前版P4079201 & panel_instr_P4079300); No X-outs\n疊構: 請依前版P4079201 & 附件panel_instr_P4079300.pdf 疊構製作!\nSurface Finish: ENIG: 1~3u”\nS/M: Green, S/L: White\n須添加西拓UL logo & date code ( WWYY ) on the silkscreen layer at any clear place.\n樣板: 除試鍚板外，須另外於出貨時提供樣板一片送本司備份.\n真空包裝: 板厚1.6mm (含) 以下, 10PNL一包!",
+      "quantity": "36pcs\n(12panels)",
+      "unit_price": "一組",
+      "subtotal": "15000.00",
+      "delivery": "DEC. 6, 2024\nor sooner!",
+      "source_file": "G1130129-02.rtf"
+    }
+  ],
+  "TS-NVRAM2 Rev B": [
+    {
+      "po_no": "ET1130099-01",
+      "prefix": "ET",
+      "factory": "星晨",
+      "factory_full": "星晨電路股份有限公司",
+      "date": "2024-09-04",
+      "spec_text": "舊料號；1up, 但須添加乾燥劑與濕度指示卡\n板子不可有MADE IN USA\n若出庫存板，Date code必須在規定有效期內\nPCB須添加乾燥劑與濕度指示卡",
+      "quantity": "400pcs",
+      "unit_price": "72.00",
+      "subtotal": "28800.00",
+      "delivery": "OCT. 1, 2024",
+      "source_file": "ET1130099-01__星晨_.docx"
+    }
+  ]
+}
