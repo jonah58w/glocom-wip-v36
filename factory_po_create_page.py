@@ -1,21 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.17。
+建立工廠 PO 頁面 v3.9.18。
 
-主要更新(v3.9.17):
-- ★ 「歷史工廠」改成自動套用,不用按按鈕:
-       PDF 上傳並 parse 完後,系統自動把 Step 3 切到歷史最多的
-       工廠 + 字首 + 發出公司。同一份 PDF 只自動套一次,Sandy
-       手動切換後不會被覆蓋。
-- ★ 面板永遠顯示(就算沒歷史也顯示):
-       讓 Sandy 一眼確認「為什麼沒自動切」 — 是因為 spec_history
-       裡這個料號沒紀錄,還是其他原因。
-- ★ 新增「🔍 spec_history.json 診斷」expander:
-       顯示 spec_history.json 路徑、總料號數、查到當前品項的紀錄。
-       Sandy 可以驗證歷史檔案有沒有正確載入。
+主要更新(v3.9.18):
+- ★ 修 AttributeError: spec_history.json 裡某些紀錄不是 dict
+       (可能是舊格式的 string list 或單一 dict),
+       _compute_old_pn_factory_suggestions 對 records 做 isinstance 防禦,
+       跳過非 dict 元素避免崩潰。
+- ★ 診斷 expander 也加同樣防禦,並對「有原始紀錄但格式不對」的料號
+       額外顯示 raw 內容(repr) 方便 Sandy 把實際結構傳給 Claude debug。
 
-v3.9.16 變更:
-- 加「📋 舊料號歷史工廠建議」面板(原本要按按鈕套用)
+v3.9.17 變更:
+- 歷史工廠改成「自動套用」(不用按按鈕)
+- 面板永遠顯示(沒歷史也顯示診斷訊息)
+- 加「🔍 spec_history.json 診斷」expander
 
 v3.9.14 變更:
 - 產 PDF 後記錄並顯示「這份 PDF 是用哪家工廠/字首/編號產的」
@@ -337,6 +335,8 @@ def _po_prefix(po_no: str) -> str:
 def _compute_old_pn_factory_suggestions(parsed_items, spec_history_data: dict) -> dict:
     """
     ★ v3.9.16: 對每個品項統計 GC/ET/EW 三個字首下的歷史工廠。
+    ★ v3.9.18: 對 record 做 isinstance(dict) 防禦,避免舊格式(string list)
+       或非預期結構造成 AttributeError。
 
     回傳:
         {
@@ -351,11 +351,23 @@ def _compute_old_pn_factory_suggestions(parsed_items, spec_history_data: dict) -
     suggestions = {}
     for item in parsed_items:
         pn = item.part_number
-        records = spec_history_data.get(pn, [])
+        records_raw = spec_history_data.get(pn, [])
+        # ★ v3.9.18: 確保 records 是 list,且每個元素都是 dict
+        if isinstance(records_raw, dict):
+            # 有些舊格式 spec_history 可能單一料號是單一 dict 而不是 list
+            records = [records_raw]
+        elif isinstance(records_raw, list):
+            records = records_raw
+        else:
+            records = []
+
         by_prefix = {"GC": Counter(), "ET": Counter(), "EW": Counter()}
         latest = {"GC": None, "ET": None, "EW": None}
 
         for r in records:
+            # ★ v3.9.18: 跳過非 dict record(例如 string、None 等舊格式)
+            if not isinstance(r, dict):
+                continue
             factory = (r.get("factory") or "").strip() or "(未填工廠)"
             po = (r.get("po") or "").strip()
             date_str = (r.get("date") or "").strip()
@@ -1727,7 +1739,16 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
 
             for it in parsed.items:
                 pn = it.part_number
-                records = spec_history_data_for_panel.get(pn, [])
+                records_raw = spec_history_data_for_panel.get(pn, [])
+                # ★ v3.9.18: 同樣的型別防禦
+                if isinstance(records_raw, dict):
+                    records = [records_raw]
+                elif isinstance(records_raw, list):
+                    records = records_raw
+                else:
+                    records = []
+                # 過濾出 dict records
+                records = [r for r in records if isinstance(r, dict)]
                 if records:
                     st.write(f"**`{pn}`** — 找到 **{len(records)}** 筆紀錄")
                     detail_rows = []
@@ -1745,14 +1766,21 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
                         hide_index=True,
                     )
                 else:
-                    st.write(f"**`{pn}`** — ❌ 沒有任何歷史紀錄")
-                    # 顯示 spec_history 裡幾個料號當參考(看有沒有名稱長得像的)
-                    similar_keys = [
-                        k for k in spec_history_data_for_panel.keys()
-                        if pn[:6] in k or k[:6] in pn
-                    ][:5]
-                    if similar_keys:
-                        st.caption(f"  spec_history 裡名稱接近的料號:{', '.join(similar_keys)}")
+                    raw_count = len(records_raw) if isinstance(records_raw, (list, dict)) else 0
+                    if raw_count > 0:
+                        st.write(
+                            f"**`{pn}`** — 有 {raw_count} 筆原始紀錄但格式不是 dict,已跳過"
+                        )
+                        st.code(repr(records_raw)[:500], language="python")
+                    else:
+                        st.write(f"**`{pn}`** — ❌ 沒有任何歷史紀錄")
+                        # 顯示 spec_history 裡幾個料號當參考(看有沒有名稱長得像的)
+                        similar_keys = [
+                            k for k in spec_history_data_for_panel.keys()
+                            if pn[:6] in k or k[:6] in pn
+                        ][:5]
+                        if similar_keys:
+                            st.caption(f"  spec_history 裡名稱接近的料號:{', '.join(similar_keys)}")
 
     # ─── Step 3 ─
     st.markdown("### Step 3. 工廠 / 發出公司 / 字首 / 編號")
