@@ -1,8 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.21。
-主要更新(v3.9.21):
-- ★ 整合 113~114 年舊訂單歷史 (legacy_orders.json)
+建立工廠 PO 頁面 v3.9.22。
+主要更新(v3.9.22):
+- ★ 修正 _compute_old_pn_factory_suggestions 跟診斷 block 對 spec_history.json
+       wrapper dict 格式 ({"latest": {...}, "history": [...]}) 的解讀:
+       原本把整個 wrapper 當成一筆紀錄,導致 r.get("po_no") 空、prefix 沒命中、
+       面板誤報「找不到」。現在正確抓 wrapper["history"] 列表。
+- 兼容兩種格式:
+       1. wrapper dict (spec_history.json 原生): {"latest": {...}, "history": [...]}
+       2. plain list (legacy_orders.json + 修正後的格式): [{...}, {...}]
+       3. 單筆 dict (極少數舊資料): {"po_no": ..., "factory": ...}
+v3.9.21 變更:
+- 整合 113~114 年舊訂單歷史 (legacy_orders.json)
        1. 多載一個 from legacy_history import merge_legacy_into_spec_history
        2. spec_history 載入後自動 merge legacy_orders.json (137 筆紀錄)
        3. 修正 v3.9.20 的 import 縮排 SyntaxError
@@ -32,12 +41,10 @@ v3.9.10 變更:
 v3.9.9 變更:
 - PDF 排版修正:在每個「數字. 」開頭的行前面加零寬空格 \\u200B,
        避免 Word/LibreOffice 把它認成 numbered list 自動套 tab stop
-- 新功能:Step 5 舊料號區塊加「🏭 歷史工廠」expander,
-       列出此料號歷史做過的所有工廠 + 各自規格,可一鍵切換
+- 新功能:Step 5 舊料號區塊加「🏭 歷史工廠」expander
 - NRE 金額預設改成 "0"
 v3.9.8 變更:
-- 修正:歷史 spec_text 載入時自動清洗 tab(去掉 "1.\\t..." 對齊用 tab),
-       印到 PDF 不再有編號項目後的大空白
+- 修正:歷史 spec_text 載入時自動清洗 tab
 - 新功能:Step 5 舊料號區塊加「📝 規格變更」欄位
 """
 from __future__ import annotations
@@ -98,6 +105,35 @@ def escape_for_docx(text: str) -> str:
     if not text:
         return ""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+# ─── ★ v3.9.22: 統一的 records 抽取邏輯 ─────────────
+def _extract_records_from_pn_data(pn_data) -> list:
+    """
+    把 spec_history dict 裡某個 P/N 對應的值,正規化成 list of records。
+
+    支援三種格式:
+    1. wrapper dict (spec_history.json 原生): {"latest": {...}, "history": [...]}
+       → 抓 ["history"]
+    2. plain list (legacy_orders.json + 修正後): [{...}, {...}]
+       → 直接用
+    3. 單筆 dict (極少數舊資料): {"po_no": ..., "factory": ...}
+       → 包成 [dict]
+
+    最後過濾掉非 dict 元素。
+    """
+    records = []
+    if isinstance(pn_data, dict):
+        # 優先抓 wrapper 的 history list
+        if "history" in pn_data and isinstance(pn_data["history"], list):
+            records = pn_data["history"]
+        elif "po" in pn_data or "po_no" in pn_data:
+            # 是單筆紀錄(有 po 欄位)
+            records = [pn_data]
+        # 其他 dict 結構就回空 list
+    elif isinstance(pn_data, list):
+        records = pn_data
+    return [r for r in records if isinstance(r, dict)]
 
 
 # ─── ★ v3.9.8: spec_text 清洗 helper ────────────────────────
@@ -168,7 +204,9 @@ def _po_prefix(po_no: str) -> str:
 
 
 def _compute_old_pn_factory_suggestions(parsed_items, spec_history_data) -> dict:
-    """對每個品項統計 GC/ET/EW 三個字首下的歷史工廠。"""
+    """對每個品項統計 GC/ET/EW 三個字首下的歷史工廠。
+    ★ v3.9.22: 用 _extract_records_from_pn_data 統一處理 wrapper dict / list 兩種格式。
+    """
     suggestions = {}
     if not isinstance(spec_history_data, dict):
         return suggestions
@@ -181,18 +219,10 @@ def _compute_old_pn_factory_suggestions(parsed_items, spec_history_data) -> dict
         pn = pn.strip()
         if not pn:
             continue
-        records_raw = spec_history_data.get(pn, [])
-        if isinstance(records_raw, dict):
-            records = [records_raw]
-        elif isinstance(records_raw, list):
-            records = records_raw
-        else:
-            records = []
+        records = _extract_records_from_pn_data(spec_history_data.get(pn))
         by_prefix = {"GC": Counter(), "ET": Counter(), "EW": Counter()}
         latest = {"GC": None, "ET": None, "EW": None}
         for r in records:
-            if not isinstance(r, dict):
-                continue
             try:
                 factory = (r.get("factory") or "").strip() or "(未填工廠)"
                 # 注意:legacy_orders.json 用 "po_no",spec_history.json 舊資料用 "po"
@@ -468,27 +498,21 @@ def load_spec_history() -> dict:
 
 
 def fetch_previous_spec(orders: pd.DataFrame, part_number: str, factory_short: str = ""):
+    """★ v3.9.22: 用 _extract_records_from_pn_data 統一處理 wrapper / list 格式。"""
     results = []
     pn_target = str(part_number).strip()
     if not pn_target:
         return results
 
     spec_history = load_spec_history()
-    if pn_target in spec_history:
-        pn_data = spec_history[pn_target]
-        # 兼容兩種格式:spec_history.json 用 {"history": [...]},legacy_orders.json 是 list 直接
-        if isinstance(pn_data, dict):
-            history_records = pn_data.get("history", [])
-        elif isinstance(pn_data, list):
-            history_records = pn_data
-        else:
-            history_records = []
+    history_records = _extract_records_from_pn_data(spec_history.get(pn_target))
+    if history_records:
         if factory_short:
-            same_factory = [r for r in history_records if isinstance(r, dict) and r.get("factory") == factory_short]
-            other = [r for r in history_records if isinstance(r, dict) and r.get("factory") != factory_short]
+            same_factory = [r for r in history_records if r.get("factory") == factory_short]
+            other = [r for r in history_records if r.get("factory") != factory_short]
             ordered = same_factory + other
         else:
-            ordered = [r for r in history_records if isinstance(r, dict)]
+            ordered = history_records
         for r in ordered:
             results.append({
                 "po_no": r.get("po_no") or r.get("po", ""),
@@ -714,13 +738,10 @@ def render_spec_input_for_item(
                 # 1. 直接 hit
                 if target_pn in spec_history_dict:
                     matched_pn = target_pn
-                    pn_data = spec_history_dict[target_pn]
-                    if isinstance(pn_data, dict):
-                        history_records = pn_data.get("history", [])
-                    elif isinstance(pn_data, list):
-                        history_records = pn_data
-                    else:
-                        history_records = []
+                    # ★ v3.9.22: 用統一邏輯抽 records
+                    history_records = _extract_records_from_pn_data(
+                        spec_history_dict[target_pn]
+                    )
                 else:
                     # 2. 模糊比對
                     keys_for_fuzzy = [k for k in spec_history_dict.keys() if not k.startswith("_")]
@@ -729,24 +750,13 @@ def render_spec_input_for_item(
                     )
                     if similar:
                         def _hist_count(p):
-                            d = spec_history_dict[p]
-                            if isinstance(d, dict):
-                                return -len(d.get("history", []))
-                            if isinstance(d, list):
-                                return -len(d)
-                            return 0
+                            recs = _extract_records_from_pn_data(spec_history_dict[p])
+                            return -len(recs)
                         similar.sort(key=_hist_count)
                         matched_pn = similar[0]
-                        d = spec_history_dict[matched_pn]
-                        if isinstance(d, dict):
-                            history_records = d.get("history", [])
-                        elif isinstance(d, list):
-                            history_records = d
-                        else:
-                            history_records = []
-
-                # 過濾掉非 dict
-                history_records = [r for r in history_records if isinstance(r, dict)]
+                        history_records = _extract_records_from_pn_data(
+                            spec_history_dict[matched_pn]
+                        )
 
                 if history_records:
                     analysis = analyze_spec_history(target_pn, history_records)
@@ -1384,7 +1394,6 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
                 )
 
             with st.expander("🔍 spec_history 診斷(展開看載入了什麼)", expanded=False):
-                # 顯示來源
                 history_path = SPEC_HISTORY_JSON
                 legacy_path = HERE / "data" / "legacy_orders.json"
                 spec_size = history_path.stat().st_size if history_path.exists() else 0
@@ -1401,14 +1410,10 @@ def render_factory_po_create_page(orders: pd.DataFrame, table_url: str, headers:
                     pn = getattr(it, "part_number", None)
                     if not pn:
                         continue
-                    records_raw = spec_history_data_for_panel.get(pn, [])
-                    if isinstance(records_raw, dict):
-                        records = [records_raw]
-                    elif isinstance(records_raw, list):
-                        records = records_raw
-                    else:
-                        records = []
-                    records = [r for r in records if isinstance(r, dict)]
+                    # ★ v3.9.22: 用統一邏輯抽 records
+                    records = _extract_records_from_pn_data(
+                        spec_history_data_for_panel.get(pn)
+                    )
                     if records:
                         st.write(f"**`{pn}`** — 找到 **{len(records)}** 筆紀錄")
                         detail_rows = []
