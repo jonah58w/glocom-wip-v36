@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-PDF 產生器 v3:接 PO 上下文 → 渲染 docx → 轉 PDF。
+PDF 產生器 v3.9.22:接 PO 上下文 → 渲染 docx → 轉 PDF。
+
+v3.9.22 更新:
+- ★ 模板選擇邏輯改成依 po_no 字首,不再用 issuing_company:
+    GC (G 開頭)  → PO_GLOCOM.docx (台灣 GLOCOM 抬頭)
+    ET           → PO_GLOCOM.docx (台灣 EUSWAY 用同一份模板,因為台灣抬頭一樣)
+    EW           → PO_EUSWAY.docx (大陸 EUSWAY logo 版本,之後再做)
+- 原邏輯 issuing == "EUSWAY" 會把 ET 字首誤導向 PO_EUSWAY.docx 觸發 FileNotFoundError
 
 v3 更新:
 - ★ 支援 unit_price_note 欄位 (v3.9.4):
@@ -49,6 +56,19 @@ def _format_date_display(d: date | None) -> str:
     if not d:
         return ""
     return d.strftime("%b. %d, %Y").upper().replace("..", ".")
+
+
+def _pick_template_name(po_ctx: dict) -> str:
+    """
+    ★ v3.9.22: 依 po_no 字首選模板。
+    - EW 開頭(大陸 EUSWAY) → PO_EUSWAY.docx
+    - 其他(GC / ET / G / 預設) → PO_GLOCOM.docx
+      因為台灣 EUSWAY 用跟 GLOCOM 一模一樣的版本,只有大陸要 EUSWAY logo。
+    """
+    po_no = (po_ctx.get("po_no") or "").strip().upper()
+    if po_no.startswith("EW"):
+        return "PO_EUSWAY.docx"
+    return "PO_GLOCOM.docx"
 
 
 def _duplicate_item_row_for_multi(docx_path: Path, item_count: int):
@@ -123,10 +143,8 @@ def _iter_runs_in_tr(tr_element):
 def render_docx_from_po_ctx(po_ctx: dict, output_path: Path | None = None) -> Path:
     """渲染 docx。is_revised=True 會在 Logo 下方蓋紅色印章。"""
 
-    issuing = po_ctx.get("issuing_company", "GLOCOM")
-    template_name = (
-        "PO_EUSWAY.docx" if issuing == "EUSWAY" else "PO_GLOCOM.docx"
-    )
+    # ★ v3.9.22: 依 po_no 字首選模板,不再用 issuing_company
+    template_name = _pick_template_name(po_ctx)
     template_path = TEMPLATE_DIR / template_name
     if not template_path.exists():
         raise FileNotFoundError(
