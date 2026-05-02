@@ -1,9 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-建立工廠 PO 頁面 v3.9.7。
+建立工廠 PO 頁面 v3.9.8。
 
-主要更新(v3.9.7):
-- ★ 新功能:Step 6 加「📑 產 PI」按鈕,產 Proforma Invoice
+主要更新(v3.9.8):
+- ★ 修正:歷史 spec_text 載入時自動清洗 tab(去掉 "1.\t..." 對齊用 tab),
+       印到 PDF 不再有編號項目後的大空白
+- ★ 新功能:Step 5 舊料號區塊加「📝 規格變更」欄位
+       - 用在「舊料號但這次規格有變更」(譬如表面處理改 ENIG 2u")
+       - 按「⬇ 套用變更」會把變更插到歷史規格頂端「舊料號」後
+       - 寫回 Teable 後也會更新 spec_history.json,下次同料號自動帶新版
+
+v3.9.7 變更:
+- 新功能:Step 6 加「📑 產 PI」按鈕,產 Proforma Invoice
 - 用 templates/PI_GLOCOM.docx 模板 + core/pi_generator.py
 - 客戶資訊從 data/customers.json 讀(VORNE/WESCO 等)
 - Invoice No. = 主號(去 -01),譬如 G1150034-01 → G1150034
@@ -154,6 +162,67 @@ def escape_for_docx(text: str) -> str:
         return ""
     # 順序很重要:先 & 再其他,否則 &lt; 會變 &amp;lt;
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+# ─── ★ v3.9.8: spec_text 清洗 helper ────────────────────────
+def _normalize_spec_text(text: str) -> str:
+    """
+    清洗 spec_text 裡的 tab 與多餘空白:
+    - "1.\t板子不可有..." → "1. 板子不可有..."  (去掉編號項目後的對齊 tab)
+    - 行內多個連續空白合成一個
+    - 保留換行 \\n(行與行的分隔不動)
+
+    歷史 RTF/DOCX 解析時很多項目是用 tab 對齊("1.\\t..." / "•\\t..."),
+    不清掉的話印到 PDF 會留下大塊空白,看起來像被 indent 出去。
+    """
+    if not text:
+        return text
+    # tab → 單一空格
+    text = text.replace("\t", " ")
+    # 行內多個連續空白合成單一空白(換行不動)
+    lines = text.split("\n")
+    normalized = [re.sub(r" +", " ", line).rstrip() for line in lines]
+    return "\n".join(normalized)
+
+
+def _merge_spec_with_change(history_spec: str, change_text: str) -> str:
+    """
+    把 Sandy 這次填的「規格變更」插入到歷史規格的第一行「舊料號」後面。
+
+    case 1: 第一行剛好 == "舊料號"      → "舊料號; {change}"
+    case 2: 第一行 "舊料號;..." 或 "舊料號:..." → "舊料號; {change}; {原內容}"
+    case 3: 第一行不是「舊料號」開頭   → "舊料號; {change}\\n{原內容}"
+
+    說明:這個函式永遠用「歷史規格原版」當底重組,不會在現況上 append,
+        所以 Sandy 重複按「⬇ 套用變更」也不會 double 上去。
+    """
+    change = (change_text or "").strip().rstrip(";；,，。 ").lstrip(";；,， ")
+    history = (history_spec or "").strip()
+    if not change:
+        return history
+    if not history:
+        return f"舊料號; {change}"
+
+    lines = history.split("\n")
+    first_line = lines[0].rstrip()
+
+    # case 2: 「舊料號; XXX」/「舊料號: XXX」/「舊料號;XXX」/「舊料號;XXX」
+    m = re.match(r"^(舊料號)\s*([;；:：])\s*(.*)$", first_line)
+    if m:
+        rest = m.group(3).strip()
+        if rest:
+            lines[0] = f"舊料號; {change}; {rest}"
+        else:
+            lines[0] = f"舊料號; {change}"
+        return "\n".join(lines)
+
+    # case 1: 純「舊料號」單獨一行
+    if first_line == "舊料號":
+        lines[0] = f"舊料號; {change}"
+        return "\n".join(lines)
+
+    # case 3: 第一行不是舊料號開頭 → prepend 新的一行
+    return f"舊料號; {change}\n{history}"
 
 
 # ─── 工廠主檔 ────────────────────────────────────
@@ -325,13 +394,33 @@ def create_teable_records(table_url: str, headers: dict, fields_list: list) -> d
 
 # ─── Teable 查同料號歷史 ─────────────────────────
 def load_spec_history() -> dict:
-    """讀 data/spec_history.json (從歷史 RTF/DOCX 訂單檔抽出來的注意事項對應表)"""
+    """
+    讀 data/spec_history.json (從歷史 RTF/DOCX 訂單檔抽出來的注意事項對應表)。
+
+    ★ v3.9.8: 載入時統一 normalize 所有 spec_text(去 tab + 多餘空白),
+              避免歷史資料的 "1.\\t..." 對齊 tab 印到 PDF 變成大空白。
+    """
     if not SPEC_HISTORY_JSON.exists():
         return {}
     try:
         with open(SPEC_HISTORY_JSON, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("spec_history", {}) or {}
+        spec_history = data.get("spec_history", {}) or {}
+
+        # ★ v3.9.8: 整個 dict 走一遍,清掉每筆 spec_text 的 tab
+        for pn, pn_data in spec_history.items():
+            if not isinstance(pn_data, dict):
+                continue
+            latest = pn_data.get("latest")
+            if isinstance(latest, dict) and "spec_text" in latest:
+                latest["spec_text"] = _normalize_spec_text(latest["spec_text"])
+            history_list = pn_data.get("history")
+            if isinstance(history_list, list):
+                for record in history_list:
+                    if isinstance(record, dict) and "spec_text" in record:
+                        record["spec_text"] = _normalize_spec_text(record["spec_text"])
+
+        return spec_history
     except Exception as e:
         st.warning(f"spec_history.json 讀取失敗:{e}")
         return {}
@@ -346,6 +435,9 @@ def fetch_previous_spec(orders: pd.DataFrame, part_number: str, factory_short: s
     2. Teable 主表「客戶要求注意事項」欄
     
     同工廠優先(如果有指定 factory_short)。
+
+    ★ v3.9.8: 從 Teable 抓的 spec 也統一 normalize(雖然主表通常是 Sandy 手打的乾淨內容,
+              但保險起見一致處理)。
     """
     results = []
     pn_target = str(part_number).strip()
@@ -366,7 +458,7 @@ def fetch_previous_spec(orders: pd.DataFrame, part_number: str, factory_short: s
         for r in ordered:
             results.append({
                 "po_no": r.get("po", ""),
-                "spec": r.get("spec_text", ""),
+                "spec": r.get("spec_text", ""),  # 已在 load_spec_history 時 normalize
                 "factory": r.get("factory", ""),
                 "date": r.get("date", ""),
                 "source": "history_file",
@@ -396,6 +488,7 @@ def fetch_previous_spec(orders: pd.DataFrame, part_number: str, factory_short: s
                     spec = str(row.get(spec_col, "")).strip() if spec_col in row.index else ""
                     if pd.isna(spec) or spec.lower() == "nan":
                         spec = ""
+                    spec = _normalize_spec_text(spec)  # ★ v3.9.8
                     factory = str(row.get(factory_col, "")).strip() if factory_col in row.index else ""
                     date_str = str(row.get(date_col, "")).strip() if date_col in row.index else ""
                     results.append({
@@ -572,6 +665,8 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
         st.session_state[type_key] = "舊料號"
 
     applied_old_default_key = f"fpo_spec_old_applied_{idx}"
+    # ★ v3.9.8: 保存「歷史規格 default 原版」,供「規格變更」按鈕重組用
+    history_default_key = f"_fpo_spec_history_default_{idx}"
 
     with st.container(border=True):
         st.markdown(f"**品項 {idx + 1}:`{item.part_number}`**(數量 {item.quantity:,})")
@@ -625,6 +720,8 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                 if history_records:
                     analysis = analyze_spec_history(target_pn, history_records)
                     smart_spec = build_smart_spec(analysis)
+                    # ★ v3.9.8: smart_spec 也保險再 normalize 一次
+                    smart_spec = _normalize_spec_text(smart_spec)
                     default_text = f"舊料號\n\n注意:\n{smart_spec}"
                     
                     # 存分析結果到 session_state(下面 UI 會顯示)
@@ -671,6 +768,8 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                         st.session_state[f"_fpo_v37_analysis_{idx}"] = None
                 
                 st.session_state[final_key] = default_text
+                # ★ v3.9.8: 同時保存 history_default 原版,供規格變更按鈕重組用
+                st.session_state[history_default_key] = default_text
                 st.session_state[applied_old_default_key] = True
             
             # ─── 顯示 v3.7 分析結果 ─
@@ -734,6 +833,41 @@ def render_spec_input_for_item(idx: int, item, orders: pd.DataFrame) -> str:
                             )
             else:
                 st.caption("⚠️ 沒找到同料號的歷史訂單,請手動填注意事項。")
+
+            # ─── ★ v3.9.8: 規格變更欄位 ─────────────
+            st.divider()
+            st.markdown("##### 📝 這次規格變更(選填)")
+            st.caption(
+                "👉 用在「舊料號但這次規格有變更」的情況,譬如 "
+                '`表面處理改 ENIG 2u"` / `改為 4 up array` / `板厚改 1.6mm`。  \n'
+                "按「⬇ 套用變更」會把變更插到最終規格頂端「舊料號」後面。  \n"
+                "**寫回 Teable 後也會更新 `spec_history.json`,下次同料號自動帶新版規格。**"
+            )
+            change_key = f"fpo_spec_change_{idx}"
+            cols_chg = st.columns([4, 1])
+            with cols_chg[0]:
+                spec_change_text = st.text_input(
+                    "規格變更",
+                    key=change_key,
+                    placeholder='例: 表面處理改 ENIG 2u"',
+                    label_visibility="collapsed",
+                )
+            with cols_chg[1]:
+                if st.button(
+                    "⬇ 套用變更",
+                    key=f"fpo_apply_change_{idx}",
+                    disabled=not (spec_change_text or "").strip(),
+                    use_container_width=True,
+                    type="primary",
+                ):
+                    # 從歷史 default 原版重組,避免重複按造成 double
+                    history_default = st.session_state.get(
+                        history_default_key, st.session_state.get(final_key, "")
+                    )
+                    st.session_state[final_key] = _merge_spec_with_change(
+                        history_default, spec_change_text
+                    )
+                    st.rerun()
 
         else:  # 新料號
             with cols_type[1]:
